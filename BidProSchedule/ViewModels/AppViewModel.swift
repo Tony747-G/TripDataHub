@@ -75,16 +75,15 @@ actor ExternalOpenImportCoordinator {
         inflightKeys.remove(key)
         if success {
             recentProcessedKeys[key] = Date()
+        } else {
+            // Allow immediate retry for the same file after a failed import attempt.
+            recentAcceptedKeys.removeValue(forKey: key)
         }
-    }
-
-    func removeQueued(key: String) {
-        queue.removeAll { $0.key == key }
-        queuedKeys.remove(key)
     }
 
     /// Clears all dedup history so the same file can be re-shared immediately
     /// after an import is confirmed or discarded.
+    /// `inflightKeys` is intentionally not reset here; active jobs are released by `finish`.
     func reset() {
         recentAcceptedKeys.removeAll()
         recentProcessedKeys.removeAll()
@@ -500,7 +499,7 @@ final class AppViewModel: ObservableObject {
     }
 
     func queueExternalOpenURL(_ url: URL) {
-        let key = stableExternalKey(for: url)
+        let key = ExternalOpenLaunchGate.stableKey(for: url)
         Task { [weak self] in
             guard let self else { return }
             let accepted = await self.externalOpenCoordinator.enqueue(key: key, url: url, now: Date())
@@ -551,6 +550,9 @@ final class AppViewModel: ObservableObject {
             NSLog("[Import] consumeExternalOpenURL begin key=%@", key)
 
             if pendingImport != nil {
+                // Another import is waiting in the UI. The dequeued URL is permanently dropped here
+                // (no re-queue). MVP limitation: the user must re-share the file after the
+                // current import is confirmed or discarded.
                 NSLog("[Import] consumeExternalOpenURL skipped (pending import exists)")
                 await externalOpenCoordinator.finish(key: key, success: false)
                 pendingExternalOpenURL = nil
@@ -582,7 +584,6 @@ final class AppViewModel: ObservableObject {
                 }
                 _ = importCrewAccessPDFData(data, sourceFileName: url.lastPathComponent)
                 if pendingImport != nil {
-                    await externalOpenCoordinator.removeQueued(key: key)
                     cleanupInboxFileBestEffort(at: url)
                     isSuccess = true
                 }
@@ -959,21 +960,6 @@ final class AppViewModel: ObservableObject {
         case timedOut
     }
 
-    private func stableExternalKey(for url: URL) -> String {
-        // Key on file content identity (size + mtime) rather than path, so that iOS delivering
-        // the same PDF via different paths (tmp original vs Inbox copy, or "in place" vs copy mode)
-        // all map to the same dedup key and only the first delivery is processed.
-        let resolvedURL = url.standardizedFileURL.resolvingSymlinksInPath()
-        do {
-            let attributes = try FileManager.default.attributesOfItem(atPath: resolvedURL.path)
-            let bytes = (attributes[.size] as? NSNumber)?.int64Value ?? -1
-            let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? -1
-            return "size:\(bytes)|mtime:\(Int64(modified))"
-        } catch {
-            return resolvedURL.absoluteString
-        }
-    }
-
     /// Resets all import dedup state so the user can re-share the same PDF immediately
     /// after confirming or discarding. Awaits coordinator.reset() for guaranteed ordering.
     private func resetExternalOpenDedup() async {
@@ -989,12 +975,16 @@ final class AppViewModel: ObservableObject {
         // defeat the dedup guard even though the file bytes are identical.
         let digest = SHA256.hash(data: data)
         let hashString = digest.map { String(format: "%02x", $0) }.joined()
-        return "sha256:\(hashString)|bytes:\(data.count)"
+        return "sha256:\(hashString)"
     }
 
     /// Claims a cross-launch fingerprint in UserDefaults. Returns false if the same content
     /// was already imported in this launch or a recent previous launch (TTL 30s).
     /// `importInProgress` handles same-launch re-entrancy; this handles app-restart edge cases.
+    ///
+    /// NSLock safety: although callers run on @MainActor, this is a synchronous (non-async)
+    /// method with no suspension points inside the lock, so there is no risk of deadlock
+    /// or actor re-entrancy while the lock is held.
     private static func claimPersistentFingerprint(_ fingerprint: String) -> Bool {
         importMethodDedupLock.lock()
         defer { importMethodDedupLock.unlock() }
