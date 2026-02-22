@@ -520,6 +520,11 @@ final class AppViewModel: ObservableObject {
             return
         }
         externalConsumerTask = Task { [weak self] in
+            defer {
+                // Always clear the task reference so startExternalConsumerIfNeeded
+                // can create a new one, even if this Task exits via cancellation.
+                self?.externalConsumerTask = nil
+            }
             guard let self else { return }
             await self.externalConsumerLoop()
         }
@@ -530,7 +535,6 @@ final class AppViewModel: ObservableObject {
         while true {
             guard let nextItem = await externalOpenCoordinator.dequeueNext() else {
                 pendingExternalOpenURL = nil
-                externalConsumerTask = nil
                 NSLog("[Import] externalConsumer stop")
                 break
             }
@@ -571,6 +575,9 @@ final class AppViewModel: ObservableObject {
                 NSLog("[Import] sniffPDF=%@ header=%@", String(sniff.isPDF), sniff.header)
                 guard sniff.isPDF else {
                     crewAccessImportMessage = "Selected file is not a PDF. Re-export using Zscaler Print and retry."
+                    await externalOpenCoordinator.finish(key: key, success: false)
+                    pendingExternalOpenURL = nil
+                    NSLog("[Import] consumeExternalOpenURL done key=%@ ok=false (not PDF)", key)
                     continue
                 }
                 _ = importCrewAccessPDFData(data, sourceFileName: url.lastPathComponent)
@@ -598,6 +605,7 @@ final class AppViewModel: ObservableObject {
               let schedule = pendingImport.parsedSchedule,
               let json = pendingImport.jsonPayload else {
             crewAccessImportMessage = "Cannot confirm import while errors exist."
+            // importInProgress stays true; user must discard to reset.
             return
         }
 
