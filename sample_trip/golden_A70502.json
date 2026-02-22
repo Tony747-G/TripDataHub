@@ -1,0 +1,58 @@
+{
+  "crew" : [
+    {
+      "crewID" : "00007793942",
+      "name" : "Funeno Satoshi",
+      "position" : "F\/O",
+      "seniority" : "2758"
+    }
+  ],
+  "dutyTotals" : [
+    "Duty totals Time: 11:44 Block: 8:31 Rest: 37:46",
+    "Duty totals Time: 10:20 Block: 8:02 Rest:"
+  ],
+  "generatedAt" : "2026-02-21T06:11:33Z",
+  "hotelDetails" : [
+    "Hotel details Status: BOOKED Hotel: Sheraton Incheon 011-82-32-835-1000 Hotel Transport:"
+  ],
+  "items" : [
+    {
+      "aircraft" : "747",
+      "arrAirport" : "ICN",
+      "block" : "08:31",
+      "deadhead" : false,
+      "depAirport" : "ANC",
+      "destinationTz" : "Asia\/Seoul",
+      "endLocalDisplay" : "2026-01-30 14:59",
+      "endUtc" : "2026-01-30T05:59:00Z",
+      "flight" : "064",
+      "originTz" : "America\/Anchorage",
+      "sequence" : 1,
+      "startLocalDisplay" : "2026-01-29 12:28",
+      "startUtc" : "2026-01-29T21:28:00Z",
+      "timeDerivation" : "from_utc"
+    },
+    {
+      "aircraft" : "747",
+      "arrAirport" : "ANC",
+      "block" : "08:02",
+      "deadhead" : false,
+      "depAirport" : "ICN",
+      "destinationTz" : "America\/Anchorage",
+      "endLocalDisplay" : "2026-01-29 21:05",
+      "endUtc" : "2026-01-30T06:05:00Z",
+      "flight" : "099",
+      "originTz" : "Asia\/Seoul",
+      "sequence" : 3,
+      "startLocalDisplay" : "2026-01-30 07:03",
+      "startUtc" : "2026-01-29T22:03:00Z",
+      "timeDerivation" : "from_utc"
+    }
+  ],
+  "mappingVersion" : "iata-tz-2026-02-21",
+  "schemaVersion" : 1,
+  "source" : "crewaccess-pdf",
+  "sourceVersion" : "crewaccess-parser-1.0",
+  "tripId" : "A70502",
+  "tripInformationDate" : "29Jan2026"
+}

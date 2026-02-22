@@ -1,0 +1,76 @@
+{
+  "crew" : [
+    {
+      "crewID" : "00007793942",
+      "name" : "Funeno Satoshi",
+      "position" : "F\/O",
+      "seniority" : "2752"
+    }
+  ],
+  "dutyTotals" : [
+    "Duty totals Time: 8:05 Block: 6:05 Rest: 25:40",
+    "Duty totals Time: 15:42 Block: 13:42 Rest: 59:30",
+    "Duty totals Time: 8:33 Block: 0:00 Rest:"
+  ],
+  "generatedAt" : "2026-02-21T06:11:33Z",
+  "hotelDetails" : [
+    "Hotel details Status: BOOKED Hotel: Galt House 502-589-5200 Hotel Transport: Galt House 502-568-3475",
+    "Hotel details Status: BOOKED Hotel: Hilton Narita UPS Only 011-81-476-331-121 Hotel Transport:"
+  ],
+  "items" : [
+    {
+      "aircraft" : "747",
+      "arrAirport" : "SDF",
+      "block" : "06:05",
+      "deadhead" : false,
+      "depAirport" : "ANC",
+      "destinationTz" : "America\/Kentucky\/Louisville",
+      "endLocalDisplay" : "2026-02-26 00:58",
+      "endUtc" : "2026-02-26T05:58:00Z",
+      "flight" : "063",
+      "originTz" : "America\/Anchorage",
+      "sequence" : 1,
+      "startLocalDisplay" : "2026-02-25 14:53",
+      "startUtc" : "2026-02-25T23:53:00Z",
+      "timeDerivation" : "from_utc"
+    },
+    {
+      "aircraft" : "747",
+      "arrAirport" : "NRT",
+      "block" : "13:42",
+      "deadhead" : false,
+      "depAirport" : "SDF",
+      "destinationTz" : "Asia\/Tokyo",
+      "endLocalDisplay" : "2026-02-27 08:20",
+      "endUtc" : "2026-02-26T23:20:00Z",
+      "flight" : "108",
+      "originTz" : "America\/Kentucky\/Louisville",
+      "sequence" : 3,
+      "startLocalDisplay" : "2026-02-26 04:38",
+      "startUtc" : "2026-02-26T09:38:00Z",
+      "timeDerivation" : "from_utc"
+    },
+    {
+      "aircraft" : "747",
+      "arrAirport" : "ANC",
+      "block" : "-",
+      "deadhead" : true,
+      "depAirport" : "NRT",
+      "destinationTz" : "America\/Anchorage",
+      "endLocalDisplay" : "2026-02-26 10:23",
+      "endUtc" : "2026-02-26T19:23:00Z",
+      "flight" : "109",
+      "originTz" : "Asia\/Tokyo",
+      "sequence" : 6,
+      "startLocalDisplay" : "2026-02-26 21:50",
+      "startUtc" : "2026-02-26T12:50:00Z",
+      "timeDerivation" : "from_utc"
+    }
+  ],
+  "mappingVersion" : "iata-tz-2026-02-21",
+  "schemaVersion" : 1,
+  "source" : "crewaccess-pdf",
+  "sourceVersion" : "crewaccess-parser-1.0",
+  "tripId" : "A70651",
+  "tripInformationDate" : "25Feb2026"
+}

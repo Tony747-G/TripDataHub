@@ -1,0 +1,19 @@
+{
+  "generated_at": "2026-02-14T00:01:23.698Z",
+  "manifest": [
+    {
+      "label": "PP26-02",
+      "trip_count": 2,
+      "leg_count": 4,
+      "json": "PP26-02_Schedule_Legs.json",
+      "csv": "PP26-02_Schedule_Legs.csv"
+    },
+    {
+      "label": "PP26-03",
+      "trip_count": 2,
+      "leg_count": 9,
+      "json": "PP26-03_Schedule_Legs.json",
+      "csv": "PP26-03_Schedule_Legs.csv"
+    }
+  ]
+}

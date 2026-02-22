@@ -1,0 +1,62 @@
+{
+  "pay_period": "PP26-02",
+  "pay_period_id": 2602,
+  "start_local": "2026-01-25 00:00",
+  "end_local": "2026-02-21 00:00",
+  "trip_count": 2,
+  "leg_count": 4,
+  "rows": [
+    {
+      "pay_period": "PP26-02",
+      "pairing": "51311",
+      "leg": 1,
+      "flight": "110",
+      "dep_airport": "ANC",
+      "dep_local": "2026-01-25 06:15",
+      "arr_airport": "NRT",
+      "arr_local": "2026-01-26 07:55",
+      "status": "DH",
+      "block": "7:40",
+      "block_raw": "0:00"
+    },
+    {
+      "pay_period": "PP26-02",
+      "pairing": "51311",
+      "leg": 2,
+      "flight": "109",
+      "dep_airport": "NRT",
+      "dep_local": "2026-01-27 21:55",
+      "arr_airport": "ANC",
+      "arr_local": "2026-01-27 10:28",
+      "status": "-",
+      "block": "6:33",
+      "block_raw": "6:33"
+    },
+    {
+      "pay_period": "PP26-02",
+      "pairing": "A70502",
+      "leg": 1,
+      "flight": "64",
+      "dep_airport": "ANC",
+      "dep_local": "2026-01-29 08:34",
+      "arr_airport": "ICN",
+      "arr_local": "2026-01-30 11:45",
+      "status": "-",
+      "block": "9:11",
+      "block_raw": "9:11"
+    },
+    {
+      "pay_period": "PP26-02",
+      "pairing": "A70502",
+      "leg": 2,
+      "flight": "99",
+      "dep_airport": "ICN",
+      "dep_local": "2026-02-01 06:45",
+      "arr_airport": "ANC",
+      "arr_local": "2026-01-31 20:41",
+      "status": "-",
+      "block": "7:56",
+      "block_raw": "7:56"
+    }
+  ]
+}

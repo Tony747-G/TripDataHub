@@ -1,0 +1,129 @@
+{
+  "cookies": [
+    {
+      "name": "ARRAffinity",
+      "value": "4c4737522f81d0fba3184e434749ba70fc1e208be19af590ee41ec492dca7b2e",
+      "domain": ".tripboard.bidproplus.com",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "ARRAffinitySameSite",
+      "value": "4c4737522f81d0fba3184e434749ba70fc1e208be19af590ee41ec492dca7b2e",
+      "domain": ".tripboard.bidproplus.com",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "ai_user",
+      "value": "6NkIS|2026-02-13T23:23:00.465Z",
+      "domain": "tripboard.bidproplus.com",
+      "path": "/",
+      "expires": 1802560980,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "LPVID",
+      "value": "IzODI3MTY5NmM4YmU2Yzg4",
+      "domain": ".bidproplus.com",
+      "path": "/",
+      "expires": 1802561025,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "LPSID-54194561",
+      "value": "9hE4OuZ4T1q3Nci2PWeYJA",
+      "domain": ".bidproplus.com",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": ".AspNet.ups-trip-board",
+      "value": "KRQWWHlTZ_9w_x0s0hyi6j323RMFiVBTXspdgU1QNgNR16KcDbHC3PvI_qmWnwJW__qYoXicSGEHK3w7tplqtzt-hxQj9kAF6OyIJeI496gWaJ6kzp-wUMrD-xWROafhruf2bnjvnvuBeerqoNow2tSl638f3LFw5ls4ng1ktKoo2OrHLZHSS4IQMJ33Ij93F7YDMhL2A3MAr5cj4TFu3dHhWCJC3VHqe5NJvePt-uXyAvne_UZ8h65zcPNyvprKKDPh5J4j379C1fZc-RlfckBc002Ivcn4-zxZXCJuuzU",
+      "domain": "tripboard.bidproplus.com",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "_ga",
+      "value": "GA1.2.1534298947.1771025025",
+      "domain": ".bidproplus.com",
+      "path": "/",
+      "expires": 1805585024.906018,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "_gid",
+      "value": "GA1.2.865270060.1771025025",
+      "domain": ".bidproplus.com",
+      "path": "/",
+      "expires": 1771111424,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "_gat",
+      "value": "1",
+      "domain": ".bidproplus.com",
+      "path": "/",
+      "expires": 1771025084,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "_ga_VSLK8KQJT3",
+      "value": "GS2.2.s1771025025$o1$g0$t1771025025$j60$l0$h0",
+      "domain": ".bidproplus.com",
+      "path": "/",
+      "expires": 1805585025.21585,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "ai_session",
+      "value": "QJU0r|1771024983268|1771025025402.4",
+      "domain": "tripboard.bidproplus.com",
+      "path": "/",
+      "expires": 1771026825,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    }
+  ],
+  "origins": [
+    {
+      "origin": "https://tripboard.bidproplus.com",
+      "localStorage": [
+        {
+          "name": "lpLastVisit-54194561",
+          "value": "1771025024795"
+        },
+        {
+          "name": "ai_session",
+          "value": "QJU0r|1771024983268.8|1771024983268.8"
+        }
+      ]
+    }
+  ]
+}

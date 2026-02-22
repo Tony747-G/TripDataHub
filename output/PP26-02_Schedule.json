@@ -1,0 +1,53 @@
+{
+  "pay_period": {
+    "label": "PP26-02",
+    "pay_period_id": 2602,
+    "bid_period_id": 2602,
+    "start_local": "2026-01-25 00:00",
+    "end_local": "2026-02-21 00:00"
+  },
+  "counts": {
+    "schedule": 2,
+    "open_time": 7
+  },
+  "rows": [
+    {
+      "pairing": "51311",
+      "title": "51311 - Credit 14:27",
+      "start_local": "2026-01-25 13:45",
+      "end_local": "2026-01-27 19:58",
+      "route": "ANC NRT",
+      "credit_hhmm": "14:27",
+      "credit_decimal": 14.45,
+      "seat": "F/O",
+      "fleet": "74Y",
+      "domicile": "ANC",
+      "week": 1,
+      "request_type": "",
+      "status_code": 0,
+      "duty_days": 3,
+      "block_hhmm": "6:33",
+      "time_away_from_base_hhmm": "54:13",
+      "total_duty_time_hhmm": "18:13"
+    },
+    {
+      "pairing": "A70502",
+      "title": "A70502 - Credit 17:07",
+      "start_local": "2026-01-29 16:04",
+      "end_local": "2026-02-01 06:11",
+      "route": "ANC ICN",
+      "credit_hhmm": "17:07",
+      "credit_decimal": 17.12,
+      "seat": "F/O",
+      "fleet": "74Y",
+      "domicile": "ANC",
+      "week": 1,
+      "request_type": "",
+      "status_code": 0,
+      "duty_days": 3,
+      "block_hhmm": "17:07",
+      "time_away_from_base_hhmm": "62:07",
+      "total_duty_time_hhmm": "21:07"
+    }
+  ]
+}
