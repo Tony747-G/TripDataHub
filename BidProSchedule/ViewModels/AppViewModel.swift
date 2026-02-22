@@ -102,18 +102,17 @@ actor ExternalOpenImportCoordinator {
 @MainActor
 final class AppViewModel: ObservableObject {
     static let shared = AppViewModel()
-    private static let externalOpenDedupLock = NSLock()
-    private static var recentExternalOpenClaims: [String: Date] = [:]
-    private static let externalImportExecutionLock = NSLock()
-    private static var recentExternalImportExecutions: [String: Date] = [:]
+
+    // MARK: - Import dedup (4-layer architecture)
+    // Layer 1: ExternalOpenLaunchGate (BidProScheduleApp.swift) — catches iOS triple-delivery at onOpenURL
+    // Layer 2: ExternalOpenImportCoordinator — queue management, single source of truth
+    // Layer 3: importInProgress (instance var below) — primary execution gate, prevents re-entrancy
+    // Layer 4: UserDefaults fingerprint — cross-launch content dedup only
     private static let importMethodDedupLock = NSLock()
-    private static var recentImportMethodFingerprints: [String: Date] = [:]
-    // UserDefaults keys for cross-launch persistent fingerprint dedup.
-    // Written on every accepted import; cleared on confirm/discard so the user can re-import immediately.
     private static let persistentFingerprintKey = "import_dedup_fingerprint_v1"
     private static let persistentFingerprintTSKey = "import_dedup_fingerprint_ts_v1"
-    /// Re-entrancy gate for `importCrewAccessPDFData`.
-    /// Instance var (not static) to guarantee synchronous @MainActor access.
+    private static let persistentFingerprintTTL: TimeInterval = 30
+    /// Primary execution gate. Set before any system call; cleared on confirm/discard.
     private var importInProgress = false
 
     @Published var isSyncing = false
@@ -156,9 +155,6 @@ final class AppViewModel: ObservableObject {
     private var sessionCookies: [HTTPCookie] = []
     private var lastAutoFetchAt: Date?
     private var externalConsumerTask: Task<Void, Never>?
-    private let processWideExternalOpenDedupTTL: TimeInterval = 5
-    private let externalImportExecutionDedupTTL: TimeInterval = 30
-    private let importMethodDedupTTL: TimeInterval = 30
 
     private let notification48hKey = "notification_48h_enabled"
     private let notification24hKey = "notification_24h_enabled"
@@ -463,8 +459,8 @@ final class AppViewModel: ObservableObject {
             return false
         }
 
-        guard Self.claimImportFingerprintAndProcess(fingerprint: fingerprint, ttl: importMethodDedupTTL) else {
-            NSLog("[Import] importCrewAccessPDFData skipped (dedup) file=%@", sourceFileName ?? "unknown")
+        guard Self.claimPersistentFingerprint(fingerprint) else {
+            NSLog("[Import] importCrewAccessPDFData skipped (cross-launch dedup) file=%@", sourceFileName ?? "unknown")
             importInProgress = false
             return false
         }
@@ -505,32 +501,15 @@ final class AppViewModel: ObservableObject {
 
     func queueExternalOpenURL(_ url: URL) {
         let key = stableExternalKey(for: url)
-        NSLog("[Import] queueExternalOpenURL enter key=%@", key)
-        guard Self.claimExternalOpenKeyInProcess(key: key, ttl: processWideExternalOpenDedupTTL) else {
-            NSLog(
-                "[Import] queueExternalOpenURL skipped (duplicate) vm=%@ key=%@",
-                String(describing: ObjectIdentifier(self)),
-                key
-            )
-            return
-        }
         Task { [weak self] in
             guard let self else { return }
             let accepted = await self.externalOpenCoordinator.enqueue(key: key, url: url, now: Date())
             if accepted {
                 self.pendingExternalOpenURL = url
-                NSLog(
-                    "[Import] queueExternalOpenURL accepted vm=%@ key=%@",
-                    String(describing: ObjectIdentifier(self)),
-                    key
-                )
+                NSLog("[Import] queueExternalOpenURL accepted key=%@", key)
                 self.startExternalConsumerIfNeeded()
             } else {
-                NSLog(
-                    "[Import] queueExternalOpenURL skipped (duplicate) vm=%@ key=%@",
-                    String(describing: ObjectIdentifier(self)),
-                    key
-                )
+                NSLog("[Import] queueExternalOpenURL skipped (duplicate) key=%@", key)
             }
         }
     }
@@ -594,10 +573,6 @@ final class AppViewModel: ObservableObject {
                     crewAccessImportMessage = "Selected file is not a PDF. Re-export using Zscaler Print and retry."
                     continue
                 }
-                guard Self.claimImportExecutionInProcess(key: key, ttl: externalImportExecutionDedupTTL) else {
-                    NSLog("[Import] importCrewAccessPDFData skipped (duplicate) key=%@", key)
-                    continue
-                }
                 _ = importCrewAccessPDFData(data, sourceFileName: url.lastPathComponent)
                 if pendingImport != nil {
                     await externalOpenCoordinator.removeQueued(key: key)
@@ -647,7 +622,6 @@ final class AppViewModel: ObservableObject {
                 lastImportSummaryMessage = "Imported new CrewAccess trip \(schedule.id)."
             }
             self.pendingImport = nil
-            Self.clearPersistentImportFingerprint()
             await resetExternalOpenDedup()
             importInProgress = false
             crewAccessImportMessage = "CrewAccess import complete: \(json.tripId) (\(schedule.legCount) legs)."
@@ -662,7 +636,6 @@ final class AppViewModel: ObservableObject {
     func discardPendingImport() async {
         pendingImport = nil
         crewAccessImportMessage = "CrewAccess import preview discarded."
-        Self.clearPersistentImportFingerprint()
         await resetExternalOpenDedup()
         importInProgress = false
     }
@@ -993,50 +966,12 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    /// Clears all external-open dedup state so the user can re-share the same PDF immediately
-    /// after confirming or discarding an import, without waiting for TTLs to expire.
+    /// Resets all import dedup state so the user can re-share the same PDF immediately
+    /// after confirming or discarding. Awaits coordinator.reset() for guaranteed ordering.
     private func resetExternalOpenDedup() async {
-        Self.externalOpenDedupLock.lock()
-        Self.recentExternalOpenClaims.removeAll()
-        Self.externalOpenDedupLock.unlock()
-
-        Self.externalImportExecutionLock.lock()
-        Self.recentExternalImportExecutions.removeAll()
-        Self.externalImportExecutionLock.unlock()
-
         ExternalOpenLaunchGate.reset()
-
         await externalOpenCoordinator.reset()
-    }
-
-    private static func claimExternalOpenKeyInProcess(key: String, ttl: TimeInterval) -> Bool {
-        externalOpenDedupLock.lock()
-        defer { externalOpenDedupLock.unlock() }
-
-        let now = Date()
-        recentExternalOpenClaims = recentExternalOpenClaims.filter {
-            now.timeIntervalSince($0.value) < ttl
-        }
-        if recentExternalOpenClaims[key] != nil {
-            return false
-        }
-        recentExternalOpenClaims[key] = now
-        return true
-    }
-
-    private static func claimImportExecutionInProcess(key: String, ttl: TimeInterval) -> Bool {
-        externalImportExecutionLock.lock()
-        defer { externalImportExecutionLock.unlock() }
-
-        let now = Date()
-        recentExternalImportExecutions = recentExternalImportExecutions.filter {
-            now.timeIntervalSince($0.value) < ttl
-        }
-        if recentExternalImportExecutions[key] != nil {
-            return false
-        }
-        recentExternalImportExecutions[key] = now
-        return true
+        Self.clearPersistentImportFingerprint()
     }
 
     private func importPayloadFingerprint(data: Data, sourceFileName: String?) -> String {
@@ -1049,52 +984,31 @@ final class AppViewModel: ObservableObject {
         return "sha256:\(hashString)|bytes:\(data.count)"
     }
 
-
-    /// Combined atomic dedup check: one NSLock covers both the persistent (UserDefaults, survives
-    /// app restarts) and in-process (in-memory, fast) fingerprint claims.
-    ///
-    /// Without a single lock the two separate checks have a TOCTOU race: concurrent threads can
-    /// each read "not claimed yet" before any thread writes its claim, so all threads pass.
-    /// The device log confirmed this: enter/enter/called/enter/called/called interleaving.
-    private static func claimImportFingerprintAndProcess(fingerprint: String, ttl: TimeInterval) -> Bool {
+    /// Claims a cross-launch fingerprint in UserDefaults. Returns false if the same content
+    /// was already imported in this launch or a recent previous launch (TTL 30s).
+    /// `importInProgress` handles same-launch re-entrancy; this handles app-restart edge cases.
+    private static func claimPersistentFingerprint(_ fingerprint: String) -> Bool {
         importMethodDedupLock.lock()
         defer { importMethodDedupLock.unlock() }
-
         let now = Date()
         let defaults = UserDefaults.standard
-
-        // 1. Persistent (cross-launch) check
         if let stored = defaults.string(forKey: persistentFingerprintKey),
            stored == fingerprint,
            let ts = defaults.object(forKey: persistentFingerprintTSKey) as? Date,
-           now.timeIntervalSince(ts) < ttl {
+           now.timeIntervalSince(ts) < persistentFingerprintTTL {
             return false
         }
-
-        // 2. In-process check (prune expired entries first)
-        recentImportMethodFingerprints = recentImportMethodFingerprints.filter {
-            now.timeIntervalSince($0.value) < ttl
-        }
-        if recentImportMethodFingerprints[fingerprint] != nil {
-            return false
-        }
-
-        // Claim: write both stores atomically under the same lock
         defaults.set(fingerprint, forKey: persistentFingerprintKey)
         defaults.set(now, forKey: persistentFingerprintTSKey)
-        recentImportMethodFingerprints[fingerprint] = now
         return true
     }
 
-    /// Removes the fingerprint claim (both persistent and in-process) under the same lock so the
-    /// user can immediately re-import the same file after Cancel or Confirm.
     private static func clearPersistentImportFingerprint() {
         importMethodDedupLock.lock()
         defer { importMethodDedupLock.unlock() }
         let defaults = UserDefaults.standard
         defaults.removeObject(forKey: persistentFingerprintKey)
         defaults.removeObject(forKey: persistentFingerprintTSKey)
-        recentImportMethodFingerprints.removeAll()
     }
 
     private nonisolated static func readExternalPDFDataDirect(from originalURL: URL) throws -> Data {
