@@ -3,24 +3,22 @@ import SwiftUI
 struct CrewAccessImportHelpView: View {
     var body: some View {
         List {
-            Section("Correct PDF Export Method") {
-                Text("1. Open the CrewAccess schedule page.")
-                Text("2. Click Zscaler Print (do NOT use browser print).")
-                Text("3. Choose “Print Schedule”.")
-                Text("4. Save as PDF.")
-                Text("5. Verify text is selectable by long-pressing text in the PDF.")
-                Text("6. Open the PDF in TripData Hub.")
+            Section("CrewAccess Import Steps") {
+                Text("1. Open CrewAccess and go to the Roster page.")
+                Text("2. Tap the expand arrow on the right side of the trip you want to import.")
+                Text("3. Tap Details, then tap Allow when prompted.")
+                Text("4. Tap the Zscaler logo at the bottom-right.")
+                Text("5. Tap the menu (3 lines) at the top-right.")
+                Text("6. Tap Print, then tap Allow when prompted again.")
+                Text("7. In the print view, tap the Share icon (left of the printer icon).")
+                Text("8. In the Share Sheet, tap TripData Hub (it may be under More).")
+                Text("9. In TripData Hub, tap Confirm Import.")
             }
 
             Section("If Import Fails:") {
-                Text("This PDF was flattened into an image.")
-                Text("Re-export using Zscaler Print. Screenshots or scans will not work.")
-            }
-
-            Section("What the App Uses") {
-                Text("Times are stored in UTC internally.")
-                Text("Local display times are derived from airport time zones.")
-                Text("This prevents DST and cross-day confusion.")
+                Text("1. Save the trip PDF to your device.")
+                Text("2. In TripData Hub, tap Import CrewAccess PDF manually.")
+                Text("3. Select the saved PDF and tap Confirm Import.")
             }
         }
         .navigationTitle("CrewAccess Import Help")

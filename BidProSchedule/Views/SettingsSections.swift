@@ -97,7 +97,7 @@ struct SettingsExperimentalImportSection: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            Button("Import CrewAccess PDF") {
+            Button("Import CrewAccess PDF manually") {
                 onTapImportCrewAccessPDF()
             }
 
@@ -113,9 +113,6 @@ struct SettingsExperimentalImportSection: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text("If this fails, re-export from CrewAccess Print as text-selectable PDF.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         } header: {
             sectionHeader("Advanced / Experimental")
         }
@@ -249,12 +246,12 @@ struct SettingsPayPeriodsSection: View {
 
     var body: some View {
         Section {
-            if viewModel.schedules.isEmpty {
+            if viewModel.bidproSchedules.isEmpty {
                 Text("No fetched data yet. Tap Fetch Latest.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(viewModel.schedules) { schedule in
+                ForEach(viewModel.bidproSchedules) { schedule in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(schedule.label)
                             .font(.headline)

@@ -1,7 +1,8 @@
 #!/bin/zsh
 set -euo pipefail
 
-ROOT="/Users/sfune/Documents/work/temp_work/scraping_bidpro"
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 TMP_SWIFT="/tmp/crewaccess_validate.swift"
 TMP_BIN="/tmp/crewaccess_validate"
 TMP_JSON="/tmp/crewaccess_validate_output.json"
@@ -44,7 +45,7 @@ struct Validate {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let json = try encoder.encode(draft.jsonPayload)
-        try json.write(to: outURL, options: .atomic)
+        try json.write(to: outURL, options: Data.WritingOptions.atomic)
     }
 }
 SWIFT
@@ -53,6 +54,7 @@ xcrun swiftc \
   -o "$TMP_BIN" \
   "$TMP_SWIFT" \
   "$ROOT/BidProSchedule/Services/CrewAccessPDFImportService.swift" \
+  "$ROOT/BidProSchedule/Services/IATATimeZoneResolver.swift" \
   "$ROOT/BidProSchedule/Models/TripModels.swift"
 
 for case_entry in "${CASES[@]}"; do

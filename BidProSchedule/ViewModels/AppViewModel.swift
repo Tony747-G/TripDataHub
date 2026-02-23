@@ -14,6 +14,7 @@ struct CrewAccessImportFile: Identifiable, Hashable {
     let fileName: String
     let url: URL
     let bytes: Int64
+    let createdAt: Date?
     let modifiedAt: Date?
     let tripId: String
     let tripInformationDate: String?
@@ -98,6 +99,13 @@ actor ExternalOpenImportCoordinator {
     }
 }
 
+private enum AppGroupImportConfig {
+    // NOTE: Must match constants in TripDataShareActionExtension/ShareViewController.swift
+    static let appGroupIdentifier = "group.com.sfune.BidProSchedule"
+    static let importDirectoryName = "CrewAccessSharedImports"
+    static let pendingHandoffFileName = "pending_import.json"
+}
+
 @MainActor
 final class AppViewModel: ObservableObject {
     static let shared = AppViewModel()
@@ -136,6 +144,7 @@ final class AppViewModel: ObservableObject {
     @Published var verifiedUsers: [VerifiedUserRecord] = []
     @Published var crewAccessImportMessage: String?
     @Published var crewAccessDeleteMessage: String?
+    @Published var tzOverrideMessage: String?
     @Published var lastImportDidReplaceExistingTrip: Bool = false
     @Published var lastImportSummaryMessage: String?
     @Published var pendingImport: PendingImport?
@@ -150,10 +159,13 @@ final class AppViewModel: ObservableObject {
     private let cacheService: ScheduleCacheServiceProtocol
     private let notificationService: NextReportNotificationServiceProtocol
     private let crewAccessImportService: CrewAccessPDFImportServiceProtocol
+    private let tzResolver: IATATimeZoneResolving
     private let externalOpenCoordinator: ExternalOpenImportCoordinator
     private var sessionCookies: [HTTPCookie] = []
     private var lastAutoFetchAt: Date?
     private var externalConsumerTask: Task<Void, Never>?
+    private var lastConsumedAppGroupHandoffFileName: String?
+    private var isConsumingAppGroupHandoff = false
 
     private let notification48hKey = "notification_48h_enabled"
     private let notification24hKey = "notification_24h_enabled"
@@ -186,13 +198,15 @@ final class AppViewModel: ObservableObject {
         authService: TripBoardAuthServiceProtocol = TripBoardAuthService(),
         cacheService: ScheduleCacheServiceProtocol = ScheduleCacheService(),
         notificationService: NextReportNotificationServiceProtocol = NextReportNotificationService(),
-        crewAccessImportService: CrewAccessPDFImportServiceProtocol = CrewAccessPDFImportService()
+        crewAccessImportService: CrewAccessPDFImportServiceProtocol = CrewAccessPDFImportService(),
+        tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared
     ) {
         self.syncService = syncService
         self.authService = authService
         self.cacheService = cacheService
         self.notificationService = notificationService
         self.crewAccessImportService = crewAccessImportService
+        self.tzResolver = tzResolver
         self.externalOpenCoordinator = ExternalOpenImportCoordinator.shared
         let loadedAdminPolicy = Self.loadAdminPolicy()
         self.adminPolicy = loadedAdminPolicy
@@ -245,6 +259,58 @@ final class AppViewModel: ObservableObject {
         NSLog("[VM] deinit vm=%@", String(describing: ObjectIdentifier(self)))
     }
 
+    func handleIncomingAppDeepLink(_ url: URL) {
+        let scheme = url.scheme?.lowercased()
+        guard scheme == "tripdatahub" else { return }
+        let route = url.host?.lowercased() ?? url.path.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard route == "import-crewaccess" else { return }
+        NSLog("[Import] deepLink received url=%@", url.absoluteString)
+        consumePendingAppGroupImportIfAvailable()
+    }
+
+    func consumePendingAppGroupImportIfAvailable() {
+        guard !isConsumingAppGroupHandoff else { return }
+        isConsumingAppGroupHandoff = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { isConsumingAppGroupHandoff = false }
+
+            guard let handoff = await Task.detached(priority: .utility, operation: {
+                Self.readPendingAppGroupHandoff()
+            }).value else {
+                return
+            }
+
+            let fileExists = await Task.detached(priority: .utility, operation: {
+                FileManager.default.fileExists(atPath: handoff.fileURL.path)
+            }).value
+
+            if lastConsumedAppGroupHandoffFileName == handoff.fileName {
+                NSLog("[Import] appGroup handoff skipped (already consumed) file=%@", handoff.fileName)
+                await Task.detached(priority: .utility, operation: {
+                    Self.removePendingAppGroupHandoffBestEffort()
+                }).value
+                return
+            }
+
+            guard fileExists else {
+                crewAccessImportMessage = "Import failed: shared PDF is missing. Please share the PDF again."
+                logNonFatal("AppGroup handoff missing shared file: \(handoff.fileURL.path)")
+                await Task.detached(priority: .utility, operation: {
+                    Self.removePendingAppGroupHandoffBestEffort()
+                }).value
+                return
+            }
+
+            NSLog("[Import] appGroup handoff queued file=%@", handoff.fileName)
+            lastConsumedAppGroupHandoffFileName = handoff.fileName
+            await Task.detached(priority: .utility, operation: {
+                Self.removePendingAppGroupHandoffBestEffort()
+            }).value
+            queueExternalOpenURL(handoff.fileURL)
+        }
+    }
+
     var authStatusText: String {
         switch authStatus {
         case .loggedIn:
@@ -293,6 +359,55 @@ final class AppViewModel: ObservableObject {
 
     var canAccessAdminTab: Bool {
         isAdmin
+    }
+
+    func unresolvedIATAAirports() -> [String] {
+        let codes = Set(crewAccessSchedules.flatMap { schedule in
+            schedule.legs.flatMap { [$0.depAirport, $0.arrAirport] }
+        })
+        return codes
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+            .filter { !$0.isEmpty && tzResolver.resolve($0) == nil }
+            .sorted()
+    }
+
+    func currentTimeZoneOverrides() -> [String: String] {
+        tzResolver.currentOverrides()
+    }
+
+    func setTimeZoneOverride(iata: String, tzID: String) {
+        let code = iata.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let zone = tzID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard code.count == 3 else {
+            tzOverrideMessage = "IATA must be 3 letters."
+            return
+        }
+        guard !zone.isEmpty, TimeZone(identifier: zone) != nil else {
+            tzOverrideMessage = "Invalid IANA timezone."
+            return
+        }
+
+        tzResolver.setOverride(iata: code, tzID: zone)
+        crewAccessSchedules = refreshScheduleTimezones(crewAccessSchedules)
+        bidproSchedules = refreshScheduleTimezones(bidproSchedules)
+        schedules = mergeAndSortSchedules(crew: crewAccessSchedules, bidpro: bidproSchedules)
+        do {
+            let persistedLastSyncAt = lastSyncAt ?? Date()
+            try cacheService.save(
+                ScheduleCacheSnapshotV2(
+                    crewAccessSchedules: crewAccessSchedules,
+                    bidproSchedules: bidproSchedules,
+                    lastSyncAt: persistedLastSyncAt,
+                    migratedAt: nil
+                )
+            )
+            if lastSyncAt == nil {
+                lastSyncAt = persistedLastSyncAt
+            }
+        } catch {
+            logNonFatal("Failed to persist cache after TZ override: \(error.localizedDescription)")
+        }
+        tzOverrideMessage = "Saved override: \(code) -> \(zone)"
     }
 
     func loadSeniorityRecordsIfNeeded() async {
@@ -554,6 +669,7 @@ final class AppViewModel: ObservableObject {
                 // (no re-queue). MVP limitation: the user must re-share the file after the
                 // current import is confirmed or discarded.
                 NSLog("[Import] consumeExternalOpenURL skipped (pending import exists)")
+                cleanupImportedExternalFileBestEffort(at: url)
                 await externalOpenCoordinator.finish(key: key, success: false)
                 pendingExternalOpenURL = nil
                 NSLog("[Import] consumeExternalOpenURL done key=%@ ok=%@", key, String(isSuccess))
@@ -582,10 +698,12 @@ final class AppViewModel: ObservableObject {
                     NSLog("[Import] consumeExternalOpenURL done key=%@ ok=false (not PDF)", key)
                     continue
                 }
-                _ = importCrewAccessPDFData(data, sourceFileName: url.lastPathComponent)
+                let importAccepted = importCrewAccessPDFData(data, sourceFileName: url.lastPathComponent)
                 if pendingImport != nil {
-                    cleanupInboxFileBestEffort(at: url)
+                    cleanupImportedExternalFileBestEffort(at: url)
                     isSuccess = true
+                } else if !importAccepted {
+                    cleanupImportedExternalFileBestEffort(at: url)
                 }
             } catch {
                 crewAccessImportMessage = "Failed to read PDF: \(error.localizedDescription)"
@@ -657,6 +775,7 @@ final class AppViewModel: ObservableObject {
     private struct CrewAccessScheduleReference: Hashable {
         let id: String
         let label: String
+        let pairings: Set<String>
     }
 
     private struct CrewAccessFileDeletionResult {
@@ -668,7 +787,11 @@ final class AppViewModel: ObservableObject {
 
     func listCrewAccessImportFiles() async -> [CrewAccessImportFile] {
         let scheduleReferences = crewAccessSchedules.map {
-            CrewAccessScheduleReference(id: $0.id, label: $0.label)
+            CrewAccessScheduleReference(
+                id: $0.id,
+                label: $0.label,
+                pairings: Set($0.legs.map(\.pairing))
+            )
         }
         return await Task.detached(priority: .utility) { () -> [CrewAccessImportFile] in
             let fm = FileManager.default
@@ -679,16 +802,17 @@ final class AppViewModel: ObservableObject {
             do {
                 let urls = try fm.contentsOfDirectory(
                     at: dir,
-                    includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey],
+                    includingPropertiesForKeys: [.fileSizeKey, .creationDateKey, .contentModificationDateKey, .isRegularFileKey],
                     options: [.skipsHiddenFiles]
                 )
                 return urls.compactMap { url in
                     guard let values = try? url.resourceValues(
-                        forKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]
+                        forKeys: [.fileSizeKey, .creationDateKey, .contentModificationDateKey, .isRegularFileKey]
                     ) else {
                         return nil
                     }
                     guard values.isRegularFile == true, url.pathExtension.lowercased() == "json" else { return nil }
+                    let createdAt = values.creationDate
                     let modifiedAt = values.contentModificationDate
                     let header = Self.readCrewAccessTripHeader(from: url)
                     let fileName = url.lastPathComponent
@@ -700,7 +824,7 @@ final class AppViewModel: ObservableObject {
                         header?.tripInformationDate,
                         fallbackDate: modifiedAt
                     )
-                    let displayName = "\(displayDateResult.dateString)_\(tripId) (\(tripId))"
+                    let displayName = "\(displayDateResult.dateString)_\(tripId)"
                     let matchedScheduleId = Self.matchScheduleID(
                         tripId: tripId,
                         scheduleReferences: scheduleReferences
@@ -709,6 +833,7 @@ final class AppViewModel: ObservableObject {
                         fileName: fileName,
                         url: url,
                         bytes: Int64(values.fileSize ?? 0),
+                        createdAt: createdAt,
                         modifiedAt: modifiedAt,
                         tripId: tripId,
                         tripInformationDate: header?.tripInformationDate,
@@ -736,7 +861,11 @@ final class AppViewModel: ObservableObject {
 
         NSLog("[CrewAccessFileDelete] start files=%d", urls.count)
         let scheduleReferences = crewAccessSchedules.map {
-            CrewAccessScheduleReference(id: $0.id, label: $0.label)
+            CrewAccessScheduleReference(
+                id: $0.id,
+                label: $0.label,
+                pairings: Set($0.legs.map(\.pairing))
+            )
         }
 
         let deletionResults = await Task.detached(priority: .utility) {
@@ -746,13 +875,31 @@ final class AppViewModel: ObservableObject {
             )
         }.value
 
-        let scheduleIDsToRemove = Set(deletionResults.flatMap(\.matchedScheduleIDs))
-        let removedSchedulesCount = crewAccessSchedules.filter { scheduleIDsToRemove.contains($0.id) }.count
-        if removedSchedulesCount > 0 {
-            crewAccessSchedules.removeAll { scheduleIDsToRemove.contains($0.id) }
+        let tripIDsToRemove = Set(deletionResults.compactMap(\.tripId))
+        let beforePairings = Set(crewAccessSchedules.flatMap { $0.legs.map(\.pairing) })
+        if !tripIDsToRemove.isEmpty {
+            crewAccessSchedules = crewAccessSchedules.compactMap { schedule in
+                let remainingLegs = schedule.legs.filter { !tripIDsToRemove.contains($0.pairing) }
+                guard !remainingLegs.isEmpty else { return nil }
+                guard remainingLegs.count != schedule.legs.count else { return schedule }
+                return PayPeriodSchedule(
+                    id: schedule.id,
+                    label: schedule.label,
+                    tripCount: Set(remainingLegs.map(\.pairing)).count,
+                    legCount: remainingLegs.count,
+                    openTimeCount: schedule.openTimeCount,
+                    updatedAt: Date(),
+                    legs: remainingLegs,
+                    openTimeTrips: schedule.openTimeTrips
+                )
+            }
         }
+        let afterPairings = Set(crewAccessSchedules.flatMap { $0.legs.map(\.pairing) })
+        let removedTripsCount = beforePairings.subtracting(afterPairings)
+            .intersection(tripIDsToRemove)
+            .count
         schedules = mergeAndSortSchedules(crew: crewAccessSchedules, bidpro: bidproSchedules)
-        NSLog("[CrewAccessFileDelete] removedSchedules=%d", removedSchedulesCount)
+        NSLog("[CrewAccessFileDelete] removedTrips=%d", removedTripsCount)
 
         var cacheSaved = false
         do {
@@ -777,8 +924,8 @@ final class AppViewModel: ObservableObject {
 
         let deletedFileCount = deletionResults.filter(\.deleted).count
         let failedFileCount = deletionResults.count - deletedFileCount
-        if removedSchedulesCount > 0 {
-            crewAccessDeleteMessage = "Deleted \(deletedFileCount) file(s). Removed \(removedSchedulesCount) trip(s) from Timeline."
+        if removedTripsCount > 0 {
+            crewAccessDeleteMessage = "Deleted \(deletedFileCount) file(s). Removed \(removedTripsCount) trip(s) from Timeline."
         } else {
             crewAccessDeleteMessage = "Deleted \(deletedFileCount) file(s). No matching trip was found in Timeline."
         }
@@ -951,6 +1098,70 @@ final class AppViewModel: ObservableObject {
 #endif
     }
 
+    private func refreshScheduleTimezones(_ schedules: [PayPeriodSchedule]) -> [PayPeriodSchedule] {
+        schedules.map { schedule in
+            let updatedLegs = schedule.legs.map { leg in
+                let depLocal = localDisplayFromUTCString(leg.depUTC, airport: leg.depAirport) ?? leg.depLocal
+                let arrLocal = localDisplayFromUTCString(leg.arrUTC, airport: leg.arrAirport) ?? leg.arrLocal
+                return TripLeg(
+                    id: leg.id,
+                    payPeriod: leg.payPeriod,
+                    pairing: leg.pairing,
+                    leg: leg.leg,
+                    flight: leg.flight,
+                    depAirport: leg.depAirport,
+                    depLocal: depLocal,
+                    arrAirport: leg.arrAirport,
+                    arrLocal: arrLocal,
+                    depUTC: leg.depUTC,
+                    arrUTC: leg.arrUTC,
+                    status: leg.status,
+                    block: leg.block
+                )
+            }
+            return PayPeriodSchedule(
+                id: schedule.id,
+                label: schedule.label,
+                tripCount: Set(updatedLegs.map(\.pairing)).count,
+                legCount: updatedLegs.count,
+                openTimeCount: schedule.openTimeCount,
+                updatedAt: schedule.updatedAt,
+                legs: updatedLegs,
+                openTimeTrips: schedule.openTimeTrips
+            )
+        }
+    }
+
+    private func localDisplayFromUTCString(_ rawUTC: String?, airport: String) -> String? {
+        guard let rawUTC = rawUTC?.trimmingCharacters(in: .whitespacesAndNewlines), !rawUTC.isEmpty else {
+            return nil
+        }
+        let date = parseUTC(rawUTC)
+        guard let date else { return nil }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        if let tzID = tzResolver.resolve(airport), let tz = TimeZone(identifier: tzID) {
+            formatter.timeZone = tz
+        } else {
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        }
+        return formatter.string(from: date)
+    }
+
+    private func parseUTC(_ raw: String) -> Date? {
+        let withFraction = ISO8601DateFormatter()
+        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        withFraction.timeZone = TimeZone(secondsFromGMT: 0)
+        if let date = withFraction.date(from: raw) { return date }
+
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        plain.timeZone = TimeZone(secondsFromGMT: 0)
+        return plain.date(from: raw)
+    }
+
     private enum ExternalOpenError: Error {
         case securityScopeDenied
         case fileReadFailed
@@ -1105,21 +1316,73 @@ final class AppViewModel: ObservableObject {
         return (isPDF, header)
     }
 
-    private func cleanupInboxFileBestEffort(at url: URL) {
+    private func cleanupImportedExternalFileBestEffort(at url: URL) {
         let normalizedPath = url.standardizedFileURL.path
         let inboxPathToken = "/Documents/Inbox/"
-        guard normalizedPath.contains(inboxPathToken) else {
-            NSLog("[Import] cleanupInbox skip (not inbox) url=%@", url.absoluteString)
+        if normalizedPath.contains(inboxPathToken) {
+            NSLog("[Import] cleanupInbox start path=%@", normalizedPath)
+            do {
+                try FileManager.default.removeItem(at: url)
+                NSLog("[Import] cleanupInbox deleted path=%@", normalizedPath)
+            } catch {
+                NSLog("[Import] cleanupInbox failed path=%@ error=%@", normalizedPath, error.localizedDescription)
+            }
             return
         }
 
-        NSLog("[Import] cleanupInbox start path=%@", normalizedPath)
-        do {
-            try FileManager.default.removeItem(at: url)
-            NSLog("[Import] cleanupInbox deleted path=%@", normalizedPath)
-        } catch {
-            NSLog("[Import] cleanupInbox failed path=%@ error=%@", normalizedPath, error.localizedDescription)
+        if let appGroupDir = Self.appGroupImportDirectoryURL()?.standardizedFileURL.path,
+           normalizedPath.hasPrefix(appGroupDir + "/") || normalizedPath == appGroupDir {
+            NSLog("[Import] cleanupAppGroup start path=%@", normalizedPath)
+            do {
+                try FileManager.default.removeItem(at: url)
+                NSLog("[Import] cleanupAppGroup deleted path=%@", normalizedPath)
+            } catch {
+                NSLog("[Import] cleanupAppGroup failed path=%@ error=%@", normalizedPath, error.localizedDescription)
+            }
+            return
         }
+
+        NSLog("[Import] cleanupInbox skip (not inbox) url=%@", url.absoluteString)
+    }
+
+    private struct AppGroupPendingImportHandoff: Codable {
+        let fileName: String
+        let createdAtISO8601: String?
+    }
+
+    private struct AppGroupPendingImportReference {
+        let fileName: String
+        let fileURL: URL
+    }
+
+    private nonisolated static func appGroupImportDirectoryURL() -> URL? {
+        guard let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: AppGroupImportConfig.appGroupIdentifier) else {
+            return nil
+        }
+        return container.appendingPathComponent(AppGroupImportConfig.importDirectoryName, isDirectory: true)
+    }
+
+    private nonisolated static func readPendingAppGroupHandoff() -> AppGroupPendingImportReference? {
+        guard let directoryURL = appGroupImportDirectoryURL() else { return nil }
+        let handoffURL = directoryURL.appendingPathComponent(AppGroupImportConfig.pendingHandoffFileName, isDirectory: false)
+        guard FileManager.default.fileExists(atPath: handoffURL.path) else { return nil }
+        do {
+            let data = try Data(contentsOf: handoffURL)
+            let handoff = try JSONDecoder().decode(AppGroupPendingImportHandoff.self, from: data)
+            let fileURL = directoryURL.appendingPathComponent(handoff.fileName, isDirectory: false)
+            return AppGroupPendingImportReference(fileName: handoff.fileName, fileURL: fileURL)
+        } catch {
+            NSLog("[Import] appGroup handoff decode failed error=%@", error.localizedDescription)
+            removePendingAppGroupHandoffBestEffort()
+            return nil
+        }
+    }
+
+    private nonisolated static func removePendingAppGroupHandoffBestEffort() {
+        guard let directoryURL = appGroupImportDirectoryURL() else { return }
+        let handoffURL = directoryURL.appendingPathComponent(AppGroupImportConfig.pendingHandoffFileName, isDirectory: false)
+        guard FileManager.default.fileExists(atPath: handoffURL.path) else { return }
+        try? FileManager.default.removeItem(at: handoffURL)
     }
 
     private nonisolated static func readCrewAccessTripHeader(from url: URL) -> CrewAccessTripHeader? {
@@ -1129,6 +1392,12 @@ final class AppViewModel: ObservableObject {
 
     private nonisolated static func inferTripIdFromFileName(_ fileName: String) -> String {
         let base = URL(fileURLWithPath: fileName).deletingPathExtension().lastPathComponent
+        if let match = base.range(of: #"^\d{4}-\d{2}-\d{2}_.+"#, options: .regularExpression),
+           match.lowerBound == base.startIndex,
+           let underscore = base.firstIndex(of: "_") {
+            let suffix = String(base[base.index(after: underscore)...])
+            return suffix.isEmpty ? base : suffix
+        }
         if let underscore = base.firstIndex(of: "_") {
             let prefix = String(base[..<underscore])
             return prefix.isEmpty ? base : prefix
@@ -1156,6 +1425,14 @@ final class AppViewModel: ObservableObject {
             ymdFormatter.timeZone = TimeZone(secondsFromGMT: 0)
             ymdFormatter.dateFormat = "yyyyMMdd"
             if let date = ymdFormatter.date(from: trimmed) {
+                return (Self.crewAccessDateString(from: date), false)
+            }
+
+            let crewFormatter = DateFormatter()
+            crewFormatter.locale = Locale(identifier: "en_US_POSIX")
+            crewFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+            crewFormatter.dateFormat = "ddMMMyyyy"
+            if let date = crewFormatter.date(from: trimmed.uppercased()) {
                 return (Self.crewAccessDateString(from: date), false)
             }
 
@@ -1187,7 +1464,7 @@ final class AppViewModel: ObservableObject {
         scheduleReferences: [CrewAccessScheduleReference]
     ) -> String? {
         return scheduleReferences.first { ref in
-            ref.id == tripId || ref.label.contains(tripId)
+            ref.id == tripId || ref.label.contains(tripId) || ref.pairings.contains(tripId)
         }?.id
     }
 
@@ -1229,7 +1506,7 @@ final class AppViewModel: ObservableObject {
             if let tripId {
                 matchedIDs = scheduleReferences
                     .filter { ref in
-                        ref.id == tripId || ref.label.contains(tripId)
+                        ref.id == tripId || ref.label.contains(tripId) || ref.pairings.contains(tripId)
                     }
                     .map(\.id)
             } else {
@@ -1327,7 +1604,11 @@ final class AppViewModel: ObservableObject {
         }
 
         let safeTripID = payload.tripId.replacingOccurrences(of: "/", with: "-")
-        let fileName = "\(safeTripID)_\(payload.tripInformationDate).json"
+        let normalizedDate = Self.normalizeTripInformationDateForDisplay(
+            payload.tripInformationDate,
+            fallbackDate: Date()
+        ).dateString
+        let fileName = "\(normalizedDate)_\(safeTripID).json"
         let finalURL = dir.appendingPathComponent(fileName)
 
         var isDirectory: ObjCBool = false

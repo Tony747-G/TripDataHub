@@ -113,6 +113,7 @@ struct CrewAccessCrewJSON: Codable {
 
 private struct ParsedLegRow {
     let sequence: Int
+    let weekdayToken: String
     let deadhead: Bool
     let flight: String
     let depAirport: String
@@ -128,7 +129,6 @@ private struct ParsedLegRow {
 
 final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
     static let parserVersion = "crewaccess-parser-1.0"
-    static let tzMappingVersion = "iata-tz-2026-02-21"
 
     private static let tripDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -155,33 +155,11 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
     }()
 
     private let minTextCharacterThreshold = 120
+    private let tzResolver: IATATimeZoneResolving
 
-    private let airportTimeZones: [String: String] = [
-        "ANC": "America/Anchorage",
-        "SDF": "America/Kentucky/Louisville",
-        "NRT": "Asia/Tokyo",
-        "KIX": "Asia/Tokyo",
-        "ICN": "Asia/Seoul",
-        "PVG": "Asia/Shanghai",
-        "HKG": "Asia/Hong_Kong",
-        "TPE": "Asia/Taipei",
-        "CGN": "Europe/Berlin",
-        "CDG": "Europe/Paris",
-        "FRA": "Europe/Berlin",
-        "MUC": "Europe/Berlin",
-        "DXB": "Asia/Dubai",
-        "DOH": "Asia/Qatar",
-        "LAX": "America/Los_Angeles",
-        "ONT": "America/Los_Angeles",
-        "MIA": "America/New_York",
-        "JFK": "America/New_York",
-        "ORD": "America/Chicago",
-        "DFW": "America/Chicago",
-        "MEM": "America/Chicago",
-        "SEA": "America/Los_Angeles",
-        "HNL": "Pacific/Honolulu",
-        "GUM": "Pacific/Guam"
-    ]
+    init(tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared) {
+        self.tzResolver = tzResolver
+    }
 
     func analyzeTrip(pdfData: Data, sourceFileName: String?) -> CrewAccessImportDraft {
         NSLog("[Import] analyzeTrip start file=%@ bytes=%d", sourceFileName ?? "unknown", pdfData.count)
@@ -256,6 +234,21 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
             lineCount: lines.count
         )
 
+        NSLog("[Parse] rawText chars=%d lines=%d", stats.characterCount, stats.lineCount)
+        let dateTokenCount = countRegexMatches(in: extractedText, pattern: #"\b\d{2}[A-Z]{3}\b"#)
+        let airportTokenCount = countRegexMatches(in: extractedText, pattern: #"\b[A-Z]{3}\b"#)
+        let flightTokenCount = countRegexMatches(in: extractedText, pattern: #"\b\d{3,4}\b"#)
+        NSLog(
+            "[Parse] candidates dateTokens=%d airportTokens=%d flightTokens=%d",
+            dateTokenCount,
+            airportTokenCount,
+            flightTokenCount
+        )
+        let legAnchorPattern = #"^\d+\s*[A-Za-z]{2}\s*(?:(?:DH)\s+)?[A-Za-z0-9]+\s+[A-Z]{3}\s*[-–—]\s*[A-Z]{3}\b"#
+        let anchorLines = lines.filter { $0.range(of: legAnchorPattern, options: .regularExpression) != nil }
+        let anchorSample = anchorLines.prefix(3).joined(separator: " || ")
+        NSLog("[Parse] anchorMatches=%d sample=%@", anchorLines.count, anchorSample)
+
         if extractedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || extractedText.count < minTextCharacterThreshold {
             errors.append(ImportErrorItem(
                 code: .pdfTextEmpty,
@@ -274,24 +267,8 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
             )
         }
 
-        guard let tripDateText = extractValue(from: lines, prefix: "Date:"),
-              let tripDate = Self.tripDateFormatter.date(from: tripDateText.uppercased()) else {
-            errors.append(ImportErrorItem(
-                code: .missingRequiredFields,
-                message: "Trip Information Date was not found.",
-                remediation: "Verify this is CrewAccess Trip Information PDF layout."
-            ))
-            return makeDraft(
-                sourceFileName: sourceFileName,
-                tripId: "UNKNOWN",
-                tripDate: "UNKNOWN",
-                parsedSchedule: nil,
-                jsonPayload: nil,
-                warnings: warnings,
-                errors: errors,
-                rawExtractStats: stats
-            )
-        }
+        let tripInfoDateText = extractValue(from: lines, prefix: "Date:")
+        let tripInfoDate = tripInfoDateText.flatMap { Self.tripDateFormatter.date(from: $0.uppercased()) }
 
         guard let tripIDLine = extractValue(from: lines, prefix: "Trip Id:") else {
             errors.append(ImportErrorItem(
@@ -302,7 +279,7 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
             return makeDraft(
                 sourceFileName: sourceFileName,
                 tripId: "UNKNOWN",
-                tripDate: tripDateText,
+                tripDate: tripInfoDateText ?? "UNKNOWN",
                 parsedSchedule: nil,
                 jsonPayload: nil,
                 warnings: warnings,
@@ -311,7 +288,33 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
             )
         }
 
-        let tripID = tripIDLine.split(separator: " ").first.map(String.init) ?? "UNKNOWN"
+        let tripIdParts = tripIDLine
+            .split(separator: " ")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let tripID = tripIdParts.first ?? "UNKNOWN"
+        let tripStartDateTextFromTripId = tripIdParts.dropFirst().first
+        let tripStartDateFromTripId = tripStartDateTextFromTripId.flatMap {
+            Self.tripDateFormatter.date(from: $0.uppercased())
+        }
+        let effectiveTripDateText = tripStartDateTextFromTripId ?? tripInfoDateText ?? "UNKNOWN"
+        guard let tripDate = tripStartDateFromTripId ?? tripInfoDate else {
+            errors.append(ImportErrorItem(
+                code: .missingRequiredFields,
+                message: "Trip start date next to Trip Id was not found.",
+                remediation: "Verify Trip Id line includes date (e.g. Trip Id: A70870 04Mar2026)."
+            ))
+            return makeDraft(
+                sourceFileName: sourceFileName,
+                tripId: tripID,
+                tripDate: effectiveTripDateText,
+                parsedSchedule: nil,
+                jsonPayload: nil,
+                warnings: warnings,
+                errors: errors,
+                rawExtractStats: stats
+            )
+        }
         if tripID == "UNKNOWN" {
             errors.append(ImportErrorItem(
                 code: .missingRequiredFields,
@@ -320,11 +323,12 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
             ))
         }
 
-        let legPattern = #"^(\d+)\s+[A-Za-z]{2}\s+(?:(DH)\s+)?([A-Za-z0-9]+)\s+([A-Z]{3})-([A-Z]{3})\s+(\d{2}:\d{2})\s+(\d{2}:\d{2})\s+(\d{2}:\d{2})\s+(\d{2}:\d{2})\s+([0-9:.-]+|-)\s+([A-Za-z0-9-]+).*$"#
+        let legPattern = #"^(\d+)\s*([A-Za-z]{2})\s*(?:(DH)\s+)?([A-Za-z0-9]+)\s+([A-Z]{3})\s*[-–—]\s*([A-Z]{3})\s+(\d{2}:\d{2})\s+(\d{2}:\d{2})\s+(\d{2}:\d{2})\s+(\d{2}:\d{2})\s+([0-9:.-]+|-)\s+([A-Za-z0-9-]+).*$"#
         var legRows: [ParsedLegRow] = []
         var dutyTotals: [String] = []
         var hotelDetails: [String] = []
         var crewRows: [CrewAccessCrewJSON] = []
+        var likelyLegButUnmatchedLines: [String] = []
 
         for line in lines {
             if line.hasPrefix("Duty totals ") {
@@ -342,12 +346,31 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
             if let parsed = matchLegRow(line, pattern: legPattern) {
                 legRows.append(parsed)
             } else if lineContainsLikelyLeg(line) {
+                likelyLegButUnmatchedLines.append(line)
                 warnings.append(ImportWarning(
                     code: .partialLegParseFailed,
                     message: "Partial leg parse failure: \(line)"
                 ))
             }
         }
+
+        let parsedSequences = legRows.map(\.sequence).sorted()
+        NSLog("[Parse] parsedSequences=%@", parsedSequences.map(String.init).joined(separator: ","))
+        let unmatchedSample = likelyLegButUnmatchedLines.prefix(3).joined(separator: " || ")
+        NSLog(
+            "[Parse] likelyLegButUnmatched=%d sample=%@",
+            likelyLegButUnmatchedLines.count,
+            unmatchedSample
+        )
+        let warningCounts = Dictionary(grouping: warnings, by: \.code).mapValues(\.count)
+        NSLog(
+            "[Parse] warningBreakdown partialLegParseFailed=%d unknownIata=%d unknownTz=%d lowConfidence=%d dstBoundaryCrossing=%d",
+            warningCounts[.partialLegParseFailed] ?? 0,
+            warningCounts[.unknownIata] ?? 0,
+            warningCounts[.unknownTz] ?? 0,
+            warningCounts[.lowConfidence] ?? 0,
+            warningCounts[.dstBoundaryCrossing] ?? 0
+        )
 
         if legRows.isEmpty {
             errors.append(ImportErrorItem(
@@ -358,7 +381,7 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
             return makeDraft(
                 sourceFileName: sourceFileName,
                 tripId: tripID,
-                tripDate: tripDateText,
+                tripDate: effectiveTripDateText,
                 parsedSchedule: nil,
                 jsonPayload: nil,
                 warnings: warnings,
@@ -369,19 +392,25 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
 
         var tripLegs: [TripLeg] = []
         var jsonItems: [CrewAccessTripItemJSON] = []
-        var previousDepUTC: Date?
-
         for row in legRows {
-            if airportTimeZones[row.depAirport] == nil {
+            let depTimeZoneID = tzResolver.resolve(row.depAirport)
+            let arrTimeZoneID = tzResolver.resolve(row.arrAirport)
+
+            if depTimeZoneID == nil {
                 warnings.append(ImportWarning(code: .unknownIata, message: "Unknown departure IATA in mapping: \(row.depAirport)"))
                 warnings.append(ImportWarning(code: .unknownTz, message: "No timezone mapping for departure airport \(row.depAirport)."))
             }
-            if airportTimeZones[row.arrAirport] == nil {
+            if arrTimeZoneID == nil {
                 warnings.append(ImportWarning(code: .unknownIata, message: "Unknown arrival IATA in mapping: \(row.arrAirport)"))
                 warnings.append(ImportWarning(code: .unknownTz, message: "No timezone mapping for arrival airport \(row.arrAirport)."))
             }
 
-            guard let depUTC = deriveDepartureUTC(row.startUTC, tripDate: tripDate, previousDeparture: previousDepUTC) else {
+            guard let depUTC = deriveDepartureUTC(
+                row.startUTC,
+                tripStartDate: tripDate,
+                tripDayOffset: row.sequence,
+                weekdayToken: row.weekdayToken
+            ) else {
                 errors.append(ImportErrorItem(
                     code: .utcParseFailed,
                     message: "Failed to parse startUtc for leg \(row.sequence): \(row.startUTC)",
@@ -399,9 +428,11 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
                 continue
             }
 
-            previousDepUTC = depUTC
             let depLocal = localDisplay(utc: depUTC, airport: row.depAirport)
             let arrLocal = localDisplay(utc: arrUTC, airport: row.arrAirport)
+            let normalizedInputBlock = normalizedBlockValue(row.block)
+            let calculatedBlock = calculateBlock(depUTC: depUTC, arrUTC: arrUTC)
+            let effectiveBlock = normalizedInputBlock ?? calculatedBlock ?? ""
 
             let leg = TripLeg(
                 payPeriod: crewAccessLabel(from: tripDate),
@@ -415,7 +446,7 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
                 depUTC: Self.isoUTCFormatter.string(from: depUTC),
                 arrUTC: Self.isoUTCFormatter.string(from: arrUTC),
                 status: row.deadhead ? "DH" : "-",
-                block: row.block == "-" ? "" : row.block
+                block: effectiveBlock
             )
             tripLegs.append(leg)
 
@@ -430,11 +461,11 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
                     endUtc: Self.isoUTCFormatter.string(from: arrUTC),
                     startLocalDisplay: depLocal,
                     endLocalDisplay: arrLocal,
-                    originTz: airportTimeZones[row.depAirport],
-                    destinationTz: airportTimeZones[row.arrAirport],
+                    originTz: depTimeZoneID,
+                    destinationTz: arrTimeZoneID,
                     timeDerivation: "from_utc",
                     aircraft: row.aircraft,
-                    block: row.block
+                    block: effectiveBlock
                 )
             )
         }
@@ -467,10 +498,10 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
             schemaVersion: 1,
             source: PendingImportSource.crewAccessPDF.rawValue,
             sourceVersion: Self.parserVersion,
-            mappingVersion: Self.tzMappingVersion,
+            mappingVersion: tzResolver.mappingVersion,
             generatedAt: Self.isoUTCFormatter.string(from: Date()),
             tripId: tripID,
-            tripInformationDate: tripDateText,
+            tripInformationDate: effectiveTripDateText,
             dutyTotals: dutyTotals,
             hotelDetails: hotelDetails,
             crew: crewRows,
@@ -480,7 +511,7 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         return makeDraft(
             sourceFileName: sourceFileName,
             tripId: tripID,
-            tripDate: tripDateText,
+            tripDate: effectiveTripDateText,
             parsedSchedule: schedule,
             jsonPayload: jsonPayload,
             warnings: dedupWarnings(warnings),
@@ -513,20 +544,34 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         return out
     }
 
-    private func deriveDepartureUTC(_ hhmm: String, tripDate: Date, previousDeparture: Date?) -> Date? {
+    private func deriveDepartureUTC(
+        _ hhmm: String,
+        tripStartDate: Date,
+        tripDayOffset: Int,
+        weekdayToken: String
+    ) -> Date? {
         guard let (hour, minute) = parseHHMM(hhmm) else { return nil }
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
 
-        var components = calendar.dateComponents([.year, .month, .day], from: tripDate)
+        guard tripDayOffset > 0 else { return nil }
+        guard let dayDate = calendar.date(byAdding: .day, value: tripDayOffset - 1, to: tripStartDate) else {
+            return nil
+        }
+        var components = calendar.dateComponents([.year, .month, .day], from: dayDate)
         components.hour = hour
         components.minute = minute
         components.second = 0
-        guard var dep = calendar.date(from: components) else { return nil }
-
-        if let previousDeparture {
-            while dep <= previousDeparture {
-                dep = calendar.date(byAdding: .day, value: 1, to: dep) ?? dep
+        let dep = calendar.date(from: components)
+        if let dep, !weekdayToken.isEmpty {
+            let parsedWeekday = normalizeWeekdayToken(weekdayToken)
+            if parsedWeekday != utcWeekdayToken(for: dep) {
+                NSLog(
+                    "[Parse] weekdayMismatch tripDay=%d token=%@ computed=%@",
+                    tripDayOffset,
+                    parsedWeekday,
+                    utcWeekdayToken(for: dep)
+                )
             }
         }
         return dep
@@ -554,7 +599,7 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
     }
 
     private func localDisplay(utc: Date, airport: String) -> String {
-        if let tzID = airportTimeZones[airport],
+        if let tzID = tzResolver.resolve(airport),
            let tz = TimeZone(identifier: tzID) {
             Self.localDisplayFormatter.timeZone = tz
             return Self.localDisplayFormatter.string(from: utc)
@@ -578,7 +623,7 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
     }
 
     private func lineContainsLikelyLeg(_ line: String) -> Bool {
-        return line.range(of: #"\b[A-Z]{3}-[A-Z]{3}\b"#, options: .regularExpression) != nil
+        return line.range(of: #"\b[A-Z]{3}\s*[-–—]\s*[A-Z]{3}\b"#, options: .regularExpression) != nil
             && line.range(of: #"\b\d{2}:\d{2}\b"#, options: .regularExpression) != nil
     }
 
@@ -598,23 +643,46 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
     }
 
     private func matchLegRow(_ line: String, pattern: String) -> ParsedLegRow? {
-        guard let groups = firstMatchGroups(in: line, pattern: pattern), groups.count >= 12 else {
+        guard let groups = firstMatchGroups(in: line, pattern: pattern), groups.count >= 13 else {
             return nil
         }
         return ParsedLegRow(
             sequence: Int(groups[1]) ?? 0,
-            deadhead: groups[2] == "DH",
-            flight: groups[3],
-            depAirport: groups[4],
-            arrAirport: groups[5],
-            startUTC: groups[6],
-            startLT: groups[7],
-            endUTC: groups[8],
-            endLT: groups[9],
-            block: groups[10],
-            aircraft: groups[11],
+            weekdayToken: groups[2],
+            deadhead: groups[3] == "DH",
+            flight: groups[4],
+            depAirport: groups[5],
+            arrAirport: groups[6],
+            startUTC: groups[7],
+            startLT: groups[8],
+            endUTC: groups[9],
+            endLT: groups[10],
+            block: groups[11],
+            aircraft: groups[12],
             sourceLine: line
         )
+    }
+
+    private func normalizeWeekdayToken(_ token: String) -> String {
+        token
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .prefix(2)
+            .capitalized
+    }
+
+    private func utcWeekdayToken(for date: Date) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        switch calendar.component(.weekday, from: date) {
+        case 1: return "Su"
+        case 2: return "Mo"
+        case 3: return "Tu"
+        case 4: return "We"
+        case 5: return "Th"
+        case 6: return "Fr"
+        case 7: return "Sa"
+        default: return ""
+        }
     }
 
     private func firstMatchGroups(in text: String, pattern: String) -> [String]? {
@@ -653,8 +721,36 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         return hour * 60 + minute
     }
 
+    private func normalizedBlockValue(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != "-" else { return nil }
+        guard let minutes = parseBlockMinutes(trimmed) else { return nil }
+        let hh = minutes / 60
+        let mm = minutes % 60
+        return "\(hh):\(String(format: "%02d", mm))"
+    }
+
+    private func calculateBlock(depUTC: Date, arrUTC: Date) -> String? {
+        var delta = arrUTC.timeIntervalSince(depUTC)
+        while delta < 0 {
+            delta += 24 * 3600
+        }
+        let minutes = Int(round(delta / 60))
+        guard minutes >= 0, minutes <= 24 * 60 else { return nil }
+        let hh = minutes / 60
+        let mm = minutes % 60
+        return "\(hh):\(String(format: "%02d", mm))"
+    }
+
     private func normalizeWhitespace(_ text: String) -> String {
         text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func countRegexMatches(in text: String, pattern: String) -> Int {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return 0 }
+        let nsText = text as NSString
+        let range = NSRange(location: 0, length: nsText.length)
+        return regex.numberOfMatches(in: text, options: [], range: range)
     }
 }

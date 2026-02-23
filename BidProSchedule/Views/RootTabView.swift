@@ -59,12 +59,14 @@ struct RootTabView: View {
         }
         .onAppear {
             migrateFontSizeDefaultIfNeeded()
+            viewModel.consumePendingAppGroupImportIfAvailable()
             Task {
                 await viewModel.autoFetchOnAppActiveIfEnabled(autoFetchOnOpen)
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
+                viewModel.consumePendingAppGroupImportIfAvailable()
                 Task {
                     await viewModel.autoFetchOnAppActiveIfEnabled(autoFetchOnOpen)
                 }

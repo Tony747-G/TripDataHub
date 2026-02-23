@@ -11,7 +11,7 @@
     "Duty totals Time: 11:44 Block: 8:31 Rest: 37:46",
     "Duty totals Time: 10:20 Block: 8:02 Rest:"
   ],
-  "generatedAt" : "2026-02-21T06:11:33Z",
+  "generatedAt" : "2026-02-22T23:30:07Z",
   "hotelDetails" : [
     "Hotel details Status: BOOKED Hotel: Sheraton Incheon 011-82-32-835-1000 Hotel Transport:"
   ],
@@ -39,17 +39,17 @@
       "deadhead" : false,
       "depAirport" : "ICN",
       "destinationTz" : "America\/Anchorage",
-      "endLocalDisplay" : "2026-01-29 21:05",
-      "endUtc" : "2026-01-30T06:05:00Z",
+      "endLocalDisplay" : "2026-01-31 21:05",
+      "endUtc" : "2026-02-01T06:05:00Z",
       "flight" : "099",
       "originTz" : "Asia\/Seoul",
       "sequence" : 3,
-      "startLocalDisplay" : "2026-01-30 07:03",
-      "startUtc" : "2026-01-29T22:03:00Z",
+      "startLocalDisplay" : "2026-02-01 07:03",
+      "startUtc" : "2026-01-31T22:03:00Z",
       "timeDerivation" : "from_utc"
     }
   ],
-  "mappingVersion" : "iata-tz-2026-02-21",
+  "mappingVersion" : "iata-tz-2026-02-22+u0",
   "schemaVersion" : 1,
   "source" : "crewaccess-pdf",
   "sourceVersion" : "crewaccess-parser-1.0",

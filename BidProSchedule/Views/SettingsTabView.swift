@@ -20,14 +20,8 @@ struct SettingsTabView: View {
     @State private var verifyGemsIDInput = ""
     @State private var verifyDOBDate = Date()
     @State private var crewAccessImportFiles: [CrewAccessImportFile] = []
-    @State private var pendingFileDeleteIDs: [CrewAccessImportFile.ID] = []
-    @State private var isShowingCrewAccessFileDeleteConfirm = false
-    @State private var selectedCrewAccessScheduleIDs: Set<String> = []
-    @State private var isShowingCrewAccessDeleteConfirm = false
-    @State private var crewAccessDeleteIDs: Set<String> = []
-#if os(iOS)
-    @State private var editMode: EditMode = .inactive
-#endif
+    @State private var overrideIATAInput = ""
+    @State private var overrideTimeZoneInput = ""
 
     private static let dobFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -35,6 +29,13 @@ struct SettingsTabView: View {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "MM/dd/yyyy"
+        return formatter
+    }()
+
+    private static let importFileDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MMM dd, yyyy 'at' HH:mm"
         return formatter
     }()
 
@@ -52,17 +53,6 @@ struct SettingsTabView: View {
         )
     }
 
-    private var isDeleteSelectedDisabled: Bool {
-        if selectedCrewAccessScheduleIDs.isEmpty || viewModel.isDeletingCrewAccessTrips {
-            return true
-        }
-#if os(iOS)
-        return editMode != .active
-#else
-        return false
-#endif
-    }
-
     private func loadCrewAccessImportFiles(afterDelete: Bool = false) async {
         crewAccessImportFiles = await viewModel.listCrewAccessImportFiles()
         if afterDelete {
@@ -73,11 +63,12 @@ struct SettingsTabView: View {
     }
 
     private func fileSecondaryText(for file: CrewAccessImportFile) -> String {
-        let updated = file.modifiedAt?.formatted(date: .abbreviated, time: .shortened) ?? "Unknown"
-        let kb = max(1, Int((Double(file.bytes) / 1024.0).rounded()))
-        let timelineState = file.isOrphan ? "Orphan file" : "In Timeline"
-        let fallbackLabel = file.usedFallbackDate ? " • fallback" : ""
-        return "Updated: \(updated) • \(kb) KB • \(timelineState)\(fallbackLabel)"
+        let modifiedDate = file.modifiedAt ?? file.createdAt
+        let dateString = modifiedDate.map { Self.importFileDateFormatter.string(from: $0) } ?? "Unknown"
+        if let createdAt = file.createdAt, let modifiedAt = file.modifiedAt, abs(modifiedAt.timeIntervalSince(createdAt)) <= 1 {
+            return "Added: \(dateString)"
+        }
+        return "Updated: \(dateString)"
     }
 
     @ViewBuilder
@@ -90,9 +81,7 @@ struct SettingsTabView: View {
             } else {
                 let fileCount = crewAccessImportFiles.count
                 let inTimelineCount = crewAccessImportFiles.filter { !$0.isOrphan }.count
-                let orphanCount = fileCount - inTimelineCount
-                let timelineLegsTotal = viewModel.crewAccessSchedules.reduce(0) { $0 + $1.legCount }
-                Text("Files: \(fileCount) • In Timeline: \(inTimelineCount) • Orphans: \(orphanCount) • Timeline legs: \(timelineLegsTotal)")
+                Text("Files: \(fileCount) • In Timeline: \(inTimelineCount)")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
@@ -106,10 +95,12 @@ struct SettingsTabView: View {
                     }
                 }
                 .onDelete { offsets in
-                    let ids = offsets.map { crewAccessImportFiles[$0].id }
-                    guard !ids.isEmpty else { return }
-                    pendingFileDeleteIDs = ids
-                    isShowingCrewAccessFileDeleteConfirm = true
+                    let targetURLs = offsets.map { crewAccessImportFiles[$0].url }
+                    guard !targetURLs.isEmpty else { return }
+                    Task {
+                        await viewModel.deleteCrewAccessImportFiles(urls: targetURLs)
+                        await loadCrewAccessImportFiles(afterDelete: true)
+                    }
                 }
             }
         } header: {
@@ -118,57 +109,53 @@ struct SettingsTabView: View {
     }
 
     @ViewBuilder
-    private var crewAccessScheduleSection: some View {
+    private var timeZoneOverridesSection: some View {
         Section {
-            HStack {
-#if os(iOS)
-                EditButton()
-                    .disabled(viewModel.crewAccessSchedules.isEmpty || viewModel.isDeletingCrewAccessTrips)
-#endif
-
-                Spacer()
-
-                Button("Delete Selected", role: .destructive) {
-                    crewAccessDeleteIDs = selectedCrewAccessScheduleIDs
-                    isShowingCrewAccessDeleteConfirm = true
-                }
-                .disabled(isDeleteSelectedDisabled)
-            }
-
-            if viewModel.crewAccessSchedules.isEmpty {
-                Text("No imported CrewAccess trips.")
+            let unknownAirports = viewModel.unresolvedIATAAirports()
+            if unknownAirports.isEmpty {
+                Text("No unknown IATA codes.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(viewModel.crewAccessSchedules) { schedule in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(schedule.label.isEmpty ? schedule.id : schedule.label)
-                            .font(.subheadline.weight(.semibold))
-                        Text("Trips: \(schedule.tripCount), Legs: \(schedule.legCount), Updated: \(schedule.updatedAt.formatted(date: .abbreviated, time: .shortened))")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    .tag(schedule.id)
+                Text("Unknown IATA: \(unknownAirports.joined(separator: ", "))")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            TextField("IATA (e.g. HKG)", text: $overrideIATAInput)
+
+            TextField("IANA TZ (e.g. Asia/Hong_Kong)", text: $overrideTimeZoneInput)
+
+            Button("Save TZ Override") {
+                viewModel.setTimeZoneOverride(iata: overrideIATAInput, tzID: overrideTimeZoneInput)
+                if viewModel.tzOverrideMessage?.hasPrefix("Saved override:") == true {
+                    overrideIATAInput = ""
+                    overrideTimeZoneInput = ""
                 }
             }
 
-            if viewModel.isDeletingCrewAccessTrips {
-                ProgressView()
+            let overrides = viewModel.currentTimeZoneOverrides()
+            if !overrides.isEmpty {
+                ForEach(overrides.keys.sorted(), id: \.self) { code in
+                    Text("\(code) -> \(overrides[code] ?? "")")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
 
-            if let deleteMessage = viewModel.crewAccessDeleteMessage {
-                Text(deleteMessage)
+            if let tzOverrideMessage = viewModel.tzOverrideMessage {
+                Text(tzOverrideMessage)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
         } header: {
-            Text("CrewAccess Imports")
+            Text("Time Zone Overrides")
         }
     }
 
     @ViewBuilder
     private var settingsListContent: some View {
-        List(selection: $selectedCrewAccessScheduleIDs) {
+        List {
             SettingsAccountSection(
                 verifyGemsIDInput: $verifyGemsIDInput,
                 verifyDOBDate: $verifyDOBDate,
@@ -182,7 +169,7 @@ struct SettingsTabView: View {
             )
 
             crewAccessFilesSection
-            crewAccessScheduleSection
+            timeZoneOverridesSection
 
             Section {
                 NavigationLink("CrewAccess Import Help") {
@@ -269,48 +256,6 @@ struct SettingsTabView: View {
             .navigationDestination(isPresented: $isShowingImportPreview) {
                 ImportPreviewView()
             }
-            .confirmationDialog(
-                "Delete imported file?",
-                isPresented: $isShowingCrewAccessFileDeleteConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("Delete", role: .destructive) {
-                    let targetURLs = crewAccessImportFiles
-                        .filter { pendingFileDeleteIDs.contains($0.id) }
-                        .map(\.url)
-                    Task {
-                        await viewModel.deleteCrewAccessImportFiles(urls: targetURLs)
-                        pendingFileDeleteIDs.removeAll()
-                        selectedCrewAccessScheduleIDs.removeAll()
-                        await loadCrewAccessImportFiles(afterDelete: true)
-                    }
-                }
-                Button("Cancel", role: .cancel) {
-                    pendingFileDeleteIDs.removeAll()
-                }
-            } message: {
-                Text("This removes the JSON file. If it matches a CrewAccess trip in Timeline, that trip will also be removed. This cannot be undone.")
-            }
-            .confirmationDialog(
-                "Delete imported trip(s)?",
-                isPresented: $isShowingCrewAccessDeleteConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("Delete", role: .destructive) {
-                    let ids = crewAccessDeleteIDs
-                    Task {
-                        await viewModel.deleteCrewAccessTrips(ids: ids)
-                        selectedCrewAccessScheduleIDs.subtract(ids)
-                        crewAccessDeleteIDs.removeAll()
-                        await loadCrewAccessImportFiles(afterDelete: true)
-                    }
-                }
-                Button("Cancel", role: .cancel) {
-                    crewAccessDeleteIDs.removeAll()
-                }
-            } message: {
-                Text("This removes the imported CrewAccess trip from Timeline. This cannot be undone.")
-            }
             .alert("Notifications Are Disabled", isPresented: $showNotificationDeniedAlert) {
                 Button("Cancel", role: .cancel) {}
                 Button("Open Settings") {
@@ -319,9 +264,6 @@ struct SettingsTabView: View {
             } message: {
                 Text("Enable notifications in iOS Settings to receive 48h/24h/12h reminders.")
             }
-#if os(iOS)
-            .environment(\.editMode, $editMode)
-#endif
 #if canImport(UniformTypeIdentifiers)
             .fileImporter(
                 isPresented: $isShowingCrewAccessImporter,

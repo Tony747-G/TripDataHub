@@ -39,65 +39,12 @@ enum SyncServiceError: Error, LocalizedError {
 final class TripBoardSyncService: TripBoardSyncServiceProtocol {
     private let homeURL: URL?
     private let loadURL: URL?
-    private let airportTimeZones: [String: String] = [
-        // North America
-        "SDF": "America/Kentucky/Louisville",
-        "ANC": "America/Anchorage",
-        "ONT": "America/Los_Angeles",
-        "MIA": "America/New_York",
-        "LAX": "America/Los_Angeles",
-        "SBD": "America/Los_Angeles",
-        "ORD": "America/Chicago",
-        "JFK": "America/New_York",
-        "PHL": "America/New_York",
-        "PDX": "America/Los_Angeles",
-        "DFW": "America/Chicago",
-        "MEM": "America/Chicago",
-        "SEA": "America/Los_Angeles",
-        "BFI": "America/Los_Angeles",
-        "HNL": "Pacific/Honolulu",
-        "GUM": "Pacific/Guam",
-        "KOA": "Pacific/Honolulu",
-        "MSP": "America/Chicago",
-        "IND": "America/Indiana/Indianapolis",
-        "CVG": "America/New_York",
-        "FAI": "America/Anchorage",
+    private let tzResolver: IATATimeZoneResolving
 
-        // East Asia
-        "NRT": "Asia/Tokyo",
-        "KIX": "Asia/Tokyo",
-        "KKJ": "Asia/Tokyo",
-        "ICN": "Asia/Seoul",
-        "PVG": "Asia/Shanghai",
-        "TPE": "Asia/Taipei",
-        "HKG": "Asia/Hong_Kong",
-        "SZX": "Asia/Shanghai",
-        "CGO": "Asia/Shanghai",
-        "HAN": "Asia/Bangkok",
-        "SGN": "Asia/Ho_Chi_Minh",
-        "DAD": "Asia/Ho_Chi_Minh",
-        "BKK": "Asia/Bangkok",
-        "SIN": "Asia/Singapore",
-        "KUL": "Asia/Kuala_Lumpur",
-        "BLR": "Asia/Kolkata",
-        "DEL": "Asia/Kolkata",
-        "BOM": "Asia/Kolkata",
-
-        // Middle East
-        "DWC": "Asia/Dubai",
-        "DXB": "Asia/Dubai",
-        "DOH": "Asia/Qatar",
-
-        // Europe
-        "CGN": "Europe/Berlin",
-        "CDG": "Europe/Paris",
-        "FRA": "Europe/Berlin",
-        "MUC": "Europe/Berlin"
-    ]
-
-    init() {
+    init(tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared) {
         self.homeURL = URL(string: "https://tripboard.bidproplus.com/")
         self.loadURL = URL(string: "https://tripboard.bidproplus.com/api/1.0/TripBoard/Load")
+        self.tzResolver = tzResolver
     }
 
     func sync(cookies: [HTTPCookie]) async throws -> [PayPeriodSchedule] {
@@ -422,7 +369,7 @@ final class TripBoardSyncService: TripBoardSyncServiceProtocol {
     private func localTimeZone(for airportCode: String?) -> TimeZone {
         guard let airportCode else { return .current }
         let code = airportCode.uppercased()
-        if let zoneID = airportTimeZones[code], let zone = TimeZone(identifier: zoneID) {
+        if let zoneID = tzResolver.resolve(code), let zone = TimeZone(identifier: zoneID) {
             return zone
         }
         return .current

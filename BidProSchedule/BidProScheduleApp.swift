@@ -54,10 +54,14 @@ struct BidProScheduleApp: App {
                 .environmentObject(viewModel)
                 .onOpenURL { url in
                     NSLog("[Import] app.onOpenURL received url=%@", url.absoluteString)
-                    if ExternalOpenLaunchGate.shouldForward(url: url) {
-                        viewModel.queueExternalOpenURL(url)
+                    if url.isFileURL {
+                        if ExternalOpenLaunchGate.shouldForward(url: url) {
+                            viewModel.queueExternalOpenURL(url)
+                        } else {
+                            NSLog("[Import] app.onOpenURL skipped (duplicate) url=%@", url.absoluteString)
+                        }
                     } else {
-                        NSLog("[Import] app.onOpenURL skipped (duplicate) url=%@", url.absoluteString)
+                        viewModel.handleIncomingAppDeepLink(url)
                     }
                 }
         }
