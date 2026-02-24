@@ -17,9 +17,11 @@ struct SettingsTabView: View {
     @State private var showNotificationDeniedAlert = false
     @State private var isShowingCrewAccessImporter = false
     @State private var isShowingImportPreview = false
+    @State private var isShowingLogTenExportShare = false
     @State private var verifyGemsIDInput = ""
     @State private var verifyDOBDate = Date()
     @State private var crewAccessImportFiles: [CrewAccessImportFile] = []
+    @State private var logTenExportURL: URL?
     @State private var overrideIATAInput = ""
     @State private var overrideTimeZoneInput = ""
 
@@ -69,6 +71,24 @@ struct SettingsTabView: View {
             return "Added: \(dateString)"
         }
         return "Updated: \(dateString)"
+    }
+
+    @ViewBuilder
+    private var logTenExportSection: some View {
+        Section {
+            Button("Export CrewAccess Flights (LogTen CSV)") {
+                let output = viewModel.exportCrewAccessFlightsLogTenCSV()
+                logTenExportURL = output
+                isShowingLogTenExportShare = output != nil
+            }
+            if let message = viewModel.logTenExportMessage {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("LogTen Pro Export")
+        }
     }
 
     @ViewBuilder
@@ -168,6 +188,7 @@ struct SettingsTabView: View {
                 onTapImportCrewAccessPDF: { isShowingCrewAccessImporter = true }
             )
 
+            logTenExportSection
             crewAccessFilesSection
             timeZoneOverridesSection
 
@@ -264,6 +285,18 @@ struct SettingsTabView: View {
             } message: {
                 Text("Enable notifications in iOS Settings to receive 48h/24h/12h reminders.")
             }
+#if canImport(UIKit)
+            .sheet(isPresented: $isShowingLogTenExportShare, onDismiss: {
+                if let url = logTenExportURL {
+                    try? FileManager.default.removeItem(at: url)
+                }
+                logTenExportURL = nil
+            }) {
+                if let url = logTenExportURL {
+                    ActivityView(activityItems: [url])
+                }
+            }
+#endif
 #if canImport(UniformTypeIdentifiers)
             .fileImporter(
                 isPresented: $isShowingCrewAccessImporter,
@@ -332,3 +365,15 @@ private enum LocalImportFileSniffer {
         return (isPDF, header)
     }
 }
+
+#if canImport(UIKit)
+private struct ActivityView: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+#endif

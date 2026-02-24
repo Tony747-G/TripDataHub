@@ -144,6 +144,7 @@ final class AppViewModel: ObservableObject {
     @Published var verifiedUsers: [VerifiedUserRecord] = []
     @Published var crewAccessImportMessage: String?
     @Published var crewAccessDeleteMessage: String?
+    @Published var logTenExportMessage: String?
     @Published var tzOverrideMessage: String?
     @Published var lastImportDidReplaceExistingTrip: Bool = false
     @Published var lastImportSummaryMessage: String?
@@ -166,6 +167,7 @@ final class AppViewModel: ObservableObject {
     private var externalConsumerTask: Task<Void, Never>?
     private var lastConsumedAppGroupHandoffFileName: String?
     private var isConsumingAppGroupHandoff = false
+    private var crewAccessLegImportReferenceTimes: [String: Date] = [:]
 
     private let notification48hKey = "notification_48h_enabled"
     private let notification24hKey = "notification_24h_enabled"
@@ -176,6 +178,7 @@ final class AppViewModel: ObservableObject {
     private let legacySeniorityRecordsKey = "pilot_roster_records_v1"
     private let verifiedIdentityKey = "verified_identity_profile_v1"
     private let verifiedUsersKey = "verified_users_v1"
+    private let crewAccessLegImportReferenceTimesKey = "crewaccess_leg_import_reference_times_v1"
     private let seniorityFileName = "pilot_seniority_records_v1.json"
     private let legacySeniorityFileName = "pilot_roster_records_v1.json"
     private let localIdentityRecordNameKey = "local_identity_record_name_v1"
@@ -220,6 +223,10 @@ final class AppViewModel: ObservableObject {
         self.schedules = mergeAndSortSchedules(crew: cachedCrewAccessSchedules, bidpro: cachedBidproSchedules)
         self.lastSyncAt = cached?.lastSyncAt
         self.sessionCookies = authService.loadPersistedCookies()
+        self.crewAccessLegImportReferenceTimes = Self.loadCrewAccessLegImportReferenceTimes(
+            from: UserDefaults.standard,
+            key: crewAccessLegImportReferenceTimesKey
+        )
         self.authStatus = authService.isAuthenticated(url: nil, cookies: sessionCookies) ? .loggedIn : .loggedOut
         self.friendConnections = loadFriendConnections()
         self.seniorityRecords = []
@@ -236,6 +243,8 @@ final class AppViewModel: ObservableObject {
             saveVerifiedIdentity(loadedVerifiedIdentity)
         }
         self.verifiedUsers = loadVerifiedUsers()
+        backfillCrewAccessLegImportReferenceTimesIfNeeded()
+        pruneCrewAccessLegImportReferenceTimes()
         if !useCloudKitIdentity {
             self.currentCloudKitRecordName = localIdentityRecordName()
         }
@@ -898,6 +907,7 @@ final class AppViewModel: ObservableObject {
         let removedTripsCount = beforePairings.subtracting(afterPairings)
             .intersection(tripIDsToRemove)
             .count
+        pruneCrewAccessLegImportReferenceTimes()
         schedules = mergeAndSortSchedules(crew: crewAccessSchedules, bidpro: bidproSchedules)
         NSLog("[CrewAccessFileDelete] removedTrips=%d", removedTripsCount)
 
@@ -962,6 +972,7 @@ final class AppViewModel: ObservableObject {
         }
 
         crewAccessSchedules.removeAll { ids.contains($0.id) }
+        pruneCrewAccessLegImportReferenceTimes()
         schedules = mergeAndSortSchedules(crew: crewAccessSchedules, bidpro: bidproSchedules)
         NSLog("[CrewAccessDelete] removedSchedules=%d", toDelete.count)
 
@@ -1009,6 +1020,140 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func exportCrewAccessFlightsLogTenCSV() -> URL? {
+        struct ExportCandidate {
+            let leg: TripLeg
+            let referenceTime: Date
+        }
+
+        let sourceSchedules = crewAccessSchedules
+        var deduped: [String: ExportCandidate] = [:]
+        for schedule in sourceSchedules {
+            for leg in schedule.legs {
+                let key = Self.logTenLegDedupKey(for: leg)
+                guard !key.hasPrefix("|") else { continue }
+                let referenceTime = crewAccessLegImportReferenceTimes[key] ?? schedule.updatedAt
+                if let existing = deduped[key] {
+                    if referenceTime > existing.referenceTime {
+                        deduped[key] = ExportCandidate(leg: leg, referenceTime: referenceTime)
+                    }
+                } else {
+                    deduped[key] = ExportCandidate(leg: leg, referenceTime: referenceTime)
+                }
+            }
+        }
+
+        NSLog("[LogTenExport] start legs=%d", deduped.count)
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.calendar = Calendar(identifier: .gregorian)
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+
+        let timeFormatter = DateFormatter()
+        timeFormatter.calendar = Calendar(identifier: .gregorian)
+        timeFormatter.locale = Locale(identifier: "en_US_POSIX")
+        timeFormatter.dateFormat = "HH:mm"
+
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime]
+        isoFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+
+        var csvRows: [(depUTC: Date, line: String)] = []
+        for candidate in deduped.values {
+            let leg = candidate.leg
+            guard
+                let depUTCText = leg.depUTC,
+                let arrUTCText = leg.arrUTC,
+                let depUTCDate = parseUTC(depUTCText),
+                let arrUTCDate = parseUTC(arrUTCText)
+            else {
+                continue
+            }
+
+            let depTzID = tzResolver.resolve(leg.depAirport)
+            let arrTzID = tzResolver.resolve(leg.arrAirport)
+            let depTZ = depTzID.flatMap(TimeZone.init(identifier:)) ?? TimeZone.current
+            let arrTZ = arrTzID.flatMap(TimeZone.init(identifier:)) ?? TimeZone.current
+            let depResolvedOK = depTzID != nil && TimeZone(identifier: depTzID ?? "") != nil
+            let arrResolvedOK = arrTzID != nil && TimeZone(identifier: arrTzID ?? "") != nil
+
+            NSLog("[LogTenExport] tzResolve airport=%@ tz=%@ ok=%@", leg.depAirport, depTZ.identifier, String(depResolvedOK))
+            NSLog("[LogTenExport] tzResolve airport=%@ tz=%@ ok=%@", leg.arrAirport, arrTZ.identifier, String(arrResolvedOK))
+            if !(depResolvedOK && arrResolvedOK) {
+                NSLog("[LogTenExport] warning TZ fallback used dep=%@ arr=%@", leg.depAirport, leg.arrAirport)
+            }
+
+            dateFormatter.timeZone = depTZ
+            let localDate = dateFormatter.string(from: depUTCDate)
+
+            timeFormatter.timeZone = depTZ
+            let outLocal = timeFormatter.string(from: depUTCDate)
+
+            timeFormatter.timeZone = arrTZ
+            let inLocal = timeFormatter.string(from: arrUTCDate)
+
+            let planned = depUTCDate >= candidate.referenceTime
+            let importedAtISO = isoFormatter.string(from: candidate.referenceTime)
+            let baseRemarks = planned
+                ? "CrewAccess Scheduled (ImportedAt=\(importedAtISO), Source=PDF)"
+                : "CrewAccess (Past by import timestamp) (ImportedAt=\(importedAtISO), Source=PDF)"
+            let fallbackApplied = !(depResolvedOK && arrResolvedOK)
+            let remarks = fallbackApplied ? "\(baseRemarks) TZFallback" : baseRemarks
+
+            NSLog(
+                "[LogTenExport] row flight=%@ date=%@ out=%@ in=%@ planned=%@",
+                leg.flight,
+                localDate,
+                outLocal,
+                inLocal,
+                String(planned)
+            )
+
+            let row = [
+                Self.csvEscaped(localDate),
+                Self.csvEscaped(leg.depAirport),
+                Self.csvEscaped(leg.arrAirport),
+                Self.csvEscaped(outLocal),
+                Self.csvEscaped(inLocal),
+                Self.csvEscaped(leg.flight),
+                Self.csvEscaped(remarks, alwaysQuote: true)
+            ].joined(separator: ",")
+            csvRows.append((depUTC: depUTCDate, line: row))
+        }
+
+        csvRows.sort { $0.depUTC < $1.depUTC }
+
+        let csvHeader = "Date,From,To,Out,In,Flight Number,Remarks"
+        var csvText = csvHeader + "\n"
+        csvText += csvRows.map(\.line).joined(separator: "\n")
+        if !csvRows.isEmpty {
+            csvText += "\n"
+        }
+
+        guard let data = csvText.data(using: .utf8) else {
+            logTenExportMessage = "Failed to encode LogTen CSV."
+            return nil
+        }
+
+        let fileNameFormatter = DateFormatter()
+        fileNameFormatter.calendar = Calendar(identifier: .gregorian)
+        fileNameFormatter.locale = Locale(identifier: "en_US_POSIX")
+        fileNameFormatter.dateFormat = "yyyyMMdd_HHmm"
+        let fileName = "TripData_LogTenExport_\(fileNameFormatter.string(from: Date())).csv"
+        let outputURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+
+        do {
+            try data.write(to: outputURL, options: .atomic)
+            NSLog("[LogTenExport] finished bytes=%d", data.count)
+            logTenExportMessage = "LogTen CSV is ready."
+            return outputURL
+        } catch {
+            logTenExportMessage = "Failed to write LogTen CSV: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
     func importSeniorityCSVFromDocuments(named preferredFileName: String = "ups_sen.csv") {
         let fm = FileManager.default
         guard let documentsURL = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
@@ -1050,6 +1195,12 @@ final class AppViewModel: ObservableObject {
 
     private func mergeImportedCrewAccessSchedule(_ imported: PayPeriodSchedule) throws {
         var updatedCrewAccess = crewAccessSchedules
+        let importConfirmedAt = Date()
+        for leg in imported.legs {
+            let key = Self.logTenLegDedupKey(for: leg)
+            guard !key.hasPrefix("|") else { continue }
+            crewAccessLegImportReferenceTimes[key] = importConfirmedAt
+        }
         let isReplacement = updatedCrewAccess.contains(where: { $0.id == imported.id })
         if let index = updatedCrewAccess.firstIndex(where: { $0.id == imported.id }) {
             let existing = updatedCrewAccess[index]
@@ -1089,6 +1240,7 @@ final class AppViewModel: ObservableObject {
             )
         )
         crewAccessSchedules = updatedCrewAccess
+        pruneCrewAccessLegImportReferenceTimes()
         schedules = updatedAll
         if lastSyncAt == nil {
             lastSyncAt = persistedLastSyncAt
@@ -1163,7 +1315,6 @@ final class AppViewModel: ObservableObject {
     }
 
     private enum ExternalOpenError: Error {
-        case securityScopeDenied
         case fileReadFailed
     }
 
@@ -1187,6 +1338,74 @@ final class AppViewModel: ObservableObject {
         let digest = SHA256.hash(data: data)
         let hashString = digest.map { String(format: "%02x", $0) }.joined()
         return "sha256:\(hashString)"
+    }
+
+    private nonisolated static func logTenLegDedupKey(for leg: TripLeg) -> String {
+        "\(leg.depUTC ?? "")|\(leg.flight)|\(leg.depAirport)|\(leg.arrAirport)"
+    }
+
+    private func pruneCrewAccessLegImportReferenceTimes() {
+        let activeKeys = Set(crewAccessSchedules.flatMap { schedule in
+            schedule.legs.map(Self.logTenLegDedupKey(for:))
+        })
+        crewAccessLegImportReferenceTimes = crewAccessLegImportReferenceTimes.filter { activeKeys.contains($0.key) }
+        Self.saveCrewAccessLegImportReferenceTimes(
+            crewAccessLegImportReferenceTimes,
+            to: UserDefaults.standard,
+            key: crewAccessLegImportReferenceTimesKey
+        )
+    }
+
+    private func backfillCrewAccessLegImportReferenceTimesIfNeeded() {
+        var didBackfill = false
+        for schedule in crewAccessSchedules {
+            for leg in schedule.legs {
+                let key = Self.logTenLegDedupKey(for: leg)
+                guard !key.hasPrefix("|") else { continue }
+                if crewAccessLegImportReferenceTimes[key] == nil {
+                    crewAccessLegImportReferenceTimes[key] = schedule.updatedAt
+                    didBackfill = true
+                }
+            }
+        }
+        if didBackfill {
+            Self.saveCrewAccessLegImportReferenceTimes(
+                crewAccessLegImportReferenceTimes,
+                to: UserDefaults.standard,
+                key: crewAccessLegImportReferenceTimesKey
+            )
+        }
+    }
+
+    private nonisolated static func loadCrewAccessLegImportReferenceTimes(
+        from defaults: UserDefaults,
+        key: String
+    ) -> [String: Date] {
+        guard let raw = defaults.dictionary(forKey: key) else { return [:] }
+        var out: [String: Date] = [:]
+        for (mapKey, value) in raw {
+            if let epoch = value as? Double {
+                out[mapKey] = Date(timeIntervalSince1970: epoch)
+            } else if let date = value as? Date {
+                out[mapKey] = date
+            }
+        }
+        return out
+    }
+
+    private nonisolated static func saveCrewAccessLegImportReferenceTimes(
+        _ map: [String: Date],
+        to defaults: UserDefaults,
+        key: String
+    ) {
+        let payload = map.mapValues(\.timeIntervalSince1970)
+        defaults.set(payload, forKey: key)
+    }
+
+    private nonisolated static func csvEscaped(_ value: String, alwaysQuote: Bool = false) -> String {
+        let escaped = value.replacingOccurrences(of: "\"", with: "\"\"")
+        let shouldQuote = alwaysQuote || escaped.contains(",") || escaped.contains("\"") || escaped.contains("\n")
+        return shouldQuote ? "\"\(escaped)\"" : escaped
     }
 
     /// Claims a cross-launch fingerprint in UserDefaults. Returns false if the same content
@@ -1228,10 +1447,11 @@ final class AppViewModel: ObservableObject {
 
     private nonisolated static func readExternalPDFDataCoordinated(from originalURL: URL) throws -> Data {
         let didStartScopedAccess = originalURL.startAccessingSecurityScopedResource()
-        guard didStartScopedAccess else {
-            throw ExternalOpenError.securityScopeDenied
+        defer {
+            if didStartScopedAccess {
+                originalURL.stopAccessingSecurityScopedResource()
+            }
         }
-        defer { originalURL.stopAccessingSecurityScopedResource() }
 
         var coordinatorError: NSError?
         var readData: Data?
@@ -1342,7 +1562,7 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        NSLog("[Import] cleanupInbox skip (not inbox) url=%@", url.absoluteString)
+        NSLog("[Import] cleanupExternalFile skip (not managed path) url=%@", url.absoluteString)
     }
 
     private struct AppGroupPendingImportHandoff: Codable {
@@ -1925,7 +2145,11 @@ final class AppViewModel: ObservableObject {
 
         do {
             let result = try await syncWithTimeout(cookies: sessionCookies, timeoutSeconds: 60)
-            bidproSchedules = result
+            bidproSchedules = mergeBidproSchedulesKeepingRecentPeriods(
+                fetched: result,
+                existing: bidproSchedules,
+                keepPeriods: 2
+            )
             schedules = mergeAndSortSchedules(crew: crewAccessSchedules, bidpro: bidproSchedules)
             lastSyncAt = Date()
             authStatus = .loggedIn
@@ -2472,6 +2696,55 @@ final class AppViewModel: ObservableObject {
             }
             return lhsKey < rhsKey
         }
+    }
+
+    private func mergeBidproSchedulesKeepingRecentPeriods(
+        fetched: [PayPeriodSchedule],
+        existing: [PayPeriodSchedule],
+        keepPeriods: Int
+    ) -> [PayPeriodSchedule] {
+        guard keepPeriods > 0 else { return fetched }
+
+        var byID: [String: PayPeriodSchedule] = [:]
+        for schedule in existing {
+            byID[schedule.id] = schedule
+        }
+        for schedule in fetched {
+            byID[schedule.id] = schedule
+        }
+
+        let fetchedIDs = Set(fetched.map(\.id))
+        let merged = Array(byID.values)
+        let distinctOrders = Array(
+            Set(merged.compactMap { payPeriodOrder(from: $0.id, fallbackLabel: $0.label) })
+        ).sorted(by: >)
+        let keptOrders = Set(distinctOrders.prefix(keepPeriods))
+
+        return merged.filter { schedule in
+            if fetchedIDs.contains(schedule.id) { return true }
+            guard let order = payPeriodOrder(from: schedule.id, fallbackLabel: schedule.label) else {
+                return false
+            }
+            return keptOrders.contains(order)
+        }
+    }
+
+    private func payPeriodOrder(from id: String, fallbackLabel: String) -> Int? {
+        parsePayPeriodOrder(id) ?? parsePayPeriodOrder(fallbackLabel)
+    }
+
+    private func parsePayPeriodOrder(_ raw: String) -> Int? {
+        let cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let range = cleaned.range(of: #"PP(\d{2})-(\d{2})"#, options: .regularExpression)
+        guard let range else { return nil }
+        let match = String(cleaned[range])
+        let parts = match.replacingOccurrences(of: "PP", with: "").split(separator: "-")
+        guard parts.count == 2,
+              let yy = Int(parts[0]),
+              let pp = Int(parts[1]) else {
+            return nil
+        }
+        return yy * 100 + pp
     }
 
     private func buildPseudoFriendSchedules(for employeeID: String) -> [PayPeriodSchedule] {

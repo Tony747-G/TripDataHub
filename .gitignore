@@ -1,2 +1,10 @@
 .pw-user-data/
 .DS_Store
+
+# Xcode user-specific files
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+
+# Build artifacts
+DerivedData/

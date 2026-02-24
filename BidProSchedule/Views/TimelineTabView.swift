@@ -32,6 +32,15 @@ struct TimelineTabView: View {
         return formatter
     }()
 
+    private static let utcHeaderFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd  HH:mm"
+        return formatter
+    }()
+
     private static let localDateTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -58,7 +67,6 @@ struct TimelineTabView: View {
                 timelineHeader
                 nextReportCard
                 timelineContent
-                timelineFooter
                 Color.gray.opacity(0.10)
                     .frame(height: 10)
             }
@@ -142,32 +150,34 @@ struct TimelineTabView: View {
 
     private var nextReportCard: some View {
         Group {
-            if let info = nextReportInfo {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        Text("NEXT REPORT")
-                            .appScaledFont(.caption, weight: .bold, scale: fontScale)
-                            .foregroundStyle(.secondary)
-                        Text("Trip \(info.pairing)")
-                            .appScaledFont(.caption, scale: fontScale)
-                            .foregroundStyle(.secondary)
+            TimelineView(.periodic(from: Date(), by: 60)) { _ in
+                if let info = nextReportInfo {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Text("NEXT REPORT")
+                                .appScaledFont(.caption, weight: .bold, scale: fontScale)
+                                .foregroundStyle(.secondary)
+                            Text("Trip \(info.pairing)")
+                                .appScaledFont(.caption, scale: fontScale)
+                                .foregroundStyle(.secondary)
+                        }
+                        HStack {
+                            Text(nextReportTimestampText(for: info.reportTime))
+                                .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
+                                .foregroundStyle(dateHeaderTextColor)
+                            Spacer()
+                            Text(countdownText(to: info.reportTime))
+                                .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
+                                .foregroundStyle(countdownColor(to: info.reportTime))
+                        }
                     }
-                    HStack {
-                        Text(nextReportTimestampText(for: info.reportTime))
-                            .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
-                            .foregroundStyle(dateHeaderTextColor)
-                        Spacer()
-                        Text(countdownText(to: info.reportTime))
-                            .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
-                            .foregroundStyle(countdownColor(to: info.reportTime))
-                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .background(.thinMaterial)
+                } else {
+                    EmptyView()
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 6)
-                .background(.thinMaterial)
-            } else {
-                EmptyView()
             }
         }
     }
@@ -250,12 +260,14 @@ struct TimelineTabView: View {
 
     private var timelineHeader: some View {
         HStack {
-            Text("FNN CREW SUPPORT")
-                .appScaledFont(.footnote, weight: .bold, scale: fixedSmallScale)
-                .foregroundStyle(headerGold)
-            Spacer()
             TimelineView(.periodic(from: Date(), by: 60)) { _ in
                 Text(anchorageHeaderTimeText())
+                    .appScaledFont(.caption2, scale: fixedSmallScale)
+                    .foregroundStyle(headerGold.opacity(0.9))
+            }
+            Spacer()
+            TimelineView(.periodic(from: Date(), by: 60)) { _ in
+                Text(utcHeaderTimeText())
                     .appScaledFont(.caption2, scale: fixedSmallScale)
                     .foregroundStyle(headerGold.opacity(0.9))
             }
@@ -263,15 +275,6 @@ struct TimelineTabView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(headerBrown)
-    }
-
-    private var timelineFooter: some View {
-        Text(verbatim: "Copyright ©\(currentYear) FNNDEV, LLC. All Rights Reserved.")
-            .appScaledFont(.caption2, scale: fixedSmallScale)
-            .foregroundStyle(headerGold)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.vertical, 6)
-            .background(headerBrown)
     }
 
     private var allLegs: [TripLeg] {
@@ -359,6 +362,10 @@ struct TimelineTabView: View {
         "ANC  \(Self.anchorageHeaderFormatter.string(from: Date()))"
     }
 
+    private func utcHeaderTimeText() -> String {
+        "UTC  \(Self.utcHeaderFormatter.string(from: Date()))"
+    }
+
     private func timeRangeText(for leg: TripLeg) -> String {
         let depTime = ScheduleDateText.timePart(from: leg.depLocal)
         let arrTime = ScheduleDateText.timePart(from: leg.arrLocal)
@@ -404,12 +411,21 @@ struct TimelineTabView: View {
         let remainingHours = remainingSeconds / 3600.0
 
         if remainingHours <= 12 {
+            if colorScheme == .light {
+                return Color(red: 0.68, green: 0.08, blue: 0.08)
+            }
             return .red
         }
         if remainingHours <= 24 {
+            if colorScheme == .light {
+                return Color(red: 0.72, green: 0.34, blue: 0.00)
+            }
             return .orange
         }
         if remainingHours <= 48 {
+            if colorScheme == .light {
+                return Color(red: 0.72, green: 0.52, blue: 0.00)
+            }
             return .yellow
         }
         return dateHeaderTextColor
@@ -497,10 +513,6 @@ struct TimelineTabView: View {
 
     private var fixedSmallScale: CGFloat {
         AppFontSizeOption.small.scaleFactor
-    }
-
-    private var currentYear: Int {
-        Calendar.current.component(.year, from: Date())
     }
 
     private var emptyStateTitle: String {
