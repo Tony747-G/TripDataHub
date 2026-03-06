@@ -249,6 +249,7 @@ final class AppViewModel: ObservableObject {
             self.currentCloudKitRecordName = localIdentityRecordName()
         }
         self.updateAdminStatus()
+        backfillMissingUTCInCachedSchedulesIfNeeded()
         if self.authStatus == .loggedIn, errorMessage == SyncServiceError.notAuthenticated.localizedDescription {
             errorMessage = nil
         }
@@ -1201,12 +1202,27 @@ final class AppViewModel: ObservableObject {
             guard !key.hasPrefix("|") else { continue }
             crewAccessLegImportReferenceTimes[key] = importConfirmedAt
         }
+
+        let importedPairings = Set(imported.legs.map(\.pairing))
+        updatedCrewAccess = updatedCrewAccess.compactMap { schedule in
+            let remainingLegs = schedule.legs.filter { !importedPairings.contains($0.pairing) }
+            guard !remainingLegs.isEmpty else { return nil }
+            return PayPeriodSchedule(
+                id: schedule.id,
+                label: schedule.label,
+                tripCount: Set(remainingLegs.map(\.pairing)).count,
+                legCount: remainingLegs.count,
+                openTimeCount: schedule.openTimeCount,
+                updatedAt: schedule.updatedAt,
+                legs: remainingLegs,
+                openTimeTrips: schedule.openTimeTrips
+            )
+        }
+
         let isReplacement = updatedCrewAccess.contains(where: { $0.id == imported.id })
         if let index = updatedCrewAccess.firstIndex(where: { $0.id == imported.id }) {
             let existing = updatedCrewAccess[index]
-            let importedPairings = Set(imported.legs.map(\.pairing))
-            let keptLegs = existing.legs.filter { !importedPairings.contains($0.pairing) }
-            let mergedLegs = (keptLegs + imported.legs).sorted { lhs, rhs in
+            let mergedLegs = (existing.legs + imported.legs).sorted { lhs, rhs in
                 let lhsUTC = lhs.depUTC ?? ""
                 let rhsUTC = rhs.depUTC ?? ""
                 if lhsUTC == rhsUTC {
@@ -1284,6 +1300,83 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    private func backfillMissingUTCInCachedSchedulesIfNeeded() {
+        let crewResult = backfillMissingUTC(in: crewAccessSchedules)
+        let bidproResult = backfillMissingUTC(in: bidproSchedules)
+        let changedCount = crewResult.recoveredLegs + bidproResult.recoveredLegs
+        guard changedCount > 0 else { return }
+
+        crewAccessSchedules = crewResult.schedules
+        bidproSchedules = bidproResult.schedules
+        schedules = mergeAndSortSchedules(crew: crewAccessSchedules, bidpro: bidproSchedules)
+
+        do {
+            let persistedLastSyncAt = lastSyncAt ?? Date()
+            try cacheService.save(
+                ScheduleCacheSnapshotV2(
+                    crewAccessSchedules: crewAccessSchedules,
+                    bidproSchedules: bidproSchedules,
+                    lastSyncAt: persistedLastSyncAt,
+                    migratedAt: nil
+                )
+            )
+            if lastSyncAt == nil {
+                lastSyncAt = persistedLastSyncAt
+            }
+            logNonFatal("UTC backfill recovered \(changedCount) leg(s) from cached schedules.")
+        } catch {
+            logNonFatal("Failed to persist cache after UTC backfill: \(error.localizedDescription)")
+        }
+    }
+
+    private func backfillMissingUTC(in schedules: [PayPeriodSchedule]) -> (schedules: [PayPeriodSchedule], recoveredLegs: Int) {
+        var recovered = 0
+        let out = schedules.map { schedule in
+            let isCrewAccessSchedule = schedule.id.uppercased().hasPrefix("CA")
+            let updatedLegs = schedule.legs.map { leg in
+                let depUTC = normalizedUTCValue(leg.depUTC)
+                    ?? backfilledUTCString(fromDisplay: leg.depLocal, airport: leg.depAirport, preferUTCDisplay: isCrewAccessSchedule)
+                let arrUTC = normalizedUTCValue(leg.arrUTC)
+                    ?? backfilledUTCString(fromDisplay: leg.arrLocal, airport: leg.arrAirport, preferUTCDisplay: isCrewAccessSchedule)
+                if normalizedUTCValue(leg.depUTC) == nil && depUTC != nil { recovered += 1 }
+                if normalizedUTCValue(leg.arrUTC) == nil && arrUTC != nil { recovered += 1 }
+                return TripLeg(
+                    id: leg.id,
+                    payPeriod: leg.payPeriod,
+                    pairing: leg.pairing,
+                    leg: leg.leg,
+                    flight: leg.flight,
+                    depAirport: leg.depAirport,
+                    depLocal: leg.depLocal,
+                    arrAirport: leg.arrAirport,
+                    arrLocal: leg.arrLocal,
+                    depUTC: depUTC,
+                    arrUTC: arrUTC,
+                    status: leg.status,
+                    block: leg.block
+                )
+            }
+            return PayPeriodSchedule(
+                id: schedule.id,
+                label: schedule.label,
+                tripCount: schedule.tripCount,
+                legCount: schedule.legCount,
+                openTimeCount: schedule.openTimeCount,
+                updatedAt: schedule.updatedAt,
+                legs: updatedLegs,
+                openTimeTrips: schedule.openTimeTrips
+            )
+        }
+        return (out, recovered)
+    }
+
+    private func backfilledUTCString(fromDisplay display: String, airport: String, preferUTCDisplay: Bool) -> String? {
+        if preferUTCDisplay {
+            return utcStringFromUTCDisplay(display) ?? utcStringFromLocalDisplay(display, airport: airport)
+        }
+        return utcStringFromLocalDisplay(display, airport: airport) ?? utcStringFromUTCDisplay(display)
+    }
+
     private func localDisplayFromUTCString(_ rawUTC: String?, airport: String) -> String? {
         guard let rawUTC = rawUTC?.trimmingCharacters(in: .whitespacesAndNewlines), !rawUTC.isEmpty else {
             return nil
@@ -1302,16 +1395,49 @@ final class AppViewModel: ObservableObject {
         return formatter.string(from: date)
     }
 
-    private func parseUTC(_ raw: String) -> Date? {
-        let withFraction = ISO8601DateFormatter()
-        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        withFraction.timeZone = TimeZone(secondsFromGMT: 0)
-        if let date = withFraction.date(from: raw) { return date }
+    private func utcStringFromLocalDisplay(_ localText: String, airport: String) -> String? {
+        let text = localText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        guard let tzID = tzResolver.resolve(airport), let tz = TimeZone(identifier: tzID) else {
+            return nil
+        }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = tz
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        guard let date = formatter.date(from: text) else { return nil }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        iso.timeZone = TimeZone(secondsFromGMT: 0)
+        return iso.string(from: date)
+    }
 
-        let plain = ISO8601DateFormatter()
-        plain.formatOptions = [.withInternetDateTime]
-        plain.timeZone = TimeZone(secondsFromGMT: 0)
-        return plain.date(from: raw)
+    private func utcStringFromUTCDisplay(_ utcText: String) -> String? {
+        let text = utcText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        guard let date = formatter.date(from: text) else { return nil }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        iso.timeZone = TimeZone(secondsFromGMT: 0)
+        return iso.string(from: date)
+    }
+
+    private func normalizedUTCValue(_ rawUTC: String?) -> String? {
+        guard let raw = rawUTC?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        guard parseUTC(raw) != nil else { return nil }
+        return raw
+    }
+
+    private func parseUTC(_ raw: String) -> Date? {
+        LegConnectionTextBuilder.parseUTC(raw)
     }
 
     private enum ExternalOpenError: Error {

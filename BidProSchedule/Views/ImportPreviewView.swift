@@ -27,7 +27,7 @@ struct ImportPreviewView: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("\(leg.depAirport) -> \(leg.arrAirport)")
                                         .font(.subheadline.weight(.semibold))
-                                    Text("Display: \(leg.depLocal) -> \(leg.arrLocal)")
+                                    Text("Time: \(leg.depLocal) -> \(leg.arrLocal)")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }

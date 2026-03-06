@@ -149,10 +149,11 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         return formatter
     }()
 
-    private static let localDisplayFormatter: DateFormatter = {
+    private static let utcDisplayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
         return formatter
     }()
@@ -432,21 +433,21 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
                 continue
             }
 
-            let depLocal = localDisplay(utc: depUTC, airport: row.depAirport)
-            let arrLocal = localDisplay(utc: arrUTC, airport: row.arrAirport)
+            let depUTCDisplay = utcDisplay(utc: depUTC)
+            let arrUTCDisplay = utcDisplay(utc: arrUTC)
             let normalizedInputBlock = normalizedBlockValue(row.block)
             let calculatedBlock = calculateBlock(depUTC: depUTC, arrUTC: arrUTC)
             let effectiveBlock = normalizedInputBlock ?? calculatedBlock ?? ""
 
             let leg = TripLeg(
-                payPeriod: crewAccessLabel(from: tripDate),
+                payPeriod: crewAccessLabel(from: tripDate, tripID: tripID),
                 pairing: tripID,
                 leg: row.sequence,
                 flight: row.flight,
                 depAirport: row.depAirport,
-                depLocal: depLocal,
+                depLocal: depUTCDisplay,
                 arrAirport: row.arrAirport,
-                arrLocal: arrLocal,
+                arrLocal: arrUTCDisplay,
                 depUTC: Self.isoUTCFormatter.string(from: depUTC),
                 arrUTC: Self.isoUTCFormatter.string(from: arrUTC),
                 status: row.deadhead ? "DH" : "-",
@@ -463,8 +464,8 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
                     flight: row.flight,
                     startUtc: Self.isoUTCFormatter.string(from: depUTC),
                     endUtc: Self.isoUTCFormatter.string(from: arrUTC),
-                    startLocalDisplay: depLocal,
-                    endLocalDisplay: arrLocal,
+                    startLocalDisplay: depUTCDisplay,
+                    endLocalDisplay: arrUTCDisplay,
                     originTz: depTimeZoneID,
                     destinationTz: arrTimeZoneID,
                     timeDerivation: "from_utc",
@@ -483,8 +484,8 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         }
 
         let schedule: PayPeriodSchedule? = errors.isEmpty ? PayPeriodSchedule(
-            id: crewAccessLabel(from: tripDate),
-            label: crewAccessLabel(from: tripDate),
+            id: crewAccessLabel(from: tripDate, tripID: tripID),
+            label: crewAccessLabel(from: tripDate, tripID: tripID),
             tripCount: Set(tripLegs.map(\.pairing)).count,
             legCount: tripLegs.count,
             openTimeCount: 0,
@@ -605,22 +606,20 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         return arrival
     }
 
-    private func localDisplay(utc: Date, airport: String) -> String {
-        if let tzID = tzResolver.resolve(airport),
-           let tz = TimeZone(identifier: tzID) {
-            Self.localDisplayFormatter.timeZone = tz
-            return Self.localDisplayFormatter.string(from: utc)
-        }
-        Self.localDisplayFormatter.timeZone = TimeZone(secondsFromGMT: 0)
-        return Self.localDisplayFormatter.string(from: utc)
+    private func utcDisplay(utc: Date) -> String {
+        Self.utcDisplayFormatter.string(from: utc)
     }
 
-    private func crewAccessLabel(from tripDate: Date) -> String {
+    private func crewAccessLabel(from tripDate: Date, tripID: String) -> String {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let year = calendar.component(.year, from: tripDate) % 100
         let month = calendar.component(.month, from: tripDate)
-        return String(format: "CA%02d-%02d", year, month)
+        let normalizedTripID = tripID
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .uppercased()
+        return String(format: "CA%02d-%02d-%@", year, month, normalizedTripID)
     }
 
     private func extractValue(from lines: [String], prefix: String) -> String? {
