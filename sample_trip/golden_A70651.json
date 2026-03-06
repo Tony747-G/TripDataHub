@@ -1,4 +1,5 @@
 {
+  "creditTime" : "31:20",
   "crew" : [
     {
       "crewID" : "00007793942",
@@ -12,7 +13,7 @@
     "Duty totals Time: 15:42 Block: 13:42 Rest: 59:30",
     "Duty totals Time: 8:33 Block: 0:00 Rest:"
   ],
-  "generatedAt" : "2026-02-22T23:30:07Z",
+  "generatedAt" : "2026-03-06T02:42:09Z",
   "hotelDetails" : [
     "Hotel details Status: BOOKED Hotel: Galt House 502-589-5200 Hotel Transport: Galt House 502-568-3475",
     "Hotel details Status: BOOKED Hotel: Hilton Narita UPS Only 011-81-476-331-121 Hotel Transport:"
@@ -21,7 +22,7 @@
     {
       "aircraft" : "747",
       "arrAirport" : "SDF",
-      "block" : "06:05",
+      "block" : "6:05",
       "deadhead" : false,
       "depAirport" : "ANC",
       "destinationTz" : "America\/Kentucky\/Louisville",
@@ -53,7 +54,7 @@
     {
       "aircraft" : "747",
       "arrAirport" : "ANC",
-      "block" : "-",
+      "block" : "6:33",
       "deadhead" : true,
       "depAirport" : "NRT",
       "destinationTz" : "America\/Anchorage",
@@ -67,10 +68,12 @@
       "timeDerivation" : "from_utc"
     }
   ],
-  "mappingVersion" : "iata-tz-2026-02-22+u0",
+  "mappingVersion" : "iata-tz-2026-02-24+u0",
   "schemaVersion" : 1,
   "source" : "crewaccess-pdf",
   "sourceVersion" : "crewaccess-parser-1.0",
+  "tafb" : "117:30",
+  "tripDays" : "6",
   "tripId" : "A70651",
   "tripInformationDate" : "25Feb2026"
 }

@@ -81,6 +81,9 @@ struct CrewAccessTripJSON: Codable {
     let generatedAt: String
     let tripId: String
     let tripInformationDate: String
+    let creditTime: String?
+    let tripDays: String?
+    let tafb: String?
     let dutyTotals: [String]
     let hotelDetails: [String]
     let crew: [CrewAccessCrewJSON]
@@ -324,6 +327,7 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         }
 
         let legPattern = #"^(\d+)\s*([A-Za-z]{2})\s*(?:(DH)\s+)?([A-Za-z0-9]+)\s+([A-Z]{3})\s*[-–—]\s*([A-Z]{3})\s+(\d{2}:\d{2})\s+(\d{2}:\d{2})\s+(\d{2}:\d{2})\s+(\d{2}:\d{2})\s+([0-9:.-]+|-)\s+([A-Za-z0-9-]+).*$"#
+        let tripSummary = extractTripSummary(from: lines)
         var legRows: [ParsedLegRow] = []
         var dutyTotals: [String] = []
         var hotelDetails: [String] = []
@@ -502,6 +506,9 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
             generatedAt: Self.isoUTCFormatter.string(from: Date()),
             tripId: tripID,
             tripInformationDate: effectiveTripDateText,
+            creditTime: tripSummary.creditTime,
+            tripDays: tripSummary.tripDays,
+            tafb: tripSummary.tafb,
             dutyTotals: dutyTotals,
             hotelDetails: hotelDetails,
             crew: crewRows,
@@ -752,5 +759,28 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         let nsText = text as NSString
         let range = NSRange(location: 0, length: nsText.length)
         return regex.numberOfMatches(in: text, options: [], range: range)
+    }
+
+    private struct TripSummaryFields {
+        let creditTime: String?
+        let tripDays: String?
+        let tafb: String?
+    }
+
+    private func extractTripSummary(from lines: [String]) -> TripSummaryFields {
+        let joined = lines.joined(separator: " ")
+        return TripSummaryFields(
+            creditTime: firstRegexCapture(in: joined, pattern: #"\bCredit\s*Time\s*:\s*([0-9]{1,3}:[0-5][0-9])\b"#),
+            tripDays: firstRegexCapture(in: joined, pattern: #"\bTrip\s*Days\s*:\s*([0-9]{1,2})\b"#),
+            tafb: firstRegexCapture(in: joined, pattern: #"\bTAFB\s*:\s*([0-9]{1,3}:[0-5][0-9])\b"#)
+        )
+    }
+
+    private func firstRegexCapture(in text: String, pattern: String) -> String? {
+        guard let groups = firstMatchGroups(in: text, pattern: pattern), groups.count > 1 else {
+            return nil
+        }
+        let value = groups[1].trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
     }
 }

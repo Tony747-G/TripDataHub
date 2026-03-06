@@ -11,6 +11,7 @@ struct TimelineTabView: View {
         ?? TimeZone(secondsFromGMT: NextReportWindowBuilder.anchorageFallbackOffsetSeconds)!
     @State private var didAutoScroll = false
     @State private var legData = TimelineLegData(schedules: [])
+    @State private var tripDataByTripID: [String: TripDataCardInfo] = [:]
 
     private static let nextReportTimestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -73,6 +74,7 @@ struct TimelineTabView: View {
             .onAppear {
                 viewModel.lastImportSummaryMessage = nil
                 refreshLegData()
+                refreshTripDataCards()
             }
         }
     }
@@ -82,6 +84,7 @@ struct TimelineTabView: View {
         ScrollViewReader { proxy in
             let connectionMap = legData.nextLegByID
             let tripBoundaryAfterLegs = tripBoundaryAfterLegIDs
+            let tripStartLegAfterBoundary = tripStartLegByBoundaryLegID
             ScrollView {
                 if daySections.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
@@ -117,12 +120,16 @@ struct TimelineTabView: View {
                                 timelineRow(leg: leg, nextLegByID: connectionMap)
                                     .id(leg.id)
                                 if tripBoundaryAfterLegs.contains(leg.id) {
-                                    Rectangle()
-                                        .fill(isPastLeg(leg) ? Color.gray : dateHeaderTextColor)
-                                        .frame(height: 4)
-                                        .padding(.horizontal, 0)
-                                        .padding(.top, 0)
-                                        .padding(.bottom, 0)
+                                    if let nextTripStartLeg = tripStartLegAfterBoundary[leg.id] {
+                                        tripDataCard(
+                                            forTripID: nextTripStartLeg.pairing,
+                                            isPast: isPastTrip(nextTripStartLeg.pairing)
+                                        )
+                                    } else {
+                                        Rectangle()
+                                            .fill(isPastLeg(leg) ? Color.gray : dateHeaderTextColor)
+                                            .frame(height: 4)
+                                    }
                                 } else {
                                     Divider()
                                 }
@@ -133,15 +140,18 @@ struct TimelineTabView: View {
             }
             .onAppear {
                 refreshLegData()
+                refreshTripDataCards()
                 autoScrollToNextFlight(using: proxy)
             }
             .onChange(of: viewModel.schedules) { _, _ in
                 refreshLegData()
+                refreshTripDataCards()
                 didAutoScroll = false
                 autoScrollToNextFlight(using: proxy)
             }
             .onChange(of: timelineSourceFilterRawValue) { _, _ in
                 refreshLegData()
+                refreshTripDataCards()
                 didAutoScroll = false
                 autoScrollToNextFlight(using: proxy)
             }
@@ -354,6 +364,15 @@ struct TimelineTabView: View {
         }
     }
 
+    private func refreshTripDataCards() {
+        Task.detached(priority: .utility) {
+            let map = Self.loadTripDataCardMapFromCrewAccessImports()
+            await MainActor.run {
+                tripDataByTripID = map
+            }
+        }
+    }
+
     private func nextReportTimestampText(for reportTime: Date) -> String {
         "\(Self.nextReportTimestampFormatter.string(from: reportTime)) ANC"
     }
@@ -448,9 +467,19 @@ struct TimelineTabView: View {
     }
 
     private func isPastLeg(_ leg: TripLeg) -> Bool {
-        let reference = parseLocalDateTime(leg.arrLocal) ?? parseLocalDateTime(leg.depLocal)
+        let reference = LegConnectionTextBuilder.parseUTC(leg.depUTC) ?? parseLocalDateTime(leg.depLocal)
         guard let reference else { return false }
         return reference < Date()
+    }
+
+    private func isPastTrip(_ tripID: String) -> Bool {
+        let tripLegs = allLegs.filter { $0.pairing == tripID }
+        guard !tripLegs.isEmpty else { return false }
+        let endTimes: [Date] = tripLegs.compactMap { leg in
+            LegConnectionTextBuilder.parseUTC(leg.arrUTC) ?? parseLocalDateTime(leg.arrLocal)
+        }
+        guard let tripEnd = endTimes.max() else { return false }
+        return tripEnd < Date()
     }
 
     private func parseLocalDateTime(_ text: String) -> Date? {
@@ -474,6 +503,13 @@ struct TimelineTabView: View {
 
     private var dateCardBackground: Color {
         ScheduleColors.dayHeaderBackground(for: colorScheme)
+    }
+
+    private var tripCardBackground: Color {
+        if colorScheme == .light {
+            return Color(red: 0.82, green: 0.82, blue: 0.84)
+        }
+        return Color(red: 0.16, green: 0.16, blue: 0.18)
     }
 
     private var dateHeaderTextColor: Color {
@@ -504,6 +540,139 @@ struct TimelineTabView: View {
             }
         }
         return ids
+    }
+
+    private var tripStartLegByBoundaryLegID: [UUID: TripLeg] {
+        let legs = allLegs
+        guard legs.count > 1 else { return [:] }
+        var map: [UUID: TripLeg] = [:]
+        for index in 1..<legs.count {
+            let previous = legs[index - 1]
+            let next = legs[index]
+            if isTripBoundary(current: previous, next: next) {
+                map[previous.id] = next
+            }
+        }
+        return map
+    }
+
+    @ViewBuilder
+    private func tripDataCard(forTripID tripID: String, isPast: Bool) -> some View {
+        let summary = tripDataByTripID[tripID]
+        let creditText = formattedDurationLabel(summary?.creditTime ?? fallbackCreditHHMM(forTripID: tripID)) ?? "--"
+        let tripCardTextColor: Color = isPast ? .gray : dateHeaderTextColor
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                Text("Trip Id: \(tripID)")
+                    .appScaledFont(.caption, weight: .bold, scale: fontScale)
+                    .foregroundStyle(tripCardTextColor)
+                Spacer()
+                Text("Credit: \(creditText)")
+                    .appScaledFont(.caption, weight: .bold, scale: fontScale)
+                    .foregroundStyle(tripCardTextColor)
+            }
+            if let tripDays = summary?.tripDays, !tripDays.isEmpty {
+                Text("Trip Days: \(tripDays)")
+                    .appScaledFont(.caption, scale: fontScale)
+                    .foregroundStyle(tripCardTextColor)
+            }
+            if let tafb = summary?.tafb, !tafb.isEmpty {
+                Text("TAFB: \(tafb)")
+                    .appScaledFont(.caption, scale: fontScale)
+                    .foregroundStyle(tripCardTextColor)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+        .background(tripCardBackground)
+    }
+
+    private func fallbackCreditHHMM(forTripID tripID: String) -> String? {
+        let tripLegs = allLegs.filter { $0.pairing == tripID }
+        guard !tripLegs.isEmpty else { return nil }
+        let totalMinutes = tripLegs.reduce(0) { partial, leg in
+            partial + parseDurationMinutes(leg.block)
+        }
+        guard totalMinutes > 0 else { return nil }
+        return "\(totalMinutes / 60):\(String(format: "%02d", totalMinutes % 60))"
+    }
+
+    private func parseDurationMinutes(_ text: String) -> Int {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parts = trimmed.split(separator: ":")
+        guard parts.count == 2,
+              let hh = Int(parts[0]),
+              let mm = Int(parts[1]),
+              hh >= 0,
+              (0...59).contains(mm)
+        else {
+            return 0
+        }
+        return hh * 60 + mm
+    }
+
+    private func formattedDurationLabel(_ hhmm: String?) -> String? {
+        guard let hhmm = hhmm else { return nil }
+        let parts = hhmm.split(separator: ":")
+        guard parts.count == 2,
+              let hh = Int(parts[0]),
+              let mm = Int(parts[1]),
+              hh >= 0,
+              (0...59).contains(mm)
+        else {
+            return nil
+        }
+        return "\(hh)h\(String(format: "%02d", mm))m"
+    }
+
+    private nonisolated static func loadTripDataCardMapFromCrewAccessImports() -> [String: TripDataCardInfo] {
+        let fm = FileManager.default
+        guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return [:]
+        }
+        let dir = documents.appendingPathComponent("CrewAccessImports", isDirectory: true)
+        guard fm.fileExists(atPath: dir.path) else { return [:] }
+
+        let urls: [URL]
+        do {
+            urls = try fm.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )
+        } catch {
+            return [:]
+        }
+
+        var latestByTripID: [String: (date: Date, info: TripDataCardInfo)] = [:]
+        for url in urls {
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey]),
+                  values.isRegularFile == true,
+                  url.pathExtension.lowercased() == "json"
+            else {
+                continue
+            }
+            guard let data = try? Data(contentsOf: url),
+                  let decoded = try? JSONDecoder().decode(CrewAccessTripSummaryCardJSON.self, from: data)
+            else {
+                continue
+            }
+            let tripID = decoded.tripId.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !tripID.isEmpty else { continue }
+            let modifiedAt = values.contentModificationDate ?? .distantPast
+            let info = TripDataCardInfo(
+                creditTime: decoded.creditTime,
+                tripDays: decoded.tripDays,
+                tafb: decoded.tafb
+            )
+            let current = latestByTripID[tripID]
+            if current == nil || modifiedAt > current!.date {
+                latestByTripID[tripID] = (modifiedAt, info)
+            }
+        }
+
+        return latestByTripID.mapValues { $0.info }
     }
 
     private var fontScale: CGFloat {
@@ -546,4 +715,17 @@ struct TimelineTabView: View {
 private struct NextReportInfo {
     let pairing: String
     let reportTime: Date
+}
+
+private struct TripDataCardInfo {
+    let creditTime: String?
+    let tripDays: String?
+    let tafb: String?
+}
+
+private struct CrewAccessTripSummaryCardJSON: Decodable {
+    let tripId: String
+    let creditTime: String?
+    let tripDays: String?
+    let tafb: String?
 }

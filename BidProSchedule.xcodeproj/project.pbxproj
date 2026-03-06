@@ -31,7 +31,7 @@
 		8781C21B7C34E73DE25A0783 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 83DE19BB2E9E95923D2242A1 /* Assets.xcassets */; };
 		8FFC91578BC6DB3DD760AF0F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 743835B120F8BD8DC12FE36A /* LaunchScreen.storyboard */; };
 		A1B2C3D4E5F60718293A4B01 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4C02 /* ShareViewController.swift */; };
-		A1B2C3D4E5F60718293A4B03 /* TripDataShareActionExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4C01 /* TripDataShareActionExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A1B2C3D4E5F60718293A4B03 /* TripDataShareActionExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4C01 /* TripDataShareActionExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A93467BB7907E6C5A49B2EEA /* TripBoardLoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4E194070DA6F5FDDC833C89 /* TripBoardLoginView.swift */; };
 		ABF2C241CE2E761EA48A8F04 /* CrewAccessImportHelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE58A211FF18337118350306 /* CrewAccessImportHelpView.swift */; };
 		B397B9839E2DB5AEC9DBD8EC /* TripModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E6143D420C35613D374EA9B /* TripModels.swift */; };
@@ -46,15 +46,15 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		A1B2C3D4E5F60718293A4E03 /* Embed App Extensions */ = {
+		A1B2C3D4E5F60718293A4E03 /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				A1B2C3D4E5F60718293A4B03 /* TripDataShareActionExtension.appex in Embed App Extensions */,
+				A1B2C3D4E5F60718293A4B03 /* TripDataShareActionExtension.appex in Embed Foundation Extensions */,
 			);
-			name = "Embed App Extensions";
+			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
@@ -72,7 +72,7 @@
 		75ADA7E8A79CDE06F28D94FE /* TripBoardSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripBoardSyncService.swift; sourceTree = "<group>"; };
 		7700CE6B572012BE6B4C19C3 /* OpenTimeTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenTimeTabView.swift; sourceTree = "<group>"; };
 		7A86A468763C0E52C694B3DC /* TimelineSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineSupport.swift; sourceTree = "<group>"; };
-		7F5ADEBC4334E147DB50445C /* BidProSchedule.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BidProSchedule.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7F5ADEBC4334E147DB50445C /* TripData Hub.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "TripData Hub.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		804795848853A2ACF469B596 /* ScheduleCacheService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleCacheService.swift; sourceTree = "<group>"; };
 		83DE19BB2E9E95923D2242A1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		9845EBACBF29A9FF33272AEA /* TripBoardAuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripBoardAuthService.swift; sourceTree = "<group>"; };
@@ -133,7 +133,7 @@
 		91247D7998095C9C27F06C8F /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				7F5ADEBC4334E147DB50445C /* BidProSchedule.app */,
+				7F5ADEBC4334E147DB50445C /* TripData Hub.app */,
 				A1B2C3D4E5F60718293A4C01 /* TripDataShareActionExtension.appex */,
 			);
 			name = Products;
@@ -230,7 +230,7 @@
 			buildPhases = (
 				BB934825CF80570B0FFBF700 /* Sources */,
 				A36917800C0211806212C354 /* Resources */,
-				A1B2C3D4E5F60718293A4E03 /* Embed App Extensions */,
+				A1B2C3D4E5F60718293A4E03 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
@@ -239,8 +239,8 @@
 			name = BidProSchedule;
 			packageProductDependencies = (
 			);
-			productName = BidProSchedule;
-			productReference = 7F5ADEBC4334E147DB50445C /* BidProSchedule.app */;
+			productName = "TripData Hub";
+			productReference = 7F5ADEBC4334E147DB50445C /* TripData Hub.app */;
 			productType = "com.apple.product-type.application";
 		};
 		A1B2C3D4E5F60718293A4F01 /* TripDataShareActionExtension */ = {
@@ -268,7 +268,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 2620;
+				LastUpgradeCheck = 2630;
 				TargetAttributes = {
 					4E9899AC7BEC5C801C31233E = {
 						ProvisioningStyle = Automatic;
@@ -375,12 +375,12 @@
 				CODE_SIGN_ENTITLEMENTS = BidProSchedule/BidProSchedule.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 54WZM2U9MK;
+				CURRENT_PROJECT_VERSION = 7;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BidProSchedule/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "TripData Hub";
 				INFOPLIST_KEY_CFBundleIconName = AppIcon;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_UIAppFonts = "MaterialIcons.ttf Resources/Fonts/MaterialIcons.ttf";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
@@ -395,7 +395,7 @@
 				);
 				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule;
-				PRODUCT_NAME = BidProSchedule;
+				PRODUCT_NAME = "TripData Hub";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -436,6 +436,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -465,8 +466,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = TripDataShareActionExtension/TripDataShareActionExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 54WZM2U9MK;
+				CURRENT_PROJECT_VERSION = 7;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TripDataShareActionExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -492,8 +492,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = TripDataShareActionExtension/TripDataShareActionExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 54WZM2U9MK;
+				CURRENT_PROJECT_VERSION = 7;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TripDataShareActionExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -548,6 +547,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -586,12 +586,12 @@
 				CODE_SIGN_ENTITLEMENTS = BidProSchedule/BidProSchedule.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 54WZM2U9MK;
+				CURRENT_PROJECT_VERSION = 7;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BidProSchedule/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "TripData Hub";
 				INFOPLIST_KEY_CFBundleIconName = AppIcon;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_UIAppFonts = "MaterialIcons.ttf Resources/Fonts/MaterialIcons.ttf";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
@@ -606,7 +606,7 @@
 				);
 				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule;
-				PRODUCT_NAME = BidProSchedule;
+				PRODUCT_NAME = "TripData Hub";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};

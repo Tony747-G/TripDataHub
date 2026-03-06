@@ -56,11 +56,14 @@ final class NextReportNotificationService: NextReportNotificationServiceProtocol
         notify12h: Bool
     ) async -> NotificationRescheduleResult {
         let enabledThresholds = enabledOffsets(notify48h: notify48h, notify24h: notify24h, notify12h: notify12h)
-        let existingIDs = await pendingRequestIDsWithPrefix()
+        let pendingIDs = await pendingRequestIDsWithPrefix()
+        let deliveredIDs = await deliveredRequestIDsWithPrefix()
 
-        if !existingIDs.isEmpty {
-            center.removePendingNotificationRequests(withIdentifiers: existingIDs)
-            center.removeDeliveredNotifications(withIdentifiers: existingIDs)
+        if !pendingIDs.isEmpty {
+            center.removePendingNotificationRequests(withIdentifiers: pendingIDs)
+        }
+        if !deliveredIDs.isEmpty {
+            center.removeDeliveredNotifications(withIdentifiers: deliveredIDs)
         }
 
         guard !enabledThresholds.isEmpty else {
@@ -72,11 +75,15 @@ final class NextReportNotificationService: NextReportNotificationServiceProtocol
         var requested = 0
         var scheduled = 0
         var failed = 0
+        var seenDedupKeys = Set<String>()
 
         for window in windows {
             for (label, secondsBeforeReport) in enabledThresholds {
                 let fireDate = window.reportTime.addingTimeInterval(-secondsBeforeReport)
                 guard fireDate > now else { continue }
+
+                let dedupKey = "\(window.pairing)|\(Int(window.reportTime.timeIntervalSince1970))|\(label)"
+                guard seenDedupKeys.insert(dedupKey).inserted else { continue }
                 requested += 1
 
                 let content = UNMutableNotificationContent()
@@ -91,7 +98,7 @@ final class NextReportNotificationService: NextReportNotificationServiceProtocol
                 )
 
                 let trigger = UNCalendarNotificationTrigger(dateMatching: triggerDate, repeats: false)
-                let identifier = "\(requestPrefix)\(window.key).\(label)"
+                let identifier = "\(requestPrefix)\(window.pairing).\(Int(window.reportTime.timeIntervalSince1970)).\(label)"
                 let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
                 do {
                     try await center.add(request)
@@ -119,6 +126,18 @@ final class NextReportNotificationService: NextReportNotificationServiceProtocol
             center.getPendingNotificationRequests { requests in
                 let ids = requests
                     .map(\.identifier)
+                    .filter { $0.hasPrefix(prefix) }
+                continuation.resume(returning: ids)
+            }
+        }
+    }
+
+    private func deliveredRequestIDsWithPrefix() async -> [String] {
+        let prefix = requestPrefix
+        return await withCheckedContinuation { continuation in
+            center.getDeliveredNotifications { notifications in
+                let ids = notifications
+                    .map { $0.request.identifier }
                     .filter { $0.hasPrefix(prefix) }
                 continuation.resume(returning: ids)
             }
