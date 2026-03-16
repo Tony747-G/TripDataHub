@@ -272,30 +272,60 @@ struct TimelineTabView: View {
         HStack(spacing: 0) {
             Text("LCL")
                 .appScaledFont(.caption2, weight: .semibold, scale: fixedSmallScale)
-                .foregroundStyle(selectedClockDisplay == .lcl ? Color.black : dateHeaderTextColor)
+                .foregroundStyle(selectedClockDisplay == .lcl ? clockPickerSelectedTextColor : clockPickerUnselectedTextColor)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
-                .background(selectedClockDisplay == .lcl ? dateHeaderTextColor : .clear)
+                .background(selectedClockDisplay == .lcl ? clockPickerSelectedBackground : .clear)
                 .clipShape(Capsule())
                 .onTapGesture { timelineClockDisplayRawValue = TimelineClockDisplay.lcl.rawValue }
-            Text("/")
+            Text(" ")
                 .appScaledFont(.caption2, weight: .semibold, scale: fixedSmallScale)
-                .foregroundStyle(dateHeaderTextColor)
-                .padding(.horizontal, 2)
+                .foregroundStyle(clockPickerUnselectedTextColor)
+                .padding(.horizontal, 0)
             Text("UTC")
                 .appScaledFont(.caption2, weight: .semibold, scale: fixedSmallScale)
-                .foregroundStyle(selectedClockDisplay == .utc ? Color.black : dateHeaderTextColor)
+                .foregroundStyle(selectedClockDisplay == .utc ? clockPickerSelectedTextColor : clockPickerUnselectedTextColor)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
-                .background(selectedClockDisplay == .utc ? dateHeaderTextColor : .clear)
+                .background(selectedClockDisplay == .utc ? clockPickerSelectedBackground : .clear)
                 .clipShape(Capsule())
                 .onTapGesture { timelineClockDisplayRawValue = TimelineClockDisplay.utc.rawValue }
         }
+        .padding(.horizontal, 2)
+        .padding(.vertical, 2)
+        .background(clockPickerContainerBackground)
         .overlay(
             RoundedRectangle(cornerRadius: 999)
-                .stroke(dateHeaderTextColor.opacity(0.8), lineWidth: 1)
+                .stroke(clockPickerBorderColor, lineWidth: 1)
         )
         .clipShape(Capsule())
+    }
+
+    private var clockPickerSelectedBackground: Color {
+        if colorScheme == .dark {
+            return clockPickerBrightAccent
+        }
+        return Color(red: 0.36, green: 0.24, blue: 0.12)
+    }
+
+    private var clockPickerSelectedTextColor: Color {
+        colorScheme == .dark ? .black : .white
+    }
+
+    private var clockPickerUnselectedTextColor: Color {
+        colorScheme == .dark ? clockPickerBrightAccent : .primary
+    }
+
+    private var clockPickerContainerBackground: Color {
+        colorScheme == .dark ? clockPickerBrightAccent.opacity(0.24) : Color.black.opacity(0.06)
+    }
+
+    private var clockPickerBorderColor: Color {
+        colorScheme == .dark ? clockPickerBrightAccent.opacity(0.72) : Color.black.opacity(0.28)
+    }
+
+    private var clockPickerBrightAccent: Color {
+        Color(red: 0.90, green: 0.76, blue: 0.60)
     }
 
     @ViewBuilder
@@ -535,7 +565,10 @@ struct TimelineTabView: View {
     }
 
     private func isPastLeg(_ leg: TripLeg) -> Bool {
-        let reference = utcDepartureDate(for: leg) ?? parseLocalDateTime(leg.depLocal)
+        let reference = utcArrivalDate(for: leg)
+            ?? parseLocalDateTime(leg.arrLocal)
+            ?? utcDepartureDate(for: leg)
+            ?? parseLocalDateTime(leg.depLocal)
         guard let reference else { return false }
         return reference < Date()
     }
@@ -581,25 +614,14 @@ struct TimelineTabView: View {
             grouped[key]?.append(leg)
         }
 
-        let calendar = Calendar(identifier: .gregorian)
-        let now = Date()
-        let dayStart: Date
-        if selectedClockDisplay == .utc {
-            var utcCalendar = calendar
-            utcCalendar.timeZone = TimeZone(secondsFromGMT: 0)!
-            dayStart = utcCalendar.startOfDay(for: now)
-        } else {
-            dayStart = calendar.startOfDay(for: now)
-        }
-
         return order.map { key in
-            let dayDate = dayDate(from: key)
-            let isPast = (dayDate?.compare(dayStart) == .orderedAscending)
+            let sectionLegs = grouped[key] ?? []
+            let isPast = !sectionLegs.isEmpty && sectionLegs.allSatisfy { isPastLeg($0) }
             return TimelineDaySection(
                 id: key,
                 label: dayHeaderLabel(from: key),
                 isPast: isPast,
-                legs: grouped[key] ?? []
+                legs: sectionLegs
             )
         }
     }
@@ -728,20 +750,10 @@ struct TimelineTabView: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 8) {
                 Text("Trip Id: \(tripID)")
-                    .appScaledFont(.caption, weight: .bold, scale: fontScale)
+                    .appScaledFont(.caption, scale: fontScale)
                     .foregroundStyle(tripCardTextColor)
                 Spacer()
                 Text("Credit: \(creditText)")
-                    .appScaledFont(.caption, weight: .bold, scale: fontScale)
-                    .foregroundStyle(tripCardTextColor)
-            }
-            if let tripDays = summary?.tripDays, !tripDays.isEmpty {
-                Text("Trip Days: \(tripDays)")
-                    .appScaledFont(.caption, scale: fontScale)
-                    .foregroundStyle(tripCardTextColor)
-            }
-            if let tafb = summary?.tafb, !tafb.isEmpty {
-                Text("TAFB: \(tafb)")
                     .appScaledFont(.caption, scale: fontScale)
                     .foregroundStyle(tripCardTextColor)
             }

@@ -12,13 +12,8 @@ struct ImportPreviewView: View {
             if let pending = viewModel.pendingImport {
                 List {
                     Section("Import Summary") {
-                        Text("Source: \(pending.source.rawValue)")
-                        Text("File: \(pending.sourceFileName ?? "N/A")")
                         Text("Trip Id: \(pending.tripId)")
-                        Text("Trip Date: \(pending.tripDate)")
                         Text("Legs count: \(pending.parsedSchedule?.legs.count ?? 0)")
-                        Text("Extract: \(pending.rawExtractStats.characterCount) chars, \(pending.rawExtractStats.lineCount) lines, \(pending.rawExtractStats.pageCount) pages")
-                        Text("Created: \(pending.createdAt.formatted(date: .abbreviated, time: .shortened))")
                     }
 
                     Section("Legs") {
@@ -46,6 +41,9 @@ struct ImportPreviewView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("tripId: \(pending.tripId)")
                                 Text("tripDate: \(pending.tripDate)")
+                                Text("tripDays: \(pending.jsonPayload?.tripDays ?? "N/A")")
+                                Text("credit: \(pending.jsonPayload?.creditTime ?? "N/A")")
+                                Text("tafb: \(pending.jsonPayload?.tafb ?? "N/A")")
                                 Text("characterCount: \(pending.rawExtractStats.characterCount)")
                                 Text("lineCount: \(pending.rawExtractStats.lineCount)")
                                 Text("pageCount: \(pending.rawExtractStats.pageCount)")
@@ -126,7 +124,7 @@ struct ImportPreviewView: View {
                 ContentUnavailableView(
                     "No Pending Import",
                     systemImage: "doc.text.magnifyingglass",
-                    description: Text("Start import from Settings -> Advanced / Experimental.")
+                    description: Text("Start a CrewAccess import from the share sheet.")
                 )
             }
         }

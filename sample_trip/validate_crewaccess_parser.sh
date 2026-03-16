@@ -53,9 +53,9 @@ SWIFT
 xcrun swiftc \
   -o "$TMP_BIN" \
   "$TMP_SWIFT" \
-  "$ROOT/BidProSchedule/Services/CrewAccessPDFImportService.swift" \
-  "$ROOT/BidProSchedule/Services/IATATimeZoneResolver.swift" \
-  "$ROOT/BidProSchedule/Models/TripModels.swift"
+  "$ROOT/TripDataHub/Services/CrewAccessPDFImportService.swift" \
+  "$ROOT/TripDataHub/Services/IATATimeZoneResolver.swift" \
+  "$ROOT/TripDataHub/Models/TripModels.swift"
 
 for case_entry in "${CASES[@]}"; do
   pdf_rel="${case_entry%%|*}"

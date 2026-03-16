@@ -135,14 +135,14 @@ SWIFT
 xcrun swiftc \
   -o "$TMP_BIN" \
   "$TMP_SWIFT" \
-  "$ROOT/BidProSchedule/Models/TripModels.swift" \
-  "$ROOT/BidProSchedule/Services/CrewAccessPDFImportService.swift" \
-  "$ROOT/BidProSchedule/Services/ScheduleCacheService.swift" \
-  "$ROOT/BidProSchedule/Services/TripBoardSyncService.swift" \
-  "$ROOT/BidProSchedule/Services/TripBoardAuthService.swift" \
-  "$ROOT/BidProSchedule/Services/KeychainService.swift" \
-  "$ROOT/BidProSchedule/Services/NextReportNotificationService.swift" \
-  "$ROOT/BidProSchedule/Services/NextReportWindowBuilder.swift" \
-  "$ROOT/BidProSchedule/ViewModels/AppViewModel.swift"
+  "$ROOT/TripDataHub/Models/TripModels.swift" \
+  "$ROOT/TripDataHub/Services/CrewAccessPDFImportService.swift" \
+  "$ROOT/TripDataHub/Services/ScheduleCacheService.swift" \
+  "$ROOT/TripDataHub/Services/TripBoardSyncService.swift" \
+  "$ROOT/TripDataHub/Services/TripBoardAuthService.swift" \
+  "$ROOT/TripDataHub/Services/KeychainService.swift" \
+  "$ROOT/TripDataHub/Services/NextReportNotificationService.swift" \
+  "$ROOT/TripDataHub/Services/NextReportWindowBuilder.swift" \
+  "$ROOT/TripDataHub/ViewModels/AppViewModel.swift"
 
 "$TMP_BIN" "$ROOT"

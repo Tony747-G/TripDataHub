@@ -60,6 +60,7 @@ struct RootTabView: View {
         .onAppear {
             migrateFontSizeDefaultIfNeeded()
             viewModel.consumePendingAppGroupImportIfAvailable()
+            viewModel.refreshFlightCountdownPresentation()
             Task {
                 await viewModel.autoFetchOnAppActiveIfEnabled(autoFetchOnOpen)
             }
@@ -67,10 +68,17 @@ struct RootTabView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 viewModel.consumePendingAppGroupImportIfAvailable()
+                viewModel.refreshFlightCountdownPresentation()
                 Task {
                     await viewModel.autoFetchOnAppActiveIfEnabled(autoFetchOnOpen)
                 }
             }
+        }
+        .onChange(of: viewModel.schedules) { _, _ in
+            viewModel.refreshFlightCountdownPresentation()
+        }
+        .onChange(of: viewModel.crewAccessSchedules) { _, _ in
+            viewModel.refreshFlightCountdownPresentation()
         }
         .onChange(of: viewModel.pendingImport?.id) { _, newValue in
             if newValue != nil {

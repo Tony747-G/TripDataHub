@@ -14,12 +14,6 @@ struct CrewAccessImportHelpView: View {
                 Text("8. In the Share Sheet, tap TripData Hub (it may be under More).")
                 Text("9. In TripData Hub, tap Confirm Import.")
             }
-
-            Section("If Import Fails:") {
-                Text("1. Save the trip PDF to your device.")
-                Text("2. In TripData Hub, tap Import CrewAccess PDF manually.")
-                Text("3. Select the saved PDF and tap Confirm Import.")
-            }
         }
         .navigationTitle("CrewAccess Import Help")
 #if os(iOS)

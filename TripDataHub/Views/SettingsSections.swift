@@ -43,19 +43,6 @@ struct SettingsTripBoardFetchSection: View {
         Section {
             Toggle("Auto Fetch on App Open", isOn: $autoFetchOnOpen)
 
-            Button {
-                Task { await viewModel.syncTapped() }
-            } label: {
-                HStack {
-                    Text("Fetch Latest")
-                    Spacer()
-                    if viewModel.isSyncing {
-                        ProgressView()
-                    }
-                }
-            }
-            .disabled(viewModel.isSyncing)
-
             if viewModel.isTripBoardServerDown {
                 Text("Auth: TripBoard Server is down")
                     .font(.footnote)
@@ -65,56 +52,8 @@ struct SettingsTripBoardFetchSection: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-
-            if viewModel.isTripBoardServerDown, viewModel.didLastFetchFail {
-                Text("Last Fetch: Failed")
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-            } else if let lastSyncAt = viewModel.lastSyncAt {
-                Text("Last Fetch: \(lastSyncAt.formatted(date: .abbreviated, time: .shortened))")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let errorMessage = viewModel.visibleErrorMessage {
-                Text(errorMessage)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-            }
         } header: {
             sectionHeader("TripBoard Fetch")
-        }
-    }
-}
-
-struct SettingsExperimentalImportSection: View {
-    @EnvironmentObject private var viewModel: AppViewModel
-    let onTapImportCrewAccessPDF: () -> Void
-
-    var body: some View {
-        Section {
-            Text("CrewAccess PDF import is experimental and may fail when CrewAccess layout changes.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-
-            Button("Import CrewAccess PDF manually") {
-                onTapImportCrewAccessPDF()
-            }
-
-            if let pending = viewModel.pendingImport {
-                Text("Preview ready: \(pending.tripId) (\(pending.rawExtractStats.characterCount) chars)")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let crewAccessImportMessage = viewModel.crewAccessImportMessage {
-                Text(crewAccessImportMessage)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
-        } header: {
-            sectionHeader("Advanced / Experimental")
         }
     }
 }
@@ -244,14 +183,34 @@ private struct CrewAccessImportRow: View {
 struct SettingsPayPeriodsSection: View {
     @EnvironmentObject private var viewModel: AppViewModel
 
+    private var sortedBidproSchedules: [PayPeriodSchedule] {
+        viewModel.bidproSchedules.sorted { lhs, rhs in
+            let lhsOrder = payPeriodOrder(for: lhs)
+            let rhsOrder = payPeriodOrder(for: rhs)
+            switch (lhsOrder, rhsOrder) {
+            case let (lhsOrder?, rhsOrder?):
+                if lhsOrder == rhsOrder {
+                    return lhs.label < rhs.label
+                }
+                return lhsOrder < rhsOrder
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            case (nil, nil):
+                return lhs.label < rhs.label
+            }
+        }
+    }
+
     var body: some View {
         Section {
             if viewModel.bidproSchedules.isEmpty {
-                Text("No fetched data yet. Tap Fetch Latest.")
+                Text("No fetched data yet.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(viewModel.bidproSchedules) { schedule in
+                ForEach(sortedBidproSchedules) { schedule in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(schedule.label)
                             .font(.headline)
@@ -264,6 +223,24 @@ struct SettingsPayPeriodsSection: View {
         } header: {
             sectionHeader("Pay Periods")
         }
+    }
+
+    private func payPeriodOrder(for schedule: PayPeriodSchedule) -> Int? {
+        parsePayPeriodOrder(schedule.id) ?? parsePayPeriodOrder(schedule.label)
+    }
+
+    private func parsePayPeriodOrder(_ raw: String) -> Int? {
+        let cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let range = cleaned.range(of: #"PP(\d{2})-(\d{2})"#, options: .regularExpression)
+        guard let range else { return nil }
+        let match = String(cleaned[range])
+        let parts = match.replacingOccurrences(of: "PP", with: "").split(separator: "-")
+        guard parts.count == 2,
+              let yy = Int(parts[0]),
+              let pp = Int(parts[1]) else {
+            return nil
+        }
+        return yy * 100 + pp
     }
 }
 

@@ -50,7 +50,7 @@ SWIFT
 xcrun swiftc \
   -o "$TMP_BIN" \
   "$TMP_SWIFT" \
-  "$ROOT/BidProSchedule/Models/TripModels.swift" \
-  "$ROOT/BidProSchedule/Models/TripLegDisplaySupport.swift"
+  "$ROOT/TripDataHub/Models/TripModels.swift" \
+  "$ROOT/TripDataHub/Models/TripLegDisplaySupport.swift"
 
 "$TMP_BIN"

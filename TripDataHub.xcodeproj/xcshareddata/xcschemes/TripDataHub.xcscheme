@@ -16,8 +16,8 @@
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "4E9899AC7BEC5C801C31233E"
                BuildableName = "TripData Hub.app"
-               BlueprintName = "BidProSchedule"
-               ReferencedContainer = "container:BidProSchedule.xcodeproj">
+               BlueprintName = "TripDataHub"
+               ReferencedContainer = "container:TripDataHub.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -32,8 +32,8 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "4E9899AC7BEC5C801C31233E"
             BuildableName = "TripData Hub.app"
-            BlueprintName = "BidProSchedule"
-            ReferencedContainer = "container:BidProSchedule.xcodeproj">
+            BlueprintName = "TripDataHub"
+            ReferencedContainer = "container:TripDataHub.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
       <Testables>
@@ -55,8 +55,8 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "4E9899AC7BEC5C801C31233E"
             BuildableName = "TripData Hub.app"
-            BlueprintName = "BidProSchedule"
-            ReferencedContainer = "container:BidProSchedule.xcodeproj">
+            BlueprintName = "TripDataHub"
+            ReferencedContainer = "container:TripDataHub.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -72,8 +72,8 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "4E9899AC7BEC5C801C31233E"
             BuildableName = "TripData Hub.app"
-            BlueprintName = "BidProSchedule"
-            ReferencedContainer = "container:BidProSchedule.xcodeproj">
+            BlueprintName = "TripDataHub"
+            ReferencedContainer = "container:TripDataHub.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

@@ -45,7 +45,7 @@ enum ExternalOpenLaunchGate {
 }
 
 @main
-struct BidProScheduleApp: App {
+struct TripDataHubApp: App {
     private let viewModel = AppViewModel.shared
 
     var body: some Scene {

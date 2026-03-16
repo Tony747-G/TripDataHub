@@ -2,9 +2,6 @@ import SwiftUI
 #if canImport(UIKit)
 import UIKit
 #endif
-#if canImport(UniformTypeIdentifiers)
-import UniformTypeIdentifiers
-#endif
 
 struct SettingsTabView: View {
     @EnvironmentObject private var viewModel: AppViewModel
@@ -15,15 +12,11 @@ struct SettingsTabView: View {
     @AppStorage("notification_24h_enabled") private var notify24h = false
     @AppStorage("notification_12h_enabled") private var notify12h = false
     @State private var showNotificationDeniedAlert = false
-    @State private var isShowingCrewAccessImporter = false
-    @State private var isShowingImportPreview = false
     @State private var isShowingLogTenExportShare = false
     @State private var verifyGemsIDInput = ""
     @State private var verifyDOBDate = Date()
     @State private var crewAccessImportFiles: [CrewAccessImportFile] = []
     @State private var logTenExportURL: URL?
-    @State private var overrideIATAInput = ""
-    @State private var overrideTimeZoneInput = ""
 
     private static let dobFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -129,51 +122,6 @@ struct SettingsTabView: View {
     }
 
     @ViewBuilder
-    private var timeZoneOverridesSection: some View {
-        Section {
-            let unknownAirports = viewModel.unresolvedIATAAirports()
-            if unknownAirports.isEmpty {
-                Text("No unknown IATA codes.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("Unknown IATA: \(unknownAirports.joined(separator: ", "))")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
-            TextField("IATA (e.g. HKG)", text: $overrideIATAInput)
-
-            TextField("IANA TZ (e.g. Asia/Hong_Kong)", text: $overrideTimeZoneInput)
-
-            Button("Save TZ Override") {
-                viewModel.setTimeZoneOverride(iata: overrideIATAInput, tzID: overrideTimeZoneInput)
-                if viewModel.tzOverrideMessage?.hasPrefix("Saved override:") == true {
-                    overrideIATAInput = ""
-                    overrideTimeZoneInput = ""
-                }
-            }
-
-            let overrides = viewModel.currentTimeZoneOverrides()
-            if !overrides.isEmpty {
-                ForEach(overrides.keys.sorted(), id: \.self) { code in
-                    Text("\(code) -> \(overrides[code] ?? "")")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if let tzOverrideMessage = viewModel.tzOverrideMessage {
-                Text(tzOverrideMessage)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-        } header: {
-            Text("Time Zone Overrides")
-        }
-    }
-
-    @ViewBuilder
     private var settingsListContent: some View {
         List {
             SettingsAccountSection(
@@ -183,22 +131,13 @@ struct SettingsTabView: View {
             )
 
             SettingsTripBoardFetchSection(autoFetchOnOpen: $autoFetchOnOpen)
-
-            SettingsExperimentalImportSection(
-                onTapImportCrewAccessPDF: { isShowingCrewAccessImporter = true }
-            )
-
-            logTenExportSection
             crewAccessFilesSection
-            timeZoneOverridesSection
 
             Section {
                 NavigationLink("CrewAccess Import Help") {
                     CrewAccessImportHelpView()
                 }
             }
-
-            SettingsPayPeriodsSection()
 
             SettingsDisplaySection(
                 appearanceMode: appearanceModeBinding,
@@ -210,6 +149,10 @@ struct SettingsTabView: View {
                 notify24h: $notify24h,
                 notify12h: $notify12h
             )
+
+            SettingsPayPeriodsSection()
+
+            logTenExportSection
         }
     }
 
@@ -269,14 +212,6 @@ struct SettingsTabView: View {
                     }
                 }
             }
-            .onChange(of: viewModel.pendingImport?.id) { _, newValue in
-                if newValue != nil {
-                    isShowingImportPreview = true
-                }
-            }
-            .navigationDestination(isPresented: $isShowingImportPreview) {
-                ImportPreviewView()
-            }
             .alert("Notifications Are Disabled", isPresented: $showNotificationDeniedAlert) {
                 Button("Cancel", role: .cancel) {}
                 Button("Open Settings") {
@@ -297,46 +232,6 @@ struct SettingsTabView: View {
                 }
             }
 #endif
-#if canImport(UniformTypeIdentifiers)
-            .fileImporter(
-                isPresented: $isShowingCrewAccessImporter,
-                allowedContentTypes: [.pdf, .item, .data],
-                allowsMultipleSelection: false
-            ) { result in
-                switch result {
-                case let .success(urls):
-                    guard let url = urls.first else { return }
-                    let ext = url.pathExtension
-#if canImport(UniformTypeIdentifiers)
-                    let contentTypeValue = (try? url.resourceValues(forKeys: [.contentTypeKey]))?.contentType?.identifier ?? "nil"
-#else
-                    let contentTypeValue = "unavailable"
-#endif
-                    NSLog("[Import] Settings picker selected url=%@", url.absoluteString)
-                    NSLog("[Import] Settings picker ext=%@ contentType=%@", ext, contentTypeValue)
-                    guard url.startAccessingSecurityScopedResource() else {
-                        viewModel.crewAccessImportMessage = "Cannot access selected PDF."
-                        return
-                    }
-                    defer { url.stopAccessingSecurityScopedResource() }
-                    do {
-                        let data = try Data(contentsOf: url)
-                        NSLog("[Import] Settings picker read bytes=%d", data.count)
-                        let sniff = LocalImportFileSniffer.sniffPDFSignature(in: data)
-                        NSLog("[Import] Settings picker sniffPDF=%@ header=%@", String(sniff.isPDF), sniff.header)
-                        guard sniff.isPDF else {
-                            viewModel.crewAccessImportMessage = "Selected file is not a PDF. Re-export using Zscaler Print and retry."
-                            return
-                        }
-                        _ = viewModel.importCrewAccessPDFData(data, sourceFileName: url.lastPathComponent)
-                    } catch {
-                        viewModel.crewAccessImportMessage = "Failed to read PDF: \(error.localizedDescription)"
-                    }
-                case let .failure(error):
-                    viewModel.crewAccessImportMessage = "PDF import canceled: \(error.localizedDescription)"
-                }
-            }
-#endif
         }
     }
 
@@ -345,24 +240,6 @@ struct SettingsTabView: View {
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         UIApplication.shared.open(url)
 #endif
-    }
-}
-
-private enum LocalImportFileSniffer {
-    static func sniffPDFSignature(in data: Data) -> (isPDF: Bool, header: String) {
-        let prefix = data.prefix(8)
-        let ascii = String(decoding: prefix, as: UTF8.self)
-        let sanitizedASCII = ascii.unicodeScalars
-            .map { scalar in
-                let value = scalar.value
-                let isPrintableASCII = scalar.isASCII && value >= 32 && value <= 126
-                return isPrintableASCII ? String(scalar) : "."
-            }
-            .joined()
-        let hex = prefix.map { String(format: "%02X", $0) }.joined(separator: " ")
-        let header = "\(sanitizedASCII) [\(hex)]"
-        let isPDF = data.starts(with: [0x25, 0x50, 0x44, 0x46, 0x2D])
-        return (isPDF, header)
     }
 }
 

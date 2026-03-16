@@ -11,13 +11,19 @@
 		0B8ECD6FADFEBAA9FCF1484F /* MaterialIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B16927F8A8D6393171553EDB /* MaterialIconView.swift */; };
 		0BD0457F14D99AB58C916030 /* AppViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D8B7CFE2A29E4A67FD58A91 /* AppViewModel.swift */; };
 		0CD936DED053AD9762B0F319 /* AdminPolicy.json in Resources */ = {isa = PBXBuildFile; fileRef = C57522AE581035464CA62C9F /* AdminPolicy.json */; };
+		10A1B2C3D4E5F60718293A4B /* FlightCountdownSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A1B2C3D4E5F60718293A4C /* FlightCountdownSupport.swift */; };
+		10A1B2C3D4E5F60718293A4D /* FlightCountdownSharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A1B2C3D4E5F60718293A4E /* FlightCountdownSharedModels.swift */; };
+		10A1B2C3D4E5F60718293A4F /* FlightCountdownCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A1B2C3D4E5F60718293A50 /* FlightCountdownCoordinator.swift */; };
+		10B1B2C3D4E5F60718293A4B /* TripDataCountdownWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 10B1B2C3D4E5F60718293A4C /* TripDataCountdownWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		10B1B2C3D4E5F60718293A4D /* TripDataCountdownWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10B1B2C3D4E5F60718293A4E /* TripDataCountdownWidget.swift */; };
+		10B1B2C3D4E5F60718293A4F /* FlightCountdownSharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A1B2C3D4E5F60718293A4E /* FlightCountdownSharedModels.swift */; };
 		1413D45878FC9DDF69496732 /* AdminSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0248F92A97B50F6BF60DDBE /* AdminSections.swift */; };
 		18A27E5A338D797F10170212 /* TripBoardSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75ADA7E8A79CDE06F28D94FE /* TripBoardSyncService.swift */; };
 		1C7335BF584F4471CA4EE8B4 /* MaterialIcons.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D651BD349BED7F8544BA519A /* MaterialIcons.ttf */; };
 		1F0EFD0FD23B9A5AB3F8FB34 /* OpenTimeTripDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7EA862885EBF992F50FFC7D /* OpenTimeTripDetailView.swift */; };
 		20393C69CCB94DD60E09E381 /* TripBoardAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9845EBACBF29A9FF33272AEA /* TripBoardAuthService.swift */; };
 		243353CD463708413FF7B526 /* TimelineSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A86A468763C0E52C694B3DC /* TimelineSupport.swift */; };
-		2872A7D59CE2CC229EF01835 /* BidProScheduleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46C227267A8B3D38527FC59 /* BidProScheduleApp.swift */; };
+		2872A7D59CE2CC229EF01835 /* TripDataHubApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46C227267A8B3D38527FC59 /* TripDataHubApp.swift */; };
 		2A679188452779A40348BACE /* FriendsTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18BB952A5611C4BA5CD19E98 /* FriendsTabView.swift */; };
 		4A85D467241559A29D667280 /* ImportPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5608494D4E54FD10608A06C3 /* ImportPreviewView.swift */; };
 		4C47D51A7B326BF6EDFC5795 /* ViewShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = B26CB31C241DED466A227842 /* ViewShared.swift */; };
@@ -52,6 +58,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
+				10B1B2C3D4E5F60718293A4B /* TripDataCountdownWidget.appex in Embed Foundation Extensions */,
 				A1B2C3D4E5F60718293A4B03 /* TripDataShareActionExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
@@ -61,6 +68,13 @@
 
 /* Begin PBXFileReference section */
 		0E6143D420C35613D374EA9B /* TripModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripModels.swift; sourceTree = "<group>"; };
+		10A1B2C3D4E5F60718293A4C /* FlightCountdownSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightCountdownSupport.swift; sourceTree = "<group>"; };
+		10A1B2C3D4E5F60718293A4E /* FlightCountdownSharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightCountdownSharedModels.swift; sourceTree = "<group>"; };
+		10A1B2C3D4E5F60718293A50 /* FlightCountdownCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightCountdownCoordinator.swift; sourceTree = "<group>"; };
+		10B1B2C3D4E5F60718293A4C /* TripDataCountdownWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TripDataCountdownWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		10B1B2C3D4E5F60718293A4E /* TripDataCountdownWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripDataCountdownWidget.swift; sourceTree = "<group>"; };
+		10B1B2C3D4E5F60718293A51 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		10B1B2C3D4E5F60718293A52 /* TripDataCountdownWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TripDataCountdownWidgetExtension.entitlements; sourceTree = "<group>"; };
 		18BB952A5611C4BA5CD19E98 /* FriendsTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendsTabView.swift; sourceTree = "<group>"; };
 		195C554A000FDB969F952CFF /* SettingsSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSections.swift; sourceTree = "<group>"; };
 		494060DD34B802296A3540C7 /* NextReportWindowBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextReportWindowBuilder.swift; sourceTree = "<group>"; };
@@ -87,7 +101,7 @@
 		AE58A211FF18337118350306 /* CrewAccessImportHelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessImportHelpView.swift; sourceTree = "<group>"; };
 		B16927F8A8D6393171553EDB /* MaterialIconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaterialIconView.swift; sourceTree = "<group>"; };
 		B26CB31C241DED466A227842 /* ViewShared.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewShared.swift; sourceTree = "<group>"; };
-		B46C227267A8B3D38527FC59 /* BidProScheduleApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BidProScheduleApp.swift; sourceTree = "<group>"; };
+		B46C227267A8B3D38527FC59 /* TripDataHubApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripDataHubApp.swift; sourceTree = "<group>"; };
 		BD00FE448BAF4185790CA983 /* CrewAccessPDFImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessPDFImportService.swift; sourceTree = "<group>"; };
 		C23D4885D1A2AF6FC26EA8FF /* AppViewModel+PreviewData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppViewModel+PreviewData.swift"; sourceTree = "<group>"; };
 		C351C0275B67649720158147 /* FriendsSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendsSupport.swift; sourceTree = "<group>"; };
@@ -124,7 +138,8 @@
 		7E3FB6BF7276FDA733A52B83 = {
 			isa = PBXGroup;
 			children = (
-				E4715FDC772BC7EEE0ED10AB /* BidProSchedule */,
+				E4715FDC772BC7EEE0ED10AB /* TripDataHub */,
+				10B1B2C3D4E5F60718293A53 /* TripDataCountdownWidgetExtension */,
 				A1B2C3D4E5F60718293A4D01 /* TripDataShareActionExtension */,
 				91247D7998095C9C27F06C8F /* Products */,
 			);
@@ -134,6 +149,7 @@
 			isa = PBXGroup;
 			children = (
 				7F5ADEBC4334E147DB50445C /* TripData Hub.app */,
+				10B1B2C3D4E5F60718293A4C /* TripDataCountdownWidget.appex */,
 				A1B2C3D4E5F60718293A4C01 /* TripDataShareActionExtension.appex */,
 			);
 			name = Products;
@@ -142,6 +158,8 @@
 		925A7EE172952E24CF9C787F /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				10A1B2C3D4E5F60718293A4E /* FlightCountdownSharedModels.swift */,
+				10A1B2C3D4E5F60718293A4C /* FlightCountdownSupport.swift */,
 				E0DFC93874D26D113A9B2476 /* TripLegDisplaySupport.swift */,
 				0E6143D420C35613D374EA9B /* TripModels.swift */,
 			);
@@ -158,6 +176,16 @@
 			path = TripDataShareActionExtension;
 			sourceTree = "<group>";
 		};
+		10B1B2C3D4E5F60718293A53 /* TripDataCountdownWidgetExtension */ = {
+			isa = PBXGroup;
+			children = (
+				10B1B2C3D4E5F60718293A4E /* TripDataCountdownWidget.swift */,
+				10B1B2C3D4E5F60718293A51 /* Info.plist */,
+				10B1B2C3D4E5F60718293A52 /* TripDataCountdownWidgetExtension.entitlements */,
+			);
+			path = TripDataCountdownWidgetExtension;
+			sourceTree = "<group>";
+		};
 		CBB88F303D3ED6AC2B3FA269 /* Fonts */ = {
 			isa = PBXGroup;
 			children = (
@@ -170,6 +198,7 @@
 			isa = PBXGroup;
 			children = (
 				BD00FE448BAF4185790CA983 /* CrewAccessPDFImportService.swift */,
+				10A1B2C3D4E5F60718293A50 /* FlightCountdownCoordinator.swift */,
 				6A7B8C9D0E1F2A3B4C5D6E7F /* IATATimeZoneResolver.swift */,
 				A0943FFC749878F7C9B4317F /* KeychainService.swift */,
 				9FEFC4254AA348A0D50494F2 /* NextReportNotificationService.swift */,
@@ -181,11 +210,11 @@
 			path = Services;
 			sourceTree = "<group>";
 		};
-		E4715FDC772BC7EEE0ED10AB /* BidProSchedule */ = {
+		E4715FDC772BC7EEE0ED10AB /* TripDataHub */ = {
 			isa = PBXGroup;
 			children = (
 				83DE19BB2E9E95923D2242A1 /* Assets.xcassets */,
-				B46C227267A8B3D38527FC59 /* BidProScheduleApp.swift */,
+				B46C227267A8B3D38527FC59 /* TripDataHubApp.swift */,
 				DFE40A750A20FC5DDB0C59DB /* Info.plist */,
 				743835B120F8BD8DC12FE36A /* LaunchScreen.storyboard */,
 				925A7EE172952E24CF9C787F /* Models */,
@@ -194,7 +223,7 @@
 				58E33ACEACB00891CCB093D3 /* ViewModels */,
 				E9BE7330AE1846F64DD09B12 /* Views */,
 			);
-			path = BidProSchedule;
+			path = TripDataHub;
 			sourceTree = "<group>";
 		};
 		E9BE7330AE1846F64DD09B12 /* Views */ = {
@@ -224,9 +253,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		4E9899AC7BEC5C801C31233E /* BidProSchedule */ = {
+		4E9899AC7BEC5C801C31233E /* TripDataHub */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 20B271A07299C45ED5E19EF6 /* Build configuration list for PBXNativeTarget "BidProSchedule" */;
+			buildConfigurationList = 20B271A07299C45ED5E19EF6 /* Build configuration list for PBXNativeTarget "TripDataHub" */;
 			buildPhases = (
 				BB934825CF80570B0FFBF700 /* Sources */,
 				A36917800C0211806212C354 /* Resources */,
@@ -236,12 +265,30 @@
 			);
 			dependencies = (
 			);
-			name = BidProSchedule;
+			name = TripDataHub;
 			packageProductDependencies = (
 			);
 			productName = "TripData Hub";
 			productReference = 7F5ADEBC4334E147DB50445C /* TripData Hub.app */;
 			productType = "com.apple.product-type.application";
+		};
+		10B1B2C3D4E5F60718293A54 /* TripDataCountdownWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 10B1B2C3D4E5F60718293A55 /* Build configuration list for PBXNativeTarget "TripDataCountdownWidget" */;
+			buildPhases = (
+				10B1B2C3D4E5F60718293A56 /* Sources */,
+				10B1B2C3D4E5F60718293A57 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TripDataCountdownWidget;
+			packageProductDependencies = (
+			);
+			productName = TripDataCountdownWidget;
+			productReference = 10B1B2C3D4E5F60718293A4C /* TripDataCountdownWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 		A1B2C3D4E5F60718293A4F01 /* TripDataShareActionExtension */ = {
 			isa = PBXNativeTarget;
@@ -270,6 +317,9 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 2630;
 				TargetAttributes = {
+					10B1B2C3D4E5F60718293A54 = {
+						ProvisioningStyle = Automatic;
+					};
 					4E9899AC7BEC5C801C31233E = {
 						ProvisioningStyle = Automatic;
 					};
@@ -278,7 +328,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 46C84DE81CA5497A7FCB6F73 /* Build configuration list for PBXProject "BidProSchedule" */;
+			buildConfigurationList = 46C84DE81CA5497A7FCB6F73 /* Build configuration list for PBXProject "TripDataHub" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -291,13 +341,21 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				4E9899AC7BEC5C801C31233E /* BidProSchedule */,
+				4E9899AC7BEC5C801C31233E /* TripDataHub */,
+				10B1B2C3D4E5F60718293A54 /* TripDataCountdownWidget */,
 				A1B2C3D4E5F60718293A4F01 /* TripDataShareActionExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		10B1B2C3D4E5F60718293A57 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A1B2C3D4E5F60718293A4E02 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -319,6 +377,15 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		10B1B2C3D4E5F60718293A56 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				10B1B2C3D4E5F60718293A4F /* FlightCountdownSharedModels.swift in Sources */,
+				10B1B2C3D4E5F60718293A4D /* TripDataCountdownWidget.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A1B2C3D4E5F60718293A4E01 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -335,9 +402,12 @@
 				7E843653CF150E2E35959F2D /* AdminTabView.swift in Sources */,
 				F768F31B96C6D2E30AA48438 /* AppViewModel+PreviewData.swift in Sources */,
 				0BD0457F14D99AB58C916030 /* AppViewModel.swift in Sources */,
-				2872A7D59CE2CC229EF01835 /* BidProScheduleApp.swift in Sources */,
+				2872A7D59CE2CC229EF01835 /* TripDataHubApp.swift in Sources */,
 				ABF2C241CE2E761EA48A8F04 /* CrewAccessImportHelpView.swift in Sources */,
 				BD77C12AF18ECA66FBEC2340 /* CrewAccessPDFImportService.swift in Sources */,
+				10A1B2C3D4E5F60718293A4F /* FlightCountdownCoordinator.swift in Sources */,
+				10A1B2C3D4E5F60718293A4D /* FlightCountdownSharedModels.swift in Sources */,
+				10A1B2C3D4E5F60718293A4B /* FlightCountdownSupport.swift in Sources */,
 				72C2E5DBB46F8BFCCB88CA61 /* FriendsSupport.swift in Sources */,
 				2A679188452779A40348BACE /* FriendsTabView.swift in Sources */,
 				4A85D467241559A29D667280 /* ImportPreviewView.swift in Sources */,
@@ -367,17 +437,69 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
+		10B1B2C3D4E5F60718293A58 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = TripDataCountdownWidgetExtension/TripDataCountdownWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 7;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = TripDataCountdownWidgetExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule.CountdownWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		10B1B2C3D4E5F60718293A59 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = TripDataCountdownWidgetExtension/TripDataCountdownWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 7;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = TripDataCountdownWidgetExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule.CountdownWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		1B481F662E0FED4C306575B8 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
-				CODE_SIGN_ENTITLEMENTS = BidProSchedule/BidProSchedule.entitlements;
+				CODE_SIGN_ENTITLEMENTS = TripDataHub/TripDataHub.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 7;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = BidProSchedule/Info.plist;
+				INFOPLIST_FILE = TripDataHub/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "TripData Hub";
 				INFOPLIST_KEY_CFBundleIconName = AppIcon;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
@@ -583,12 +705,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
-				CODE_SIGN_ENTITLEMENTS = BidProSchedule/BidProSchedule.entitlements;
+				CODE_SIGN_ENTITLEMENTS = TripDataHub/TripDataHub.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 7;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = BidProSchedule/Info.plist;
+				INFOPLIST_FILE = TripDataHub/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "TripData Hub";
 				INFOPLIST_KEY_CFBundleIconName = AppIcon;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
@@ -615,7 +737,16 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		20B271A07299C45ED5E19EF6 /* Build configuration list for PBXNativeTarget "BidProSchedule" */ = {
+		10B1B2C3D4E5F60718293A55 /* Build configuration list for PBXNativeTarget "TripDataCountdownWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				10B1B2C3D4E5F60718293A58 /* Debug */,
+				10B1B2C3D4E5F60718293A59 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		20B271A07299C45ED5E19EF6 /* Build configuration list for PBXNativeTarget "TripDataHub" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				1B481F662E0FED4C306575B8 /* Debug */,
@@ -624,7 +755,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
-		46C84DE81CA5497A7FCB6F73 /* Build configuration list for PBXProject "BidProSchedule" */ = {
+		46C84DE81CA5497A7FCB6F73 /* Build configuration list for PBXProject "TripDataHub" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				AA737ECF136BBA830B64E9AD /* Debug */,
