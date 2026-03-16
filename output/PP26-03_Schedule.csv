@@ -1,3 +1,0 @@
-pairing,title,start_local,end_local,route,credit_hhmm,credit_decimal,seat,fleet,domicile,week,request_type,status_code,duty_days,block_hhmm,time_away_from_base_hhmm,total_duty_time_hhmm
-A70651,A70651 - Credit 31:20,2026-02-25 22:23,2026-03-02 19:53,ANC SDF NRT,31:20,31.33,F/O,74Y,ANC,1,,0,5,19:47,117:30,32:20
-A70878,A70878 - Credit 67:18,2026-03-04 15:57,2026-03-15 04:18,ANC SDF NRT HNL SGN HKG,67:18,67.3,F/O,74Y,ANC,2,,0,11,32:05,252:21,62:33

@@ -1,5 +1,8 @@
 .pw-user-data/
 .DS_Store
+node_modules/
+output/
+storageState.json
 
 # Xcode user-specific files
 xcuserdata/

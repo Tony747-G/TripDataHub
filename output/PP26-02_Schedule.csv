@@ -1,3 +1,0 @@
-pairing,title,start_local,end_local,route,credit_hhmm,credit_decimal,seat,fleet,domicile,week,request_type,status_code,duty_days,block_hhmm,time_away_from_base_hhmm,total_duty_time_hhmm
-51311,51311 - Credit 14:27,2026-01-25 13:45,2026-01-27 19:58,ANC NRT,14:27,14.45,F/O,74Y,ANC,1,,0,3,6:33,54:13,18:13
-A70502,A70502 - Credit 17:07,2026-01-29 16:04,2026-02-01 06:11,ANC ICN,17:07,17.12,F/O,74Y,ANC,1,,0,3,17:07,62:07,21:07
