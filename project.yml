@@ -67,5 +67,6 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: ""
         GENERATE_INFOPLIST_FILE: YES
+        # Hardcoded to match PRODUCT_NAME "TripData Hub". If PRODUCT_NAME changes, update this path.
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/TripData Hub.app/TripData Hub"
         BUNDLE_LOADER: $(TEST_HOST)
