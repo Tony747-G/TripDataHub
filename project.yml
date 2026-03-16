@@ -5,6 +5,9 @@ settings:
   base:
     SWIFT_VERSION: 5.9
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+  configs:
+    Debug:
+      ENABLE_TESTABILITY: YES
 targets:
   TripDataHub:
     type: application
@@ -48,4 +51,21 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: ""
     scheme:
-      testTargets: []
+      testTargets:
+        - TripDataHubTests
+
+  TripDataHubTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - TripDataHubTests
+    dependencies:
+      - target: TripDataHub
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sfune.BidProSchedule.Tests
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/TripData Hub.app/TripData Hub"
+        BUNDLE_LOADER: $(TEST_HOST)

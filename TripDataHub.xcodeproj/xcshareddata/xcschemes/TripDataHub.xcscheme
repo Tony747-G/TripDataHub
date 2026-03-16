@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
-   LastUpgradeVersion = "2630"
+   LastUpgradeVersion = "1430"
    version = "1.3">
    <BuildAction
       parallelizeBuildables = "YES"
@@ -14,7 +14,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "4E9899AC7BEC5C801C31233E"
+               BlueprintIdentifier = "9CDD311DB999C310E3ADCC73"
                BuildableName = "TripData Hub.app"
                BlueprintName = "TripDataHub"
                ReferencedContainer = "container:TripDataHub.xcodeproj">
@@ -30,13 +30,24 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "4E9899AC7BEC5C801C31233E"
+            BlueprintIdentifier = "9CDD311DB999C310E3ADCC73"
             BuildableName = "TripData Hub.app"
             BlueprintName = "TripDataHub"
             ReferencedContainer = "container:TripDataHub.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
       <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "06F2AF4905B951E2C0FF528F"
+               BuildableName = "TripDataHubTests.xctest"
+               BlueprintName = "TripDataHubTests"
+               ReferencedContainer = "container:TripDataHub.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction
@@ -53,7 +64,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "4E9899AC7BEC5C801C31233E"
+            BlueprintIdentifier = "9CDD311DB999C310E3ADCC73"
             BuildableName = "TripData Hub.app"
             BlueprintName = "TripDataHub"
             ReferencedContainer = "container:TripDataHub.xcodeproj">
@@ -70,7 +81,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "4E9899AC7BEC5C801C31233E"
+            BlueprintIdentifier = "9CDD311DB999C310E3ADCC73"
             BuildableName = "TripData Hub.app"
             BlueprintName = "TripDataHub"
             ReferencedContainer = "container:TripDataHub.xcodeproj">

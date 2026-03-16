@@ -2,6 +2,65 @@ import SwiftUI
 import WidgetKit
 import ActivityKit
 
+// MARK: - Shared helpers (file-private)
+
+/// Single flight number formatter used by both the live activity view and compact Dynamic Island.
+/// Falls back to "DH" for deadhead legs with no number, or `unknownFallback` for non-deadhead.
+/// Handles three cases:
+///   - Already prefixed (e.g. "5X76")  → kept as-is ("5X76")
+///   - Other airline prefix (e.g. "UA123") → uppercased ("UA123")
+///   - Numeric only (e.g. "76") → UPS prefix prepended ("5X76")
+private func formattedFlightNumber(
+    _ number: String?,
+    isDeadhead: Bool,
+    unknownFallback: String
+) -> String {
+    let trimmed = number?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    guard !trimmed.isEmpty else {
+        return isDeadhead ? "DH" : unknownFallback
+    }
+    let upper = trimmed.uppercased()
+    let normalized: String
+    if upper.hasPrefix("5X") {
+        normalized = upper
+    } else if let firstScalar = trimmed.unicodeScalars.first, CharacterSet.letters.contains(firstScalar) {
+        normalized = upper
+    } else {
+        normalized = "5X\(upper)"
+    }
+    return isDeadhead ? "DH \(normalized)" : normalized
+}
+
+/// Compact "H:MM" format for narrow Dynamic Island slots where "Xh Xm" doesn't fit.
+private func compactDurationText(from start: Date, to end: Date) -> String {
+    let mins = max(0, Int(end.timeIntervalSince(start)) / 60)
+    return "\(mins / 60):\(String(format: "%02d", mins % 60))"
+}
+
+/// Lock covers both dictionary access and the formatting call so no formatter
+/// is ever used outside the lock — avoiding the DateFormatter thread-safety ambiguity.
+private let liveActivityFormatterLock = NSLock()
+private var liveActivityDateFormatterCache: [String: DateFormatter] = [:]
+
+private func liveActivityLocalDateText(_ date: Date, tzID: String) -> String {
+    liveActivityFormatterLock.lock(); defer { liveActivityFormatterLock.unlock() }
+    let f: DateFormatter
+    if let existing = liveActivityDateFormatterCache[tzID] {
+        f = existing
+    } else {
+        let newF = DateFormatter()
+        newF.calendar = Calendar(identifier: .gregorian)
+        newF.locale = Locale(identifier: "en_US_POSIX")
+        newF.dateFormat = "MMM d (EEE)"
+        newF.timeZone = TimeZone(identifier: tzID) ?? TimeZone(secondsFromGMT: 0)
+        liveActivityDateFormatterCache[tzID] = newF
+        f = newF
+    }
+    return f.string(from: date)
+}
+
+// MARK: - Snapshot store
+
 private struct FlightCountdownEntry: TimelineEntry {
     let date: Date
     let snapshot: FlightCountdownSnapshot?
@@ -44,6 +103,8 @@ private enum FlightCountdownSnapshotStore {
     }
 }
 
+// MARK: - Timeline provider
+
 private struct FlightCountdownProvider: TimelineProvider {
     func placeholder(in context: Context) -> FlightCountdownEntry {
         FlightCountdownEntry(date: Date(), snapshot: FlightCountdownSnapshotStore.placeholderSnapshot())
@@ -62,10 +123,15 @@ private struct FlightCountdownProvider: TimelineProvider {
         }
 
         let current = FlightCountdownEntry(date: now, snapshot: snapshot)
+        let effectivePhase = FlightCountdownSharedStore.phase(
+            scheduledDepartureUTC: snapshot.scheduledDepartureUTC,
+            now: now
+        )
         let refreshDate: Date
-        switch snapshot.phase {
+        switch effectivePhase {
         case .widget:
-            refreshDate = snapshot.scheduledDepartureUTC.addingTimeInterval(-(6 * 60 * 60) + 1)
+            // Refresh just after the widget-to-live-activity transition boundary
+            refreshDate = snapshot.scheduledDepartureUTC.addingTimeInterval(-FlightCountdownSharedStore.liveLeadTime + 1)
         case .liveCountdown, .liveDelayed, .finished, .none:
             refreshDate = now.addingTimeInterval(30 * 60)
         }
@@ -74,11 +140,17 @@ private struct FlightCountdownProvider: TimelineProvider {
     }
 }
 
+// MARK: - Widget view
+
 private struct FlightCountdownWidgetEntryView: View {
     let entry: FlightCountdownEntry
 
     var body: some View {
-        if let snapshot = entry.snapshot, snapshot.phase == .widget {
+        if let snapshot = entry.snapshot,
+           FlightCountdownSharedStore.phase(
+               scheduledDepartureUTC: snapshot.scheduledDepartureUTC,
+               now: entry.date
+           ) == .widget {
             VStack(alignment: .leading, spacing: 8) {
                 Text(snapshot.departureDateText.uppercased())
                     .font(.caption.weight(.semibold))
@@ -136,22 +208,16 @@ private struct FlightCountdownWidgetEntryView: View {
     }
 }
 
+// MARK: - Live activity view
+
 private struct FlightCountdownLiveActivityView: View {
     let state: FlightCountdownAttributes.ContentState
-
-    private static let localDateWeekdayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US")
-        formatter.dateFormat = "MMM d (EEE)"
-        return formatter
-    }()
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { timeline in
             let displayMode = mode(at: timeline.date)
             VStack(alignment: .leading, spacing: 8) {
-                Text("Flight: \(displayFlightNumber)")
+                Text("Flight: \(formattedFlightNumber(state.flightNumber, isDeadhead: state.isDeadhead, unknownFallback: "UNKNOWN"))")
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
 
@@ -187,7 +253,7 @@ private struct FlightCountdownLiveActivityView: View {
     }
 
     private func mode(at date: Date) -> CountdownMode {
-        if date >= state.scheduledDepartureUTC.addingTimeInterval(6 * 60 * 60) {
+        if date >= state.scheduledDepartureUTC.addingTimeInterval(FlightCountdownSharedStore.delayedTailTime) {
             return .finished
         }
         if date >= state.scheduledDepartureUTC {
@@ -202,41 +268,23 @@ private struct FlightCountdownLiveActivityView: View {
         case finished
     }
 
-    private var displayFlightNumber: String {
-        let trimmed = state.flightNumber?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if trimmed.isEmpty {
-            return state.isDeadhead ? "DH" : "UNKNOWN"
-        }
-        let normalized: String
-        if let first = trimmed.unicodeScalars.first, CharacterSet.letters.contains(first) {
-            normalized = trimmed.uppercased()
-        } else {
-            normalized = "5X\(trimmed)"
-        }
-        return state.isDeadhead ? "DH \(normalized)" : normalized
-    }
-
     private func localDateText(date: Date, timeZoneID: String) -> String {
-        Self.localDateWeekdayFormatter.timeZone = TimeZone(identifier: timeZoneID) ?? TimeZone(secondsFromGMT: 0)
-        return Self.localDateWeekdayFormatter.string(from: date)
+        liveActivityLocalDateText(date, tzID: timeZoneID)
     }
 
     private func activityStatusText(mode: CountdownMode, now: Date) -> String {
         switch mode {
         case .countdown:
-            return "Departure in \(durationText(from: now, to: state.scheduledDepartureUTC))"
+            return "Departure in \(FlightCountdownSharedStore.durationText(from: now, to: state.scheduledDepartureUTC))"
         case .delayed:
-            return "+\(durationText(from: state.scheduledDepartureUTC, to: now)) past STD"
+            return "Delayed \(FlightCountdownSharedStore.durationText(from: state.scheduledDepartureUTC, to: now))"
         case .finished:
             return "Completed"
         }
     }
-
-    private func durationText(from start: Date, to end: Date) -> String {
-        let totalMinutes = max(0, Int(end.timeIntervalSince(start)) / 60)
-        return "\(totalMinutes / 60):\(String(format: "%02d", totalMinutes % 60))"
-    }
 }
+
+// MARK: - Widget declarations
 
 struct TripDataCountdownWidget: Widget {
     let kind = "TripDataCountdownWidget"
@@ -263,20 +311,20 @@ struct FlightCountdownLiveActivityWidget: Widget {
                     FlightCountdownLiveActivityView(state: context.state)
                 }
             } compactLeading: {
-                Text("✈ \(compactFlightNumber(for: context.state))")
+                Text("✈ \(formattedFlightNumber(context.state.flightNumber, isDeadhead: context.state.isDeadhead, unknownFallback: "Flight"))")
                     .font(.caption2.weight(.bold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.9)
             } compactTrailing: {
                 TimelineView(.periodic(from: .now, by: 60)) { timeline in
                     if timeline.date >= context.state.scheduledDepartureUTC {
-                        Text("+\(shortDurationText(from: context.state.scheduledDepartureUTC, to: timeline.date)) STD")
+                        Text("+\(compactDurationText(from: context.state.scheduledDepartureUTC, to: timeline.date)) STD")
                             .font(.caption2.weight(.bold))
                             .foregroundStyle(.red)
                             .lineLimit(1)
                             .minimumScaleFactor(0.75)
                     } else {
-                        Text("Dep in \(shortDurationText(from: timeline.date, to: context.state.scheduledDepartureUTC))")
+                        Text("Dep in \(compactDurationText(from: timeline.date, to: context.state.scheduledDepartureUTC))")
                             .font(.caption2.weight(.bold))
                             .monospacedDigit()
                             .foregroundStyle(.green)
@@ -285,27 +333,10 @@ struct FlightCountdownLiveActivityWidget: Widget {
                     }
                 }
             } minimal: {
-                Text("✈ \(compactFlightNumber(for: context.state))")
+                Text("✈ \(formattedFlightNumber(context.state.flightNumber, isDeadhead: context.state.isDeadhead, unknownFallback: "Flight"))")
                     .font(.caption2.weight(.bold))
             }
         }
-    }
-
-    private func shortDurationText(from start: Date, to end: Date) -> String {
-        let totalMinutes = max(0, Int(end.timeIntervalSince(start)) / 60)
-        return "\(totalMinutes / 60):\(String(format: "%02d", totalMinutes % 60))"
-    }
-
-    private func compactFlightNumber(for state: FlightCountdownAttributes.ContentState) -> String {
-        let trimmed = state.flightNumber?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if trimmed.isEmpty {
-            return state.isDeadhead ? "DH" : "Flight"
-        }
-        if let first = trimmed.unicodeScalars.first, CharacterSet.letters.contains(first) {
-            return trimmed.uppercased()
-        }
-        let normalized = "5X\(trimmed)"
-        return state.isDeadhead ? "DH \(normalized)" : normalized
     }
 }
 

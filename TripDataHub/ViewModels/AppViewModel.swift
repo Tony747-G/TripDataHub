@@ -119,7 +119,6 @@ final class AppViewModel: ObservableObject {
     private static let persistentFingerprintKey = "import_dedup_fingerprint_v1"
     private static let persistentFingerprintTSKey = "import_dedup_fingerprint_ts_v1"
     private static let persistentFingerprintTTL: TimeInterval = 30
-    private static let countdownTestingLegsKey = "countdown_testing_legs_v1"
     /// Primary execution gate. Set before any system call; cleared on confirm/discard.
     private var importInProgress = false
 
@@ -147,7 +146,6 @@ final class AppViewModel: ObservableObject {
     @Published var crewAccessDeleteMessage: String?
     @Published var logTenExportMessage: String?
     @Published var tzOverrideMessage: String?
-    @Published var countdownTestingMessage: String?
     @Published var lastImportDidReplaceExistingTrip: Bool = false
     @Published var lastImportSummaryMessage: String?
     @Published var pendingImport: PendingImport?
@@ -225,6 +223,7 @@ final class AppViewModel: ObservableObject {
         self.bidproSchedules = cachedBidproSchedules
         self.schedules = mergeAndSortSchedules(crew: cachedCrewAccessSchedules, bidpro: cachedBidproSchedules)
         self.lastSyncAt = cached?.lastSyncAt
+        UserDefaults.standard.removeObject(forKey: "countdown_testing_legs_v1")
         self.sessionCookies = authService.loadPersistedCookies()
         self.crewAccessLegImportReferenceTimes = Self.loadCrewAccessLegImportReferenceTimes(
             from: UserDefaults.standard,
@@ -1025,12 +1024,7 @@ final class AppViewModel: ObservableObject {
     }
 
     func nextFlightCountdownOutput(nowUTC: Date = Date()) -> CountdownEngineOutput? {
-        if let testingLegs = loadCountdownTestingLegs(),
-           let output = FlightCountdownEngine.buildCountdownOutput(from: testingLegs, nowUTC: nowUTC) {
-            return output
-        }
-        let sourceSchedules = crewAccessSchedules.isEmpty ? schedules : crewAccessSchedules
-        let countdownLegs = sourceSchedules.countdownLegs(tzResolver: tzResolver)
+        let countdownLegs = schedules.countdownLegs(tzResolver: tzResolver)
         return FlightCountdownEngine.buildCountdownOutput(from: countdownLegs, nowUTC: nowUTC)
     }
 
@@ -1039,56 +1033,6 @@ final class AppViewModel: ObservableObject {
         Task {
             await flightCountdownCoordinator.refresh(output: output, nowUTC: nowUTC)
         }
-    }
-
-    func installMockCountdownTripForTesting(nowUTC: Date = Date()) {
-        let utcCalendar = Calendar(identifier: .gregorian)
-        var departureComponents = DateComponents()
-        departureComponents.calendar = utcCalendar
-        departureComponents.timeZone = TimeZone(secondsFromGMT: 0)
-        departureComponents.year = 2026
-        departureComponents.month = 3
-        departureComponents.day = 16
-        departureComponents.hour = 0
-        departureComponents.minute = 30
-
-        var arrivalComponents = DateComponents()
-        arrivalComponents.calendar = utcCalendar
-        arrivalComponents.timeZone = TimeZone(secondsFromGMT: 0)
-        arrivalComponents.year = 2026
-        arrivalComponents.month = 3
-        arrivalComponents.day = 16
-        arrivalComponents.hour = 7
-        arrivalComponents.minute = 24
-
-        guard
-            let departureUTC = utcCalendar.date(from: departureComponents),
-            let arrivalUTC = utcCalendar.date(from: arrivalComponents)
-        else {
-            countdownTestingMessage = "Failed to load mock countdown trip."
-            return
-        }
-
-        let mockLeg = FlightCountdownLeg(
-            id: "mock-countdown-anc-sdf",
-            flightNumber: "5X76",
-            isDeadhead: false,
-            departureAirportIATA: "ANC",
-            arrivalAirportIATA: "SDF",
-            scheduledDepartureUTC: departureUTC,
-            scheduledArrivalUTC: arrivalUTC,
-            departureTimeZoneID: "America/Anchorage",
-            arrivalTimeZoneID: "America/New_York"
-        )
-        saveCountdownTestingLegs([mockLeg])
-        countdownTestingMessage = "Mock countdown trip loaded: 5X76 ANC -> SDF, dep 2026-03-16 00:30Z."
-        refreshFlightCountdownPresentation(nowUTC: nowUTC)
-    }
-
-    func clearMockCountdownTripForTesting(nowUTC: Date = Date()) {
-        UserDefaults.standard.removeObject(forKey: Self.countdownTestingLegsKey)
-        countdownTestingMessage = "Mock countdown trip cleared."
-        refreshFlightCountdownPresentation(nowUTC: nowUTC)
     }
 
     func exportCrewAccessFlightsLogTenCSV() -> URL? {
@@ -2494,29 +2438,6 @@ final class AppViewModel: ObservableObject {
             UserDefaults.standard.set(data, forKey: friendConnectionsKey)
         } catch {
             logNonFatal("Failed to save friend connections: \(error.localizedDescription)")
-        }
-    }
-
-    private func loadCountdownTestingLegs() -> [FlightCountdownLeg]? {
-        guard let data = UserDefaults.standard.data(forKey: Self.countdownTestingLegsKey) else {
-            return nil
-        }
-        do {
-            return try JSONDecoder().decode([FlightCountdownLeg].self, from: data)
-        } catch {
-            UserDefaults.standard.removeObject(forKey: Self.countdownTestingLegsKey)
-            logNonFatal("Failed to decode countdown testing legs: \(error.localizedDescription)")
-            return nil
-        }
-    }
-
-    private func saveCountdownTestingLegs(_ legs: [FlightCountdownLeg]) {
-        do {
-            let data = try JSONEncoder().encode(legs)
-            UserDefaults.standard.set(data, forKey: Self.countdownTestingLegsKey)
-        } catch {
-            countdownTestingMessage = "Failed to save mock countdown trip."
-            logNonFatal("Failed to encode countdown testing legs: \(error.localizedDescription)")
         }
     }
 

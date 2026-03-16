@@ -81,7 +81,7 @@ actor FlightCountdownCoordinator {
     }
 
     private func staleDate(for snapshot: FlightCountdownSnapshot) -> Date {
-        snapshot.scheduledDepartureUTC.addingTimeInterval(6 * 60 * 60)
+        snapshot.scheduledDepartureUTC.addingTimeInterval(FlightCountdownSharedStore.delayedTailTime)
     }
 
     private func isLiveActivityPhase(_ phase: CountdownPresentationPhase) -> Bool {

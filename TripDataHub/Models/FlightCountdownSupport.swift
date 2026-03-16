@@ -28,40 +28,50 @@ struct CountdownEngineOutput: Codable, Equatable, Hashable {
 }
 
 enum FlightCountdownEngine {
-    private static let widgetLeadTime: TimeInterval = 12 * 60 * 60
-    private static let liveLeadTime: TimeInterval = 6 * 60 * 60
-    private static let delayedTailTime: TimeInterval = 6 * 60 * 60
+    // DateFormatter caches keyed by timezone ID. The lock protects dictionary mutations;
+    // formatters themselves are immutable after creation so concurrent reads are safe.
+    private static let formatterLock = NSLock()
+    private static var dateFormatterCache: [String: DateFormatter] = [:]
+    private static var timeFormatterCache: [String: DateFormatter] = [:]
 
     static func selectRelevantLeg(
         from legs: [FlightCountdownLeg],
         nowUTC: Date
     ) -> FlightCountdownLeg? {
-        legs
+        let eligibleLegs = legs.filter { leg in
+            nowUTC >= leg.scheduledDepartureUTC.addingTimeInterval(-FlightCountdownSharedStore.widgetLeadTime)
+                && nowUTC < leg.scheduledDepartureUTC.addingTimeInterval(FlightCountdownSharedStore.delayedTailTime)
+        }
+
+        let liveUpcoming = eligibleLegs
+            .filter { phase(for: $0, nowUTC: nowUTC) == .liveCountdown }
             .sorted(by: compareLegs(_:_:))
-            .first { leg in
-                nowUTC >= leg.scheduledDepartureUTC.addingTimeInterval(-widgetLeadTime)
-                    && nowUTC < leg.scheduledDepartureUTC.addingTimeInterval(delayedTailTime)
-            }
+        if let liveUpcomingLeg = liveUpcoming.first {
+            return liveUpcomingLeg
+        }
+
+        let widgetUpcoming = eligibleLegs
+            .filter { phase(for: $0, nowUTC: nowUTC) == .widget }
+            .sorted(by: compareLegs(_:_:))
+        if let widgetUpcomingLeg = widgetUpcoming.first {
+            return widgetUpcomingLeg
+        }
+
+        let liveDelayed = eligibleLegs
+            .filter { phase(for: $0, nowUTC: nowUTC) == .liveDelayed }
+            .sorted(by: compareDelayedLegs(_:_:))
+        if let liveDelayedLeg = liveDelayed.first {
+            return liveDelayedLeg
+        }
+
+        return nil
     }
 
     static func phase(
         for leg: FlightCountdownLeg,
         nowUTC: Date
     ) -> CountdownPresentationPhase {
-        let departureUTC = leg.scheduledDepartureUTC
-        if nowUTC < departureUTC.addingTimeInterval(-widgetLeadTime) {
-            return .none
-        }
-        if nowUTC < departureUTC.addingTimeInterval(-liveLeadTime) {
-            return .widget
-        }
-        if nowUTC < departureUTC {
-            return .liveCountdown
-        }
-        if nowUTC < departureUTC.addingTimeInterval(delayedTailTime) {
-            return .liveDelayed
-        }
-        return .finished
+        FlightCountdownSharedStore.phase(scheduledDepartureUTC: leg.scheduledDepartureUTC, now: nowUTC)
     }
 
     static func statusText(
@@ -71,9 +81,9 @@ enum FlightCountdownEngine {
         let currentPhase = phase(for: leg, nowUTC: nowUTC)
         switch currentPhase {
         case .widget, .liveCountdown:
-            return "Departure in \(durationText(from: nowUTC, to: leg.scheduledDepartureUTC))"
+            return "Departure in \(FlightCountdownSharedStore.durationText(from: nowUTC, to: leg.scheduledDepartureUTC))"
         case .liveDelayed:
-            return "Delayed \(durationText(from: leg.scheduledDepartureUTC, to: nowUTC))"
+            return "Delayed \(FlightCountdownSharedStore.durationText(from: leg.scheduledDepartureUTC, to: nowUTC))"
         case .none, .finished:
             return nil
         }
@@ -122,29 +132,50 @@ enum FlightCountdownEngine {
         return lhs.id < rhs.id
     }
 
-    private static func durationText(from start: Date, to end: Date) -> String {
-        let totalMinutes = max(0, Int(end.timeIntervalSince(start)) / 60)
-        let hours = totalMinutes / 60
-        let minutes = totalMinutes % 60
-        return "\(hours)h \(minutes)m"
+    private static func compareDelayedLegs(_ lhs: FlightCountdownLeg, _ rhs: FlightCountdownLeg) -> Bool {
+        if lhs.scheduledDepartureUTC != rhs.scheduledDepartureUTC {
+            return lhs.scheduledDepartureUTC > rhs.scheduledDepartureUTC
+        }
+        if lhs.scheduledArrivalUTC != rhs.scheduledArrivalUTC {
+            return lhs.scheduledArrivalUTC > rhs.scheduledArrivalUTC
+        }
+        return lhs.id < rhs.id
     }
 
+    // Lock covers both dictionary access and the formatting call so no formatter
+    // is ever used outside the lock — avoiding the DateFormatter thread-safety ambiguity.
     private static func localDateText(for utcDate: Date, timeZoneID: String) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US")
-        formatter.timeZone = TimeZone(identifier: timeZoneID) ?? TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "MMM d"
-        return formatter.string(from: utcDate)
+        formatterLock.lock(); defer { formatterLock.unlock() }
+        let f: DateFormatter
+        if let existing = dateFormatterCache[timeZoneID] {
+            f = existing
+        } else {
+            let newF = DateFormatter()
+            newF.calendar = Calendar(identifier: .gregorian)
+            newF.locale = Locale(identifier: "en_US_POSIX")
+            newF.timeZone = TimeZone(identifier: timeZoneID) ?? TimeZone(secondsFromGMT: 0)
+            newF.dateFormat = "MMM d"
+            dateFormatterCache[timeZoneID] = newF
+            f = newF
+        }
+        return f.string(from: utcDate)
     }
 
     private static func localTimeText(for utcDate: Date, timeZoneID: String) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: timeZoneID) ?? TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "HH:mm"
-        return formatter.string(from: utcDate)
+        formatterLock.lock(); defer { formatterLock.unlock() }
+        let f: DateFormatter
+        if let existing = timeFormatterCache[timeZoneID] {
+            f = existing
+        } else {
+            let newF = DateFormatter()
+            newF.calendar = Calendar(identifier: .gregorian)
+            newF.locale = Locale(identifier: "en_US_POSIX")
+            newF.timeZone = TimeZone(identifier: timeZoneID) ?? TimeZone(secondsFromGMT: 0)
+            newF.dateFormat = "HH:mm"
+            timeFormatterCache[timeZoneID] = newF
+            f = newF
+        }
+        return f.string(from: utcDate)
     }
 }
 
