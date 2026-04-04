@@ -82,6 +82,12 @@ actor ExternalOpenImportCoordinator {
         }
     }
 
+    func requeueFront(_ item: QueueItem) {
+        guard !queuedKeys.contains(item.key), !inflightKeys.contains(item.key) else { return }
+        queuedKeys.insert(item.key)
+        queue.insert(item, at: 0)
+    }
+
     /// Clears all dedup history so the same file can be re-shared immediately
     /// after an import is confirmed or discarded.
     /// `inflightKeys` is intentionally not reset here; active jobs are released by `finish`.
@@ -109,6 +115,9 @@ private enum AppGroupImportConfig {
 @MainActor
 final class AppViewModel: ObservableObject {
     static let shared = AppViewModel()
+    static let crewAccessRetentionSelectionKey = "crewaccess_trip_data_retained_v1"
+    static let defaultCrewAccessRetentionSelection = "ALL"
+    static let crewAccessRetentionDefaultMigrationKey = "crewaccess_trip_data_retained_default_all_migrated_v1"
 
     // MARK: - Import dedup (4-layer architecture)
     // Layer 1: ExternalOpenLaunchGate (BidProScheduleApp.swift) — catches iOS triple-delivery at onOpenURL
@@ -143,6 +152,7 @@ final class AppViewModel: ObservableObject {
     @Published var verifiedIdentity: VerifiedIdentityProfile?
     @Published var verifiedUsers: [VerifiedUserRecord] = []
     @Published var crewAccessImportMessage: String?
+    @Published var hasQueuedImport: Bool = false
     @Published var crewAccessDeleteMessage: String?
     @Published var logTenExportMessage: String?
     @Published var tzOverrideMessage: String?
@@ -215,6 +225,7 @@ final class AppViewModel: ObservableObject {
         let loadedAdminPolicy = Self.loadAdminPolicy()
         self.adminPolicy = loadedAdminPolicy
         self.adminPolicyFingerprint = Self.fingerprint(for: loadedAdminPolicy)
+        Self.migrateCrewAccessRetentionDefaultIfNeeded()
 
         let cached = cacheService.load()
         let cachedCrewAccessSchedules = cached?.crewAccessSchedules ?? []
@@ -256,9 +267,14 @@ final class AppViewModel: ObservableObject {
             errorMessage = nil
         }
 
+#if DEBUG
+        applyDebugLaunchOverridesIfNeeded()
+#endif
+
         Task { [weak self] in
             await self?.refreshNotificationAuthorizationStatus()
             await self?.rescheduleNotificationsIfAuthorized()
+            await self?.applyCrewAccessRetentionPolicy()
         }
 
 #if DEBUG
@@ -677,15 +693,14 @@ final class AppViewModel: ObservableObject {
             NSLog("[Import] consumeExternalOpenURL begin key=%@", key)
 
             if pendingImport != nil {
-                // Another import is waiting in the UI. The dequeued URL is permanently dropped here
-                // (no re-queue). MVP limitation: the user must re-share the file after the
-                // current import is confirmed or discarded.
                 NSLog("[Import] consumeExternalOpenURL skipped (pending import exists)")
-                cleanupImportedExternalFileBestEffort(at: url)
+                crewAccessImportMessage = "Another import is waiting for review. Confirm or dismiss the current import first."
+                hasQueuedImport = true
                 await externalOpenCoordinator.finish(key: key, success: false)
+                await externalOpenCoordinator.requeueFront(nextItem)
                 pendingExternalOpenURL = nil
                 NSLog("[Import] consumeExternalOpenURL done key=%@ ok=%@", key, String(isSuccess))
-                continue
+                break
             }
 
             guard url.isFileURL else {
@@ -745,6 +760,7 @@ final class AppViewModel: ObservableObject {
             let jsonWriteContext = try persistCrewAccessJSON(json)
             do {
                 try mergeImportedCrewAccessSchedule(schedule)
+                await applyCrewAccessRetentionPolicy()
             } catch {
                 do {
                     try rollbackCrewAccessJSONWrite(with: jsonWriteContext)
@@ -761,8 +777,10 @@ final class AppViewModel: ObservableObject {
                 lastImportSummaryMessage = "Imported new CrewAccess trip \(schedule.id)."
             }
             self.pendingImport = nil
+            hasQueuedImport = false
             await resetExternalOpenDedup()
             importInProgress = false
+            startExternalConsumerIfNeeded()
             crewAccessImportMessage = "CrewAccess import complete: \(json.tripId) (\(schedule.legCount) legs)."
             errorMessage = nil
         } catch {
@@ -774,9 +792,11 @@ final class AppViewModel: ObservableObject {
 
     func discardPendingImport() async {
         pendingImport = nil
+        hasQueuedImport = false
         crewAccessImportMessage = "CrewAccess import preview discarded."
         await resetExternalOpenDedup()
         importInProgress = false
+        startExternalConsumerIfNeeded()
     }
 
     private struct CrewAccessTripHeader: Decodable {
@@ -855,12 +875,65 @@ final class AppViewModel: ObservableObject {
                         isOrphan: matchedScheduleId == nil
                     )
                 }.sorted { lhs, rhs in
-                    (lhs.modifiedAt ?? .distantPast) > (rhs.modifiedAt ?? .distantPast)
+                    if lhs.fileName == rhs.fileName {
+                        let lhsDate = lhs.modifiedAt ?? lhs.createdAt ?? .distantPast
+                        let rhsDate = rhs.modifiedAt ?? rhs.createdAt ?? .distantPast
+                        return lhsDate > rhsDate
+                    }
+                    return lhs.fileName > rhs.fileName
                 }
             } catch {
                 return [CrewAccessImportFile]()
             }
         }.value
+    }
+
+    func applyCrewAccessRetentionPolicy() async {
+        let deletedFileCount: Int
+        if let retainedOrders = retainedCrewAccessBidPeriodOrders() {
+            deletedFileCount = await Task.detached(priority: .utility) {
+                Self.deleteCrewAccessImportFilesOutsideRetainedBidPeriods(retainedOrders: retainedOrders)
+            }.value
+            if deletedFileCount > 0 {
+                NSLog(
+                    "[CrewAccessRetention] keptPeriods=%@ deletedFiles=%d",
+                    retainedOrders.map(String.init).sorted().joined(separator: ","),
+                    deletedFileCount
+                )
+            }
+        } else {
+            deletedFileCount = 0
+        }
+
+        await reconcileCrewAccessSchedulesWithImportFiles()
+    }
+
+    func reconcileCrewAccessSchedulesWithImportFiles() async {
+        let rebuiltSchedules = await Task.detached(priority: .utility) {
+            Self.loadCrewAccessSchedulesFromImportFiles()
+        }.value
+
+        guard rebuiltSchedules != crewAccessSchedules else { return }
+
+        crewAccessSchedules = rebuiltSchedules
+        pruneCrewAccessLegImportReferenceTimes()
+        schedules = mergeAndSortSchedules(crew: crewAccessSchedules, bidpro: bidproSchedules)
+        let persistedLastSyncAt = lastSyncAt ?? Date()
+        do {
+            try cacheService.save(
+                ScheduleCacheSnapshotV2(
+                    crewAccessSchedules: crewAccessSchedules,
+                    bidproSchedules: bidproSchedules,
+                    lastSyncAt: persistedLastSyncAt,
+                    migratedAt: nil
+                )
+            )
+            if lastSyncAt == nil {
+                lastSyncAt = persistedLastSyncAt
+            }
+        } catch {
+            logNonFatal("Failed to save schedule cache after CrewAccess file reconciliation: \(error.localizedDescription)")
+        }
     }
 
     func deleteCrewAccessImportFiles(urls: [URL]) async {
@@ -1748,6 +1821,210 @@ final class AppViewModel: ObservableObject {
     private nonisolated static func readCrewAccessTripHeader(from url: URL) -> CrewAccessTripHeader? {
         guard let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode(CrewAccessTripHeader.self, from: data)
+    }
+
+    private nonisolated static func migrateCrewAccessRetentionDefaultIfNeeded() {
+        let defaults = UserDefaults.standard
+        let migrationKey = "crewaccess_trip_data_retained_default_all_migrated_v1"
+        let selectionKey = "crewaccess_trip_data_retained_v1"
+        let defaultSelection = "ALL"
+        if defaults.bool(forKey: migrationKey) {
+            return
+        }
+        defaults.set(defaultSelection, forKey: selectionKey)
+        defaults.set(true, forKey: migrationKey)
+    }
+
+    private func retainedCrewAccessBidPeriodOrders() -> Set<Int>? {
+        guard let previousCount = crewAccessRetentionPreviousBidPeriods() else {
+            return nil
+        }
+        return retainedBidPeriodOrders(currentDateUTC: Date(), previousCount: previousCount)
+    }
+
+    private func crewAccessRetentionPreviousBidPeriods() -> Int? {
+        let raw = UserDefaults.standard.string(forKey: Self.crewAccessRetentionSelectionKey)
+            ?? Self.defaultCrewAccessRetentionSelection
+        if raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "ALL" {
+            return nil
+        }
+        return min(max(Int(raw) ?? 1, 1), 7)
+    }
+
+    private func crewAccessBidPeriodOrder(for schedule: PayPeriodSchedule) -> Int? {
+        parseCrewAccessBidPeriodOrder(schedule.id)
+            ?? parseCrewAccessBidPeriodOrder(schedule.label)
+            ?? schedule.legs.compactMap { leg in
+                if let depUTC = LegConnectionTextBuilder.parseUTC(leg.depUTC),
+                   let period = bidPeriod(for: depUTC) {
+                    return bidPeriodOrder(for: period.id)
+                }
+                let normalized = Self.normalizeTripInformationDateForDisplay(leg.depLocal, fallbackDate: nil).dateString
+                let formatter = DateFormatter()
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                formatter.timeZone = TimeZone(secondsFromGMT: 0)
+                formatter.dateFormat = "yyyy-MM-dd"
+                guard let date = formatter.date(from: normalized),
+                      let period = bidPeriod(for: date) else {
+                    return nil
+                }
+                return bidPeriodOrder(for: period.id)
+            }.first
+    }
+
+    private func parseCrewAccessBidPeriodOrder(_ raw: String) -> Int? {
+        let cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let range = cleaned.range(of: #"(?:CA|BP)(\d{2})-(\d{2})"#, options: .regularExpression)
+        guard let range else { return nil }
+        let match = String(cleaned[range])
+            .replacingOccurrences(of: "CA", with: "")
+            .replacingOccurrences(of: "BP", with: "")
+        let parts = match.split(separator: "-")
+        guard parts.count == 2,
+              let year = Int(parts[0]),
+              let period = Int(parts[1]) else {
+            return nil
+        }
+        return year * 100 + period
+    }
+
+    private nonisolated static func crewAccessBidPeriodOrder(tripInformationDate: String?, fallbackDate: Date?) -> Int? {
+        let normalized = normalizeTripInformationDateForDisplay(tripInformationDate, fallbackDate: fallbackDate).dateString
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let date = formatter.date(from: normalized),
+              let period = bidPeriod(for: date) else {
+            return nil
+        }
+        return bidPeriodOrder(for: period.id)
+    }
+
+    private nonisolated static func deleteCrewAccessImportFilesOutsideRetainedBidPeriods(retainedOrders: Set<Int>) -> Int {
+        let fm = FileManager.default
+        guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return 0
+        }
+        let dir = documents.appendingPathComponent("CrewAccessImports", isDirectory: true)
+        guard let urls = try? fm.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return 0
+        }
+
+        var deletedCount = 0
+        for url in urls {
+            guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
+                  values.isRegularFile == true,
+                  url.pathExtension.lowercased() == "json" else {
+                continue
+            }
+            let header = readCrewAccessTripHeader(from: url)
+            guard let order = crewAccessBidPeriodOrder(
+                tripInformationDate: header?.tripInformationDate,
+                fallbackDate: values.contentModificationDate
+            ) else {
+                continue
+            }
+            guard !retainedOrders.contains(order) else {
+                continue
+            }
+            do {
+                try fm.removeItem(at: url)
+                deletedCount += 1
+            } catch {
+                NSLog("[CrewAccessRetention] failedFileDelete=%@ error=%@", url.path, error.localizedDescription)
+            }
+        }
+        return deletedCount
+    }
+
+    private nonisolated static func loadCrewAccessSchedulesFromImportFiles() -> [PayPeriodSchedule] {
+        let fm = FileManager.default
+        guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return []
+        }
+        let dir = documents.appendingPathComponent("CrewAccessImports", isDirectory: true)
+        guard let urls = try? fm.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        return urls.compactMap { url in
+            guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
+                  values.isRegularFile == true,
+                  url.pathExtension.lowercased() == "json",
+                  let data = try? Data(contentsOf: url),
+                  let payload = try? JSONDecoder().decode(CrewAccessTripJSON.self, from: data)
+            else {
+                return nil
+            }
+            return buildCrewAccessSchedule(from: payload, modifiedAt: values.contentModificationDate ?? Date())
+        }.sorted { lhs, rhs in
+            let lhsKey = lhs.legs.compactMap(\.depUTC).sorted().first ?? lhs.label
+            let rhsKey = rhs.legs.compactMap(\.depUTC).sorted().first ?? rhs.label
+            if lhsKey == rhsKey {
+                return lhs.label < rhs.label
+            }
+            return lhsKey < rhsKey
+        }
+    }
+
+    private nonisolated static func buildCrewAccessSchedule(from payload: CrewAccessTripJSON, modifiedAt: Date) -> PayPeriodSchedule? {
+        let normalizedDate = normalizeTripInformationDateForDisplay(payload.tripInformationDate, fallbackDate: modifiedAt).dateString
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let tripDate = formatter.date(from: normalizedDate) else {
+            return nil
+        }
+
+        let tripID = payload.tripId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let year = Calendar(identifier: .gregorian).component(.year, from: tripDate) % 100
+        let month = Calendar(identifier: .gregorian).component(.month, from: tripDate)
+        let label = String(format: "CA%02d-%02d-%@", year, month, tripID)
+
+        let legs = payload.items.map { item in
+            TripLeg(
+                payPeriod: label,
+                pairing: tripID,
+                leg: item.sequence,
+                flight: item.flight,
+                depAirport: item.depAirport,
+                depLocal: item.startLocalDisplay,
+                arrAirport: item.arrAirport,
+                arrLocal: item.endLocalDisplay,
+                depUTC: item.startUtc,
+                arrUTC: item.endUtc,
+                status: item.deadhead ? "DH" : "-",
+                block: item.block
+            )
+        }.sorted { lhs, rhs in
+            if lhs.leg == rhs.leg {
+                return (lhs.depUTC ?? lhs.depLocal) < (rhs.depUTC ?? rhs.depLocal)
+            }
+            return lhs.leg < rhs.leg
+        }
+
+        guard !legs.isEmpty else { return nil }
+
+        return PayPeriodSchedule(
+            id: label,
+            label: label,
+            tripCount: Set(legs.map(\.pairing)).count,
+            legCount: legs.count,
+            openTimeCount: 0,
+            updatedAt: modifiedAt,
+            legs: legs,
+            openTimeTrips: []
+        )
     }
 
     private nonisolated static func inferTripIdFromFileName(_ fileName: String) -> String {

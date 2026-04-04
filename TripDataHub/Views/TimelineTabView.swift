@@ -8,11 +8,9 @@ struct TimelineTabView: View {
     private let anchorageTimeZone = TimeZone(identifier: "America/Anchorage")
         ?? TimeZone(secondsFromGMT: NextReportWindowBuilder.anchorageFallbackOffsetSeconds)!
     private let tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared
-    @State private var didAutoScroll = false
     @State private var legData = TimelineLegData(schedules: [])
     @State private var tripDataByTripID: [String: TripDataCardInfo] = [:]
     @State private var importedUTCTimesByTripAndSequence: [String: ImportLegUTCTimes] = [:]
-
     private static let nextReportTimestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -97,8 +95,13 @@ struct TimelineTabView: View {
             VStack(spacing: 0) {
                 timelineTopBar
                 importSummaryBanner
-                nextReportCard
+                if shouldShowNextReportCardOnTop {
+                    nextReportCard
+                }
                 timelineContent
+                if !shouldShowNextReportCardOnTop {
+                    nextReportCard
+                }
                 Color.gray.opacity(0.10)
                     .frame(height: 10)
             }
@@ -145,6 +148,8 @@ struct TimelineTabView: View {
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 5)
                                 .background(dateCardBackground)
+                                .id(daySectionScrollID(section.id))
+                                .accessibilityIdentifier("timeline.dayHeader.\(section.id)")
 
                             let legs = section.legs
                             ForEach(Array(legs.enumerated()), id: \.element.id) { _, leg in
@@ -172,13 +177,16 @@ struct TimelineTabView: View {
             .onAppear {
                 refreshLegData()
                 refreshTripDataCards()
-                autoScrollToNextFlight(using: proxy)
             }
             .onChange(of: viewModel.schedules) { _, _ in
                 refreshLegData()
                 refreshTripDataCards()
-                didAutoScroll = false
-                autoScrollToNextFlight(using: proxy)
+            }
+            .onChange(of: selectedClockDisplay) { _, _ in
+                refreshLegData()
+            }
+            .task(id: focusScrollContextKey) {
+                await autoScrollToFocusDay(using: proxy)
             }
         }
     }
@@ -210,6 +218,7 @@ struct TimelineTabView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 6)
                     .background(.thinMaterial)
+                    .accessibilityIdentifier("timeline.nextReportCard")
                 } else {
                     EmptyView()
                 }
@@ -348,6 +357,25 @@ struct TimelineTabView: View {
         legData.allLegs
     }
 
+    private var focusDayID: String? {
+        let now = Date()
+
+        let currentOrNextLeg = allLegs.first { leg in
+            guard let dep = utcDepartureDate(for: leg) ?? parseLocalDateTime(leg.depLocal) else {
+                return false
+            }
+            if let arr = utcArrivalDate(for: leg) ?? parseLocalDateTime(leg.arrLocal),
+               dep <= now,
+               now < arr {
+                return true
+            }
+            return dep >= now
+        }
+
+        guard let currentOrNextLeg else { return nil }
+        return dayKey(for: currentOrNextLeg)
+    }
+
     private var nextReportInfo: NextReportInfo? {
         let nowANC = nowInAnchorage()
         let windows = tripWindows.sorted { $0.reportTime < $1.reportTime }
@@ -368,35 +396,23 @@ struct TimelineTabView: View {
         return nil
     }
 
+    private var hasActiveTripWindow: Bool {
+        let nowANC = nowInAnchorage()
+        return tripWindows.contains { window in
+            nowANC >= window.reportTime && nowANC < window.tripEndANC
+        }
+    }
+
+    private var shouldShowNextReportCardOnTop: Bool {
+        nextReportInfo != nil && !hasActiveTripWindow
+    }
+
     private var tripWindows: [NextReportTripWindow] {
         NextReportWindowBuilder.build(schedules: currentTimelineSchedules, anchorageTimeZone: anchorageTimeZone)
     }
 
     private var daySections: [TimelineDaySection] {
         buildDisplayDaySections(from: allLegs)
-    }
-
-    private var nextUpcomingLegID: UUID? {
-        let now = Date()
-        if let next = allLegs.first(where: { leg in
-            guard let dep = utcDepartureDate(for: leg) ?? parseLocalDateTime(leg.depLocal) else { return false }
-            return dep >= now
-        }) {
-            return next.id
-        }
-        return allLegs.first?.id
-    }
-
-    private func autoScrollToNextFlight(using proxy: ScrollViewProxy) {
-        guard !didAutoScroll else { return }
-        guard let targetID = nextUpcomingLegID else { return }
-        didAutoScroll = true
-        let scrollID = "\(targetID.uuidString)|\(selectedClockDisplay.rawValue)"
-        DispatchQueue.main.async {
-            withAnimation(.easeInOut(duration: 0.25)) {
-                proxy.scrollTo(scrollID, anchor: .top)
-            }
-        }
     }
 
     private func refreshLegData() {
@@ -423,6 +439,31 @@ struct TimelineTabView: View {
             await MainActor.run {
                 tripDataByTripID = result.summaryByTripID
                 importedUTCTimesByTripAndSequence = result.utcByTripAndSequence
+            }
+        }
+    }
+
+    private func daySectionScrollID(_ dayID: String) -> String {
+        "timeline.daySection.\(dayID)"
+    }
+
+    private var focusScrollContextKey: String {
+        let dayIDs = daySections.map(\.id).joined(separator: "|")
+        let focusKey = focusDayID ?? "none"
+        return "\(selectedClockDisplay.rawValue)|\(focusKey)|\(dayIDs)"
+    }
+
+    @MainActor
+    private func autoScrollToFocusDay(using proxy: ScrollViewProxy) async {
+        guard let focusDayID else {
+            return
+        }
+
+        let scrollID = daySectionScrollID(focusDayID)
+        for _ in 0..<3 {
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            withAnimation(.easeInOut(duration: 0.25)) {
+                proxy.scrollTo(scrollID, anchor: .top)
             }
         }
     }

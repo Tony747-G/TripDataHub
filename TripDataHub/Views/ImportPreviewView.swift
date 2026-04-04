@@ -11,6 +11,17 @@ struct ImportPreviewView: View {
         Group {
             if let pending = viewModel.pendingImport {
                 List {
+                    if viewModel.hasQueuedImport {
+                        Section {
+                            Label(
+                                "Another import is queued. It will open automatically after you confirm or cancel this one.",
+                                systemImage: "tray.full"
+                            )
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+
                     Section("Import Summary") {
                         Text("Trip Id: \(pending.tripId)")
                         Text("Legs count: \(pending.parsedSchedule?.legs.count ?? 0)")

@@ -16,6 +16,7 @@ struct OpenTimeTabView: View {
     @State private var refreshMessageIsError = false
     @State private var lastFetchMessage: String?
     @State private var hideUpToDateTask: Task<Void, Never>?
+    @State private var hideLastFetchTask: Task<Void, Never>?
 
     private static let lastFetchFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -27,47 +28,32 @@ struct OpenTimeTabView: View {
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
-                Group {
-                    if ppSections.isEmpty {
-                        ScrollView {
-                            Color.clear
-                                .frame(height: 0)
-                                .id(topAnchorID)
-                            Text("No fetched data yet. Use Settings to fetch from TripBoard.")
+                ScrollView {
+                    LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        Color.clear
+                            .frame(height: 0)
+                            .id(topAnchorID)
+
+                        if ppSections.isEmpty {
+                            Text("No fetched data yet. Pull to refresh or use Settings to fetch from TripBoard.")
                                 .appScaledFont(.footnote, scale: fontScale)
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .topLeading)
                                 .padding(.horizontal, 16)
                                 .padding(.top, 16)
-                        }
-                        .refreshable {
-                            await refreshOpenTime(using: proxy)
-                        }
-                    } else {
-                        ScrollView {
-                            LazyVStack(spacing: 0) {
-                                Color.clear
-                                    .frame(height: 0)
-                                    .id(topAnchorID)
-                                ForEach(ppSections) { pp in
-                                    Text(pp.label)
-                                        .appScaledFont(.headline, weight: .bold, scale: fontScale)
-                                        .foregroundStyle(ppCardForeground)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 8)
-                                        .background(ppCardBackground)
-                                        .padding(.top, 8)
+                        } else {
+                            ForEach(ppSections) { pp in
+                                Text(pp.label)
+                                    .appScaledFont(.headline, weight: .bold, scale: fontScale)
+                                    .foregroundStyle(ppCardForeground)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 8)
+                                    .background(ppCardBackground)
+                                    .padding(.top, 8)
 
-                                    ForEach(pp.daySections) { day in
-                                        Text(day.label)
-                                            .appScaledFont(.subheadline, weight: .semibold, scale: fontScale)
-                                            .foregroundStyle(dateHeaderTextColor)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            .padding(.horizontal, 16)
-                                            .padding(.vertical, 6)
-                                            .background(dayHeaderBackground)
-
+                                ForEach(pp.daySections) { day in
+                                    Section {
                                         ForEach(day.rows) { row in
                                             NavigationLink {
                                                 OpenTimeTripDetailView(
@@ -109,14 +95,22 @@ struct OpenTimeTabView: View {
                                             .padding(.vertical, 8)
                                             Divider()
                                         }
+                                    } header: {
+                                        Text(day.label)
+                                            .appScaledFont(.subheadline, weight: .semibold, scale: fontScale)
+                                            .foregroundStyle(dateHeaderTextColor)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 6)
+                                            .background(dayHeaderBackground)
                                     }
                                 }
                             }
                         }
-                        .refreshable {
-                            await refreshOpenTime(using: proxy)
-                        }
                     }
+                }
+                .refreshable {
+                    await refreshOpenTime(using: proxy)
                 }
             }
 #if os(iOS)
@@ -159,6 +153,8 @@ struct OpenTimeTabView: View {
     private func refreshOpenTime(using proxy: ScrollViewProxy) async {
         hideUpToDateTask?.cancel()
         hideUpToDateTask = nil
+        hideLastFetchTask?.cancel()
+        hideLastFetchTask = nil
         let (previousLastSyncAt, wasShowingLoginSheet) = await MainActor.run {
             (viewModel.lastSyncAt, viewModel.isShowingLoginSheet)
         }
@@ -181,6 +177,13 @@ struct OpenTimeTabView: View {
             isRefreshingOpenTime = false
             if let currentLastSyncAt {
                 lastFetchMessage = "Last Fetch \(Self.lastFetchFormatter.string(from: currentLastSyncAt))"
+                hideLastFetchTask = Task {
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        lastFetchMessage = nil
+                    }
+                }
             }
             if didSyncSucceed {
                 refreshMessage = "TripBoard refresh complete."

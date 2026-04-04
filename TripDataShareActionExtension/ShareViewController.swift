@@ -7,6 +7,18 @@ final class ShareViewController: UIViewController {
     private static let sharedDirectoryName = "CrewAccessSharedImports"
     private static let pendingFileName = "pending_import.json"
 
+    private enum SharedPDFPayload {
+        case file(url: URL, sourceName: String)
+        case data(Data, sourceName: String)
+
+        var sourceName: String {
+            switch self {
+            case let .file(_, sourceName), let .data(_, sourceName):
+                return sourceName
+            }
+        }
+    }
+
     private let statusLabel = UILabel()
     private var didStart = false
 
@@ -56,13 +68,13 @@ final class ShareViewController: UIViewController {
                 return
             }
 
-            guard let dataResult = try await firstPDFData(from: providers) else {
+            guard let payload = try await firstPDFPayload(from: providers) else {
                 await setStatus("Selected item is not a PDF.")
                 await complete(after: 1.0)
                 return
             }
 
-            let destination = try saveToAppGroup(pdfData: dataResult.data, sourceName: dataResult.sourceName)
+            let destination = try saveToAppGroup(payload: payload)
             savedDestinationURL = destination
             try writePendingHandoff(fileName: destination.lastPathComponent)
             didWritePendingHandoff = true
@@ -93,20 +105,20 @@ final class ShareViewController: UIViewController {
         extensionContext?.completeRequest(returningItems: nil)
     }
 
-    private func firstPDFData(from providers: [NSItemProvider]) async throws -> (data: Data, sourceName: String)? {
+    private func firstPDFPayload(from providers: [NSItemProvider]) async throws -> SharedPDFPayload? {
         for provider in providers {
             if provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) {
-                if let result = try await loadPDFData(from: provider, typeIdentifier: UTType.pdf.identifier) {
+                if let result = try await loadPDFPayload(from: provider, typeIdentifier: UTType.pdf.identifier) {
                     return result
                 }
             }
             if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-                if let result = try await loadPDFData(from: provider, typeIdentifier: UTType.fileURL.identifier) {
+                if let result = try await loadPDFPayload(from: provider, typeIdentifier: UTType.fileURL.identifier) {
                     return result
                 }
             }
             if provider.hasItemConformingToTypeIdentifier(UTType.data.identifier) {
-                if let result = try await loadPDFData(from: provider, typeIdentifier: UTType.data.identifier) {
+                if let result = try await loadPDFPayload(from: provider, typeIdentifier: UTType.data.identifier) {
                     return result
                 }
             }
@@ -114,7 +126,7 @@ final class ShareViewController: UIViewController {
         return nil
     }
 
-    private func loadPDFData(from provider: NSItemProvider, typeIdentifier: String) async throws -> (data: Data, sourceName: String)? {
+    private func loadPDFPayload(from provider: NSItemProvider, typeIdentifier: String) async throws -> SharedPDFPayload? {
         try await withCheckedThrowingContinuation { continuation in
             provider.loadItem(forTypeIdentifier: typeIdentifier, options: nil) { item, error in
                 if let error {
@@ -124,12 +136,12 @@ final class ShareViewController: UIViewController {
 
                 if let url = item as? URL {
                     do {
-                        let data = try Data(contentsOf: url)
-                        guard Self.sniffPDF(data) else {
+                        guard try Self.sniffPDF(at: url) else {
                             continuation.resume(returning: nil)
                             return
                         }
-                        continuation.resume(returning: (data, url.lastPathComponent.isEmpty ? "Shared.pdf" : url.lastPathComponent))
+                        let sourceName = url.lastPathComponent.isEmpty ? "Shared.pdf" : url.lastPathComponent
+                        continuation.resume(returning: .file(url: url, sourceName: sourceName))
                     } catch {
                         continuation.resume(throwing: error)
                     }
@@ -141,7 +153,7 @@ final class ShareViewController: UIViewController {
                         continuation.resume(returning: nil)
                         return
                     }
-                    continuation.resume(returning: (data, "Shared.pdf"))
+                    continuation.resume(returning: .data(data, sourceName: "Shared.pdf"))
                     return
                 }
 
@@ -151,7 +163,7 @@ final class ShareViewController: UIViewController {
                         continuation.resume(returning: nil)
                         return
                     }
-                    continuation.resume(returning: (data, "Shared.pdf"))
+                    continuation.resume(returning: .data(data, sourceName: "Shared.pdf"))
                     return
                 }
 
@@ -160,7 +172,7 @@ final class ShareViewController: UIViewController {
         }
     }
 
-    private func saveToAppGroup(pdfData: Data, sourceName: String) throws -> URL {
+    private func saveToAppGroup(payload: SharedPDFPayload) throws -> URL {
         let fm = FileManager.default
         guard let container = fm.containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupIdentifier) else {
             throw NSError(domain: "TripDataShareAction", code: 1, userInfo: [NSLocalizedDescriptionKey: "App Group container not available."])
@@ -169,10 +181,21 @@ final class ShareViewController: UIViewController {
         let directory = container.appendingPathComponent(Self.sharedDirectoryName, isDirectory: true)
         try fm.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        let sanitizedName = sourceName.isEmpty ? "CrewAccess.pdf" : sourceName
+        let sanitizedName = payload.sourceName.isEmpty ? "CrewAccess.pdf" : payload.sourceName
         let uniqueName = "\(UUID().uuidString)-\(sanitizedName)"
         let destination = directory.appendingPathComponent(uniqueName)
-        try pdfData.write(to: destination, options: .atomic)
+        switch payload {
+        case let .file(sourceURL, _):
+            let didStartScopedAccess = sourceURL.startAccessingSecurityScopedResource()
+            defer {
+                if didStartScopedAccess {
+                    sourceURL.stopAccessingSecurityScopedResource()
+                }
+            }
+            try fm.copyItem(at: sourceURL, to: destination)
+        case let .data(data, _):
+            try data.write(to: destination, options: .atomic)
+        }
         return destination
     }
 
@@ -204,5 +227,18 @@ final class ShareViewController: UIViewController {
 
     private static func sniffPDF(_ data: Data) -> Bool {
         data.starts(with: [0x25, 0x50, 0x44, 0x46, 0x2D])
+    }
+
+    private static func sniffPDF(at url: URL) throws -> Bool {
+        let didStartScopedAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if didStartScopedAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let prefix = try handle.read(upToCount: 5) ?? Data()
+        return sniffPDF(prefix)
     }
 }

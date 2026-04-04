@@ -6,6 +6,7 @@ import UIKit
 struct SettingsTabView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @AppStorage("auto_fetch_on_open_enabled") private var autoFetchOnOpen = true
+    @AppStorage(AppViewModel.crewAccessRetentionSelectionKey) private var crewAccessRetentionSelection = AppViewModel.defaultCrewAccessRetentionSelection
     @AppStorage("appearance_mode") private var appearanceModeRawValue = AppearanceMode.system.rawValue
     @AppStorage("app_font_size_option") private var appFontSizeOptionRawValue = AppFontSizeOption.medium.rawValue
     @AppStorage("notification_48h_enabled") private var notify48h = false
@@ -33,6 +34,10 @@ struct SettingsTabView: View {
         formatter.dateFormat = "MMM dd, yyyy 'at' HH:mm"
         return formatter
     }()
+
+    private static let crewAccessRetentionOptions: [String] = [
+        "1", "2", "3", "4", "5", "6", "7", "ALL"
+    ]
 
     private var appearanceModeBinding: Binding<AppearanceMode> {
         Binding(
@@ -85,6 +90,23 @@ struct SettingsTabView: View {
     }
 
     @ViewBuilder
+    private var crewAccessRetentionSection: some View {
+        Section {
+            Picker("Trip data retained", selection: $crewAccessRetentionSelection) {
+                ForEach(Self.crewAccessRetentionOptions, id: \.self) { option in
+                    Text(option).tag(option)
+                }
+            }
+
+            Text("Keeps current plus selected number of previous Bid Periods.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        } header: {
+            Text("CrewAccess Retention")
+        }
+    }
+
+    @ViewBuilder
     private var crewAccessFilesSection: some View {
         Section {
             if crewAccessImportFiles.isEmpty {
@@ -131,6 +153,7 @@ struct SettingsTabView: View {
             )
 
             SettingsTripBoardFetchSection(autoFetchOnOpen: $autoFetchOnOpen)
+            crewAccessRetentionSection
             crewAccessFilesSection
 
             Section {
@@ -177,6 +200,7 @@ struct SettingsTabView: View {
                 Task {
                     await viewModel.loadSeniorityRecordsIfNeeded()
                     await viewModel.refreshNotificationAuthorizationStatus()
+                    await viewModel.applyCrewAccessRetentionPolicy()
                     await loadCrewAccessImportFiles()
                     if viewModel.notificationAuthorizationStatus == .denied {
                         notify48h = false
@@ -210,6 +234,12 @@ struct SettingsTabView: View {
                         notify12h = false
                         showNotificationDeniedAlert = true
                     }
+                }
+            }
+            .onChange(of: crewAccessRetentionSelection) { _, _ in
+                Task {
+                    await viewModel.applyCrewAccessRetentionPolicy()
+                    await loadCrewAccessImportFiles()
                 }
             }
             .alert("Notifications Are Disabled", isPresented: $showNotificationDeniedAlert) {

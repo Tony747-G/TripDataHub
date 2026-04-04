@@ -21,21 +21,26 @@
 		4C5EC0A3F2B851101A6DF46D /* IATATimeZoneResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FC85F3B696ED2DB2C56FC18 /* IATATimeZoneResolver.swift */; };
 		4F7808E425C3280304305CB3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 906799561E65DB1AF44B2DE4 /* Assets.xcassets */; };
 		5BF750A9EB06E31DED48688D /* AdminTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F151A3C5326A78E7880243EB /* AdminTabView.swift */; };
+		5C839E2F9397C27B75B962A9 /* BidPeriodService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B6FCCCA54583B5E8D70721D /* BidPeriodService.swift */; };
 		6A4D1917B4C1F6301A23AA7D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 3E72BFB505AAA65912E222FA /* LaunchScreen.storyboard */; };
+		6EC416FDFC26261153D10DD5 /* CalendarSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD7C5B32EE84F84B8DB788FD /* CalendarSupport.swift */; };
 		770DDB243CCA709322ED76E2 /* FriendsSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DD141C17FE03A5610C7CD39 /* FriendsSupport.swift */; };
 		7C3AB2B9272B81AA8921086F /* MaterialIcons.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 5E0709AD7B1E41C090C2CDA2 /* MaterialIcons.ttf */; };
 		7D1704D2A316ADA1508A7A5E /* TripBoardSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A4FD2E096CBF54B7899BF9A /* TripBoardSyncService.swift */; };
 		7DCBF996FF525485AECDAF4C /* AdminSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24F3AE1A0D7CD7D7B5816484 /* AdminSections.swift */; };
+		8AE54C1B2D3E4F5061728392 /* LaunchBehaviorUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AE54C1B2D3E4F5061728391 /* LaunchBehaviorUITests.swift */; };
 		9599AC8B5334199EAAC4FC49 /* FlightCountdownTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58EB09BC72A13BE9062573CC /* FlightCountdownTests.swift */; };
 		95B113CB364AA3060CA5D213 /* TimelineSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A53834B9B503F29F362404 /* TimelineSupport.swift */; };
 		A1D82A544C65FC9E6F2AB004 /* OpenTimeSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD991C2C233AF5AEE5AB9A42 /* OpenTimeSupport.swift */; };
 		B52957FE513ECC9639B99496 /* CrewAccessPDFImportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AF942899EBB7E90814E4995 /* CrewAccessPDFImportService.swift */; };
+		BCA4AE729D06B2ACB035CB39 /* CalendarSupportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30EA7A40210086623915E4DE /* CalendarSupportTests.swift */; };
 		C253B94D1BAE19FE0272F3F3 /* AdminPolicy.json in Resources */ = {isa = PBXBuildFile; fileRef = 98EDE30CF9675F9EFF5433AD /* AdminPolicy.json */; };
 		C6DAD0A1BE825FB0BA256D13 /* SettingsTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B75C57D0E8EA97E45C283A7B /* SettingsTabView.swift */; };
 		C8D9B5BF0F2E0E10EFC1355F /* TripDataHubApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BDD762619119C64ED70F521 /* TripDataHubApp.swift */; };
 		CABB746FF49354B5B9FB8445 /* MaterialIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9B6B161A74F14EA6BD7D4F1 /* MaterialIconView.swift */; };
 		CE0849FD7F7F3F22C65211EE /* ImportPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF695C0A628B417D70BF6664 /* ImportPreviewView.swift */; };
 		D62D823638EA9042B84575C1 /* RootTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABBFA59E2733EED76133B12E /* RootTabView.swift */; };
+		D7CF5354C3F636A38CCA3C27 /* CalendarModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C935139ABDF9C6B5FE71310 /* CalendarModels.swift */; };
 		DC8A5853601DC74925B4908E /* TripBoardLoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B56C7C114EB63B94E2C3ED4 /* TripBoardLoginView.swift */; };
 		DEA186B6F8256B4A0B01C291 /* AppViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 537DE7E0A39D9117D8B2DE33 /* AppViewModel.swift */; };
 		E1BDA32E3801BEDCB3C9A9E3 /* CrewAccessImportHelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C6A66B614D3A175C4E929D9 /* CrewAccessImportHelpView.swift */; };
@@ -61,11 +66,14 @@
 /* Begin PBXFileReference section */
 		0280B0ED64CBF38F6C06B873 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		0AF942899EBB7E90814E4995 /* CrewAccessPDFImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessPDFImportService.swift; sourceTree = "<group>"; };
-		13F6EFC17A823450FE7E3210 /* TripDataHubTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TripDataHubTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		13F6EFC17A823450FE7E3210 /* TripDataHubTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TripDataHubTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		1BC23D4E5F60718293A4B5C6 /* TripDataHubUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TripDataHubUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1FDA7EA4639BB0121DD6B803 /* ViewShared.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewShared.swift; sourceTree = "<group>"; };
 		24F3AE1A0D7CD7D7B5816484 /* AdminSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminSections.swift; sourceTree = "<group>"; };
 		26F1CF972BCCEF2CFFA1D9B1 /* NextReportNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextReportNotificationService.swift; sourceTree = "<group>"; };
 		27B3B19D320BB806C27D1D1C /* TripDataHub.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TripDataHub.entitlements; sourceTree = "<group>"; };
+		2C935139ABDF9C6B5FE71310 /* CalendarModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarModels.swift; sourceTree = "<group>"; };
+		30EA7A40210086623915E4DE /* CalendarSupportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSupportTests.swift; sourceTree = "<group>"; };
 		3A4FD2E096CBF54B7899BF9A /* TripBoardSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripBoardSyncService.swift; sourceTree = "<group>"; };
 		3AA31B4F87A8944508CA4749 /* TripLegDisplaySupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripLegDisplaySupport.swift; sourceTree = "<group>"; };
 		3AE25B19B246FF6370CE9E6F /* OpenTimeTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenTimeTabView.swift; sourceTree = "<group>"; };
@@ -84,14 +92,17 @@
 		7530BA3F3B6E04AB959D36F4 /* FriendsTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendsTabView.swift; sourceTree = "<group>"; };
 		79E4DBC654459A337652E6EB /* OpenTimeTripDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenTimeTripDetailView.swift; sourceTree = "<group>"; };
 		7B4DAB3D177949F363100BE8 /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
+		8AE54C1B2D3E4F5061728391 /* LaunchBehaviorUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchBehaviorUITests.swift; sourceTree = "<group>"; };
 		8CD425A30028665C7AF3C26E /* TripModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripModels.swift; sourceTree = "<group>"; };
 		906799561E65DB1AF44B2DE4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		98EDE30CF9675F9EFF5433AD /* AdminPolicy.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = AdminPolicy.json; sourceTree = "<group>"; };
+		9B6FCCCA54583B5E8D70721D /* BidPeriodService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BidPeriodService.swift; sourceTree = "<group>"; };
 		9BDD762619119C64ED70F521 /* TripDataHubApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripDataHubApp.swift; sourceTree = "<group>"; };
 		9C6A66B614D3A175C4E929D9 /* CrewAccessImportHelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessImportHelpView.swift; sourceTree = "<group>"; };
 		ABBFA59E2733EED76133B12E /* RootTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootTabView.swift; sourceTree = "<group>"; };
 		B75C57D0E8EA97E45C283A7B /* SettingsTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTabView.swift; sourceTree = "<group>"; };
 		B9B6B161A74F14EA6BD7D4F1 /* MaterialIconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaterialIconView.swift; sourceTree = "<group>"; };
+		BD7C5B32EE84F84B8DB788FD /* CalendarSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSupport.swift; sourceTree = "<group>"; };
 		CD991C2C233AF5AEE5AB9A42 /* OpenTimeSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenTimeSupport.swift; sourceTree = "<group>"; };
 		D1A53834B9B503F29F362404 /* TimelineSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineSupport.swift; sourceTree = "<group>"; };
 		D5F00128A17C7CA217977EA7 /* TimelineTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineTabView.swift; sourceTree = "<group>"; };
@@ -99,7 +110,7 @@
 		DF695C0A628B417D70BF6664 /* ImportPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportPreviewView.swift; sourceTree = "<group>"; };
 		EABE1DFB8EE6CCCF77FB5717 /* ImportFileSniffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportFileSniffer.swift; sourceTree = "<group>"; };
 		F151A3C5326A78E7880243EB /* AdminTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminTabView.swift; sourceTree = "<group>"; };
-		F518C211127FA260E6247ED8 /* TripDataHub.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TripDataHub.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F518C211127FA260E6247ED8 /* TripData Hub.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "TripData Hub.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		FC24A3084F1CB77216493907 /* NextReportWindowBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextReportWindowBuilder.swift; sourceTree = "<group>"; };
 		FE4BC208606CA451400CC1BE /* AppViewModel+PreviewData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppViewModel+PreviewData.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -108,8 +119,9 @@
 		35A97BDAAEA706418C6B65F2 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				F518C211127FA260E6247ED8 /* TripDataHub.app */,
+				F518C211127FA260E6247ED8 /* TripData Hub.app */,
 				13F6EFC17A823450FE7E3210 /* TripDataHubTests.xctest */,
+				1BC23D4E5F60718293A4B5C6 /* TripDataHubUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -144,6 +156,7 @@
 			children = (
 				24F3AE1A0D7CD7D7B5816484 /* AdminSections.swift */,
 				F151A3C5326A78E7880243EB /* AdminTabView.swift */,
+				BD7C5B32EE84F84B8DB788FD /* CalendarSupport.swift */,
 				9C6A66B614D3A175C4E929D9 /* CrewAccessImportHelpView.swift */,
 				6DD141C17FE03A5610C7CD39 /* FriendsSupport.swift */,
 				7530BA3F3B6E04AB959D36F4 /* FriendsTabView.swift */,
@@ -175,6 +188,7 @@
 		AEF8401FA9AEE5505B4A6FA5 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				9B6FCCCA54583B5E8D70721D /* BidPeriodService.swift */,
 				0AF942899EBB7E90814E4995 /* CrewAccessPDFImportService.swift */,
 				4F6C86491D2E927C2CEC60D5 /* FlightCountdownCoordinator.swift */,
 				4FC85F3B696ED2DB2C56FC18 /* IATATimeZoneResolver.swift */,
@@ -201,9 +215,18 @@
 		D101DDBB3D56809CEA7A0D66 /* TripDataHubTests */ = {
 			isa = PBXGroup;
 			children = (
+				30EA7A40210086623915E4DE /* CalendarSupportTests.swift */,
 				58EB09BC72A13BE9062573CC /* FlightCountdownTests.swift */,
 			);
 			path = TripDataHubTests;
+			sourceTree = "<group>";
+		};
+		D101DDBB3D56809CEA7A0D67 /* TripDataHubUITests */ = {
+			isa = PBXGroup;
+			children = (
+				8AE54C1B2D3E4F5061728391 /* LaunchBehaviorUITests.swift */,
+			);
+			path = TripDataHubUITests;
 			sourceTree = "<group>";
 		};
 		DA29E1945D375877678093FD = {
@@ -211,6 +234,7 @@
 			children = (
 				61C9603609A3BE24BCF74010 /* TripDataHub */,
 				D101DDBB3D56809CEA7A0D66 /* TripDataHubTests */,
+				D101DDBB3D56809CEA7A0D67 /* TripDataHubUITests */,
 				35A97BDAAEA706418C6B65F2 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -218,6 +242,7 @@
 		E904C8310067C98AD7B34FC0 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				2C935139ABDF9C6B5FE71310 /* CalendarModels.swift */,
 				58C18FF3A67E7E968B09F58E /* FlightCountdownSharedModels.swift */,
 				725719445A236E76E849AF2F /* FlightCountdownSupport.swift */,
 				3AA31B4F87A8944508CA4749 /* TripLegDisplaySupport.swift */,
@@ -247,6 +272,24 @@
 			productReference = 13F6EFC17A823450FE7E3210 /* TripDataHubTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		4D5E6F708192A3B4C5D6E7F8 /* TripDataHubUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5E6F708192A3B4C5D6E7F809 /* Build configuration list for PBXNativeTarget "TripDataHubUITests" */;
+			buildPhases = (
+				6F708192A3B4C5D6E7F8091A /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				7A8192A3B4C5D6E7F8091A2B /* PBXTargetDependency */,
+			);
+			name = TripDataHubUITests;
+			packageProductDependencies = (
+			);
+			productName = TripDataHubUITests;
+			productReference = 1BC23D4E5F60718293A4B5C6 /* TripDataHubUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		9CDD311DB999C310E3ADCC73 /* TripDataHub */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 4501989166C2FB0365E64546 /* Build configuration list for PBXNativeTarget "TripDataHub" */;
@@ -262,7 +305,7 @@
 			packageProductDependencies = (
 			);
 			productName = TripDataHub;
-			productReference = F518C211127FA260E6247ED8 /* TripDataHub.app */;
+			productReference = F518C211127FA260E6247ED8 /* TripData Hub.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -272,20 +315,20 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 1430;
+				LastUpgradeCheck = 2640;
 				TargetAttributes = {
 					06F2AF4905B951E2C0FF528F = {
-						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					4D5E6F708192A3B4C5D6E7F8 = {
 						ProvisioningStyle = Automatic;
 					};
 					9CDD311DB999C310E3ADCC73 = {
-						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
 				};
 			};
 			buildConfigurationList = 12782E3E02B300ED016918C6 /* Build configuration list for PBXProject "TripDataHub" */;
-			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -295,11 +338,13 @@
 			mainGroup = DA29E1945D375877678093FD;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
+			productRefGroup = 35A97BDAAEA706418C6B65F2 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
 				9CDD311DB999C310E3ADCC73 /* TripDataHub */,
 				06F2AF4905B951E2C0FF528F /* TripDataHubTests */,
+				4D5E6F708192A3B4C5D6E7F8 /* TripDataHubUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -323,7 +368,16 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BCA4AE729D06B2ACB035CB39 /* CalendarSupportTests.swift in Sources */,
 				9599AC8B5334199EAAC4FC49 /* FlightCountdownTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6F708192A3B4C5D6E7F8091A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8AE54C1B2D3E4F5061728392 /* LaunchBehaviorUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -335,6 +389,9 @@
 				5BF750A9EB06E31DED48688D /* AdminTabView.swift in Sources */,
 				F4130D36B01FE4896582FC2F /* AppViewModel+PreviewData.swift in Sources */,
 				DEA186B6F8256B4A0B01C291 /* AppViewModel.swift in Sources */,
+				5C839E2F9397C27B75B962A9 /* BidPeriodService.swift in Sources */,
+				D7CF5354C3F636A38CCA3C27 /* CalendarModels.swift in Sources */,
+				6EC416FDFC26261153D10DD5 /* CalendarSupport.swift in Sources */,
 				E1BDA32E3801BEDCB3C9A9E3 /* CrewAccessImportHelpView.swift in Sources */,
 				B52957FE513ECC9639B99496 /* CrewAccessPDFImportService.swift in Sources */,
 				27B924E6CA6484B9156032EC /* FlightCountdownCoordinator.swift in Sources */,
@@ -372,6 +429,11 @@
 
 /* Begin PBXTargetDependency section */
 		ACCF85D1355AE5B839C9740B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9CDD311DB999C310E3ADCC73 /* TripDataHub */;
+			targetProxy = 30A401B24E2279426942B203 /* PBXContainerItemProxy */;
+		};
+		7A8192A3B4C5D6E7F8091A2B /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 9CDD311DB999C310E3ADCC73 /* TripDataHub */;
 			targetProxy = 30A401B24E2279426942B203 /* PBXContainerItemProxy */;
@@ -414,8 +476,10 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -429,6 +493,7 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.9;
@@ -440,7 +505,6 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -460,33 +524,20 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_ENTITLEMENTS = TripDataHub/TripDataHub.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				CURRENT_PROJECT_VERSION = 8;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TripDataHub/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "TripData Hub";
 				INFOPLIST_KEY_CFBundleIconName = AppIcon;
-				INFOPLIST_KEY_UIAppFonts = (
-					MaterialIcons.ttf,
-					Resources/Fonts/MaterialIcons.ttf,
-				);
+				INFOPLIST_KEY_UIAppFonts = "Resources/Fonts/MaterialIcons.ttf";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = (
-					UIInterfaceOrientationPortrait,
-					UIInterfaceOrientationPortraitUpsideDown,
-					UIInterfaceOrientationLandscapeLeft,
-					UIInterfaceOrientationLandscapeRight,
-				);
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = (
-					UIInterfaceOrientationPortrait,
-					UIInterfaceOrientationPortraitUpsideDown,
-					UIInterfaceOrientationLandscapeLeft,
-					UIInterfaceOrientationLandscapeRight,
-				);
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -497,6 +548,18 @@
 				PRODUCT_NAME = "TripData Hub";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		93A4B5C6D7E8F90123456789 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule.UITests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = TripDataHub;
 			};
 			name = Debug;
 		};
@@ -535,8 +598,10 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -557,6 +622,7 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.9;
@@ -569,33 +635,20 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_ENTITLEMENTS = TripDataHub/TripDataHub.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				CURRENT_PROJECT_VERSION = 8;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TripDataHub/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "TripData Hub";
 				INFOPLIST_KEY_CFBundleIconName = AppIcon;
-				INFOPLIST_KEY_UIAppFonts = (
-					MaterialIcons.ttf,
-					Resources/Fonts/MaterialIcons.ttf,
-				);
+				INFOPLIST_KEY_UIAppFonts = "Resources/Fonts/MaterialIcons.ttf";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = (
-					UIInterfaceOrientationPortrait,
-					UIInterfaceOrientationPortraitUpsideDown,
-					UIInterfaceOrientationLandscapeLeft,
-					UIInterfaceOrientationLandscapeRight,
-				);
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = (
-					UIInterfaceOrientationPortrait,
-					UIInterfaceOrientationPortraitUpsideDown,
-					UIInterfaceOrientationLandscapeLeft,
-					UIInterfaceOrientationLandscapeRight,
-				);
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -614,7 +667,6 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -627,6 +679,18 @@
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TripData Hub.app/TripData Hub";
 			};
 			name = Debug;
+		};
+		C4D5E6F708192A3B4C5D6E7F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule.UITests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = TripDataHub;
+			};
+			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
@@ -654,6 +718,15 @@
 			buildConfigurations = (
 				BE1A24A53247FEF47BB0ED3B /* Debug */,
 				6BFF8CEE30E67ABE025767C1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		5E6F708192A3B4C5D6E7F809 /* Build configuration list for PBXNativeTarget "TripDataHubUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				93A4B5C6D7E8F90123456789 /* Debug */,
+				C4D5E6F708192A3B4C5D6E7F /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

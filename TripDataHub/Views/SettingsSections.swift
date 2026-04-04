@@ -43,6 +43,18 @@ struct SettingsTripBoardFetchSection: View {
         Section {
             Toggle("Auto Fetch on App Open", isOn: $autoFetchOnOpen)
 
+            Button(viewModel.authStatus == .loggedOut ? "TripBoard Log-in" : "Fetch TripBoard Data") {
+                Task {
+                    await viewModel.syncTapped()
+                }
+            }
+            .disabled(viewModel.isSyncing)
+            .accessibilityIdentifier("settings.tripboardAction")
+
+            if viewModel.isSyncing {
+                ProgressView()
+            }
+
             if viewModel.isTripBoardServerDown {
                 Text("Auth: TripBoard Server is down")
                     .font(.footnote)

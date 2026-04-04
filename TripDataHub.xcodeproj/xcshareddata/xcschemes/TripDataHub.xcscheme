@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
-   LastUpgradeVersion = "1430"
+   LastUpgradeVersion = "2640"
    version = "1.3">
    <BuildAction
       parallelizeBuildables = "YES"
@@ -17,6 +17,20 @@
                BlueprintIdentifier = "9CDD311DB999C310E3ADCC73"
                BuildableName = "TripData Hub.app"
                BlueprintName = "TripDataHub"
+               ReferencedContainer = "container:TripDataHub.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "4D5E6F708192A3B4C5D6E7F8"
+               BuildableName = "TripDataHubUITests.xctest"
+               BlueprintName = "TripDataHubUITests"
                ReferencedContainer = "container:TripDataHub.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -45,6 +59,17 @@
                BlueprintIdentifier = "06F2AF4905B951E2C0FF528F"
                BuildableName = "TripDataHubTests.xctest"
                BlueprintName = "TripDataHubTests"
+               ReferencedContainer = "container:TripDataHub.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "4D5E6F708192A3B4C5D6E7F8"
+               BuildableName = "TripDataHubUITests.xctest"
+               BlueprintName = "TripDataHubUITests"
                ReferencedContainer = "container:TripDataHub.xcodeproj">
             </BuildableReference>
          </TestableReference>

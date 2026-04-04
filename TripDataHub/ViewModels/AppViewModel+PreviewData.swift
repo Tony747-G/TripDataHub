@@ -79,5 +79,100 @@ extension AppViewModel {
             )
         ]
     }
+
+    func applyDebugLaunchOverridesIfNeeded() {
+        let arguments = ProcessInfo.processInfo.arguments
+
+        if arguments.contains("UITEST_TIMELINE_SEED") {
+            let seededCrewSchedules = Self.uiTestTimelineSchedules
+            crewAccessSchedules = seededCrewSchedules
+            bidproSchedules = []
+            schedules = seededCrewSchedules
+            lastSyncAt = Date(timeIntervalSince1970: 1_767_494_400) // 2026-01-06T00:00:00Z
+            lastImportSummaryMessage = nil
+            errorMessage = nil
+        }
+
+        if arguments.contains("UITEST_LOGGED_OUT_VERIFIED") {
+            let recordName = currentCloudKitRecordName ?? "UITEST-LOCAL-IDENTITY"
+            currentCloudKitRecordName = recordName
+            verifiedIdentity = VerifiedIdentityProfile(
+                cloudKitRecordName: recordName,
+                name: "UI Test Pilot",
+                gemsID: "UT1001",
+                domicile: "ANC",
+                equipment: "747",
+                seat: "FO",
+                dateOfHire: "01/01/2020",
+                isAdminEligible: false,
+                adminPolicyFingerprint: nil,
+                verifiedAt: Date(timeIntervalSince1970: 1_767_494_400)
+            )
+            authStatus = .loggedOut
+            errorMessage = nil
+            isShowingLoginSheet = false
+            didLastFetchFail = false
+        }
+    }
+
+    private static var uiTestTimelineSchedules: [PayPeriodSchedule] {
+        let firstLegs = [
+            TripLeg(
+                payPeriod: "CA26-01-A70001",
+                pairing: "A70001",
+                leg: 1,
+                flight: "063",
+                depAirport: "ANC",
+                depLocal: "2026-06-09 09:15",
+                arrAirport: "SDF",
+                arrLocal: "2026-06-09 18:30",
+                depUTC: "2026-06-09T18:15:00Z",
+                arrUTC: "2026-06-10T00:30:00Z",
+                status: "-",
+                block: "6:15"
+            ),
+            TripLeg(
+                payPeriod: "CA26-01-A70001",
+                pairing: "A70001",
+                leg: 2,
+                flight: "108",
+                depAirport: "SDF",
+                depLocal: "2026-06-10 08:20",
+                arrAirport: "NRT",
+                arrLocal: "2026-06-11 12:05",
+                depUTC: "2026-06-10T13:20:00Z",
+                arrUTC: "2026-06-11T03:05:00Z",
+                status: "-",
+                block: "13:45"
+            ),
+            TripLeg(
+                payPeriod: "CA26-01-A70001",
+                pairing: "A70001",
+                leg: 3,
+                flight: "109",
+                depAirport: "NRT",
+                depLocal: "2026-06-12 16:40",
+                arrAirport: "ANC",
+                arrLocal: "2026-06-12 08:25",
+                depUTC: "2026-06-12T07:40:00Z",
+                arrUTC: "2026-06-12T17:25:00Z",
+                status: "-",
+                block: "8:45"
+            )
+        ]
+
+        return [
+            PayPeriodSchedule(
+                id: "CA26-01-A70001",
+                label: "CA26-01-A70001",
+                tripCount: 1,
+                legCount: firstLegs.count,
+                openTimeCount: 0,
+                updatedAt: Date(timeIntervalSince1970: 1_767_494_400),
+                legs: firstLegs,
+                openTimeTrips: []
+            )
+        ]
+    }
 }
 #endif

@@ -397,7 +397,8 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
 
         var tripLegs: [TripLeg] = []
         var jsonItems: [CrewAccessTripItemJSON] = []
-        for row in legRows {
+        for (index, row) in legRows.enumerated() {
+            let legSequence = index + 1
             let depTimeZoneID = tzResolver.resolve(row.depAirport)
             let arrTimeZoneID = tzResolver.resolve(row.arrAirport)
 
@@ -433,8 +434,8 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
                 continue
             }
 
-            let depUTCDisplay = utcDisplay(utc: depUTC)
-            let arrUTCDisplay = utcDisplay(utc: arrUTC)
+            let depLocalDisplay = localDisplay(utc: depUTC, timeZoneID: depTimeZoneID)
+            let arrLocalDisplay = localDisplay(utc: arrUTC, timeZoneID: arrTimeZoneID)
             let normalizedInputBlock = normalizedBlockValue(row.block)
             let calculatedBlock = calculateBlock(depUTC: depUTC, arrUTC: arrUTC)
             let effectiveBlock = normalizedInputBlock ?? calculatedBlock ?? ""
@@ -442,12 +443,12 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
             let leg = TripLeg(
                 payPeriod: crewAccessLabel(from: tripDate, tripID: tripID),
                 pairing: tripID,
-                leg: row.sequence,
+                leg: legSequence,
                 flight: row.flight,
                 depAirport: row.depAirport,
-                depLocal: depUTCDisplay,
+                depLocal: depLocalDisplay,
                 arrAirport: row.arrAirport,
-                arrLocal: arrUTCDisplay,
+                arrLocal: arrLocalDisplay,
                 depUTC: Self.isoUTCFormatter.string(from: depUTC),
                 arrUTC: Self.isoUTCFormatter.string(from: arrUTC),
                 status: row.deadhead ? "DH" : "-",
@@ -457,15 +458,15 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
 
             jsonItems.append(
                 CrewAccessTripItemJSON(
-                    sequence: row.sequence,
+                    sequence: legSequence,
                     depAirport: row.depAirport,
                     arrAirport: row.arrAirport,
                     deadhead: row.deadhead,
                     flight: row.flight,
                     startUtc: Self.isoUTCFormatter.string(from: depUTC),
                     endUtc: Self.isoUTCFormatter.string(from: arrUTC),
-                    startLocalDisplay: depUTCDisplay,
-                    endLocalDisplay: arrUTCDisplay,
+                    startLocalDisplay: depLocalDisplay,
+                    endLocalDisplay: arrLocalDisplay,
                     originTz: depTimeZoneID,
                     destinationTz: arrTimeZoneID,
                     timeDerivation: "from_utc",
@@ -608,6 +609,18 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
 
     private func utcDisplay(utc: Date) -> String {
         Self.utcDisplayFormatter.string(from: utc)
+    }
+
+    private func localDisplay(utc: Date, timeZoneID: String?) -> String {
+        guard let tzID = timeZoneID, let tz = TimeZone(identifier: tzID) else {
+            return Self.utcDisplayFormatter.string(from: utc)
+        }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = tz
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter.string(from: utc)
     }
 
     private func crewAccessLabel(from tripDate: Date, tripID: String) -> String {
