@@ -199,8 +199,14 @@ final class AppViewModel: ObservableObject {
     private let useCloudKitIdentity = false
     // Internal testing fallback:
     // when true, users can verify with entered GEMS ID + DOB even if Seniority DB is not loaded.
-    // This never grants admin eligibility.
+    // This never grants admin eligibility, but in Friends sharing GEMS ID itself is the
+    // trust boundary — so this fallback must NOT ship in App Store builds. Gate strictly
+    // on DEBUG (Xcode/local builds only). TestFlight and Release default to false.
+#if DEBUG
     private let allowVerificationWithoutSeniorityDB = true
+#else
+    private let allowVerificationWithoutSeniorityDB = false
+#endif
     // Add your own CloudKit recordName(s) here to grant admin access in TestFlight.
     private let adminCloudKitRecordAllowlist: Set<String> = []
     private let adminPolicy: AdminPolicy
@@ -590,7 +596,7 @@ final class AppViewModel: ObservableObject {
     }
 
     @discardableResult
-    func importCrewAccessPDFData(_ data: Data, sourceFileName: String?) -> Bool {
+    func importCrewAccessPDFData(_ data: Data, sourceFileName: String?) async -> Bool {
         guard !importInProgress else { return false }
         importInProgress = true
 
@@ -612,7 +618,12 @@ final class AppViewModel: ObservableObject {
             sourceFileName ?? "unknown",
             data.count
         )
-        let draft = crewAccessImportService.analyzeTrip(pdfData: data, sourceFileName: sourceFileName)
+        // PDF parsing is CPU-heavy (PDFKit text extraction + regex passes).
+        // Run it off the main actor so the UI stays responsive on large trips.
+        let service = crewAccessImportService
+        let draft = await Task.detached(priority: .utility) {
+            service.analyzeTrip(pdfData: data, sourceFileName: sourceFileName)
+        }.value
         pendingImport = PendingImport(
             id: UUID(),
             source: .crewAccessPDF,
@@ -726,7 +737,7 @@ final class AppViewModel: ObservableObject {
                     NSLog("[Import] consumeExternalOpenURL done key=%@ ok=false (not PDF)", key)
                     continue
                 }
-                let importAccepted = importCrewAccessPDFData(data, sourceFileName: url.lastPathComponent)
+                let importAccepted = await importCrewAccessPDFData(data, sourceFileName: url.lastPathComponent)
                 if pendingImport != nil {
                     cleanupImportedExternalFileBestEffort(at: url)
                     isSuccess = true
@@ -1245,16 +1256,62 @@ final class AppViewModel: ObservableObject {
 
     // MARK: - Logbook CSV Export
 
-    func exportLogbookCSV() -> URL? {
+    private static let logbookISOParser: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        return f
+    }()
+
+    private static let logbookDateFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    private static let logbookTimeFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    private static let logbookFileNameFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyyMMdd_HHmm"
+        return f
+    }()
+
+    private struct LogbookExportResult: Sendable {
+        let url: URL?
+        let message: String
+    }
+
+    func exportLogbookCSV() async -> URL? {
+        // Always reset message before starting so stale text from a prior run
+        // never lingers when the user taps Export twice in a row.
+        logbookExportMessage = nil
+
+        let result = await Task.detached(priority: .utility) {
+            Self.buildLogbookCSV()
+        }.value
+
+        logbookExportMessage = result.message
+        return result.url
+    }
+
+    private nonisolated static func buildLogbookCSV() -> LogbookExportResult {
         let fm = FileManager.default
         guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            logbookExportMessage = "Documents directory is unavailable."
-            return nil
+            return LogbookExportResult(url: nil, message: "Documents directory is unavailable.")
         }
         let dir = documents.appendingPathComponent("CrewAccessImports", isDirectory: true)
         guard fm.fileExists(atPath: dir.path) else {
-            logbookExportMessage = "No imported trips found."
-            return nil
+            return LogbookExportResult(url: nil, message: "No imported trips found.")
         }
 
         let urls: [URL]
@@ -1265,36 +1322,25 @@ final class AppViewModel: ObservableObject {
                 options: [.skipsHiddenFiles]
             ).filter { $0.pathExtension.lowercased() == "json" }
         } catch {
-            logbookExportMessage = "Failed to read import files."
-            return nil
+            return LogbookExportResult(url: nil, message: "Failed to read import files.")
         }
-
-        let isoParser = ISO8601DateFormatter()
-        isoParser.formatOptions = [.withInternetDateTime]
-        isoParser.timeZone = TimeZone(secondsFromGMT: 0)
-
-        let dateFmt = DateFormatter()
-        dateFmt.locale = Locale(identifier: "en_US_POSIX")
-        dateFmt.timeZone = TimeZone(secondsFromGMT: 0)
-        dateFmt.dateFormat = "yyyy-MM-dd"
-
-        let timeFmt = DateFormatter()
-        timeFmt.locale = Locale(identifier: "en_US_POSIX")
-        timeFmt.timeZone = TimeZone(secondsFromGMT: 0)
-        timeFmt.dateFormat = "HH:mm"
 
         struct ExportRow { let sortDate: Date; let line: String }
         var rows: [ExportRow] = []
+
+        let isoParser = logbookISOParser
+        let dateFmt = logbookDateFmt
+        let timeFmt = logbookTimeFmt
 
         for url in urls {
             guard let data = try? Data(contentsOf: url),
                   let trip = try? JSONDecoder().decode(CrewAccessTripJSON.self, from: data)
             else { continue }
 
-            let pic = Self.logbookCrewName(trip.crew, role: .pic)
-            let fo  = Self.logbookCrewName(trip.crew, role: .fo)
-            let ro  = Self.logbookCrewName(trip.crew, role: .ro)
-            let fo2 = Self.logbookCrewName(trip.crew, role: .fo2)
+            let pic = logbookCrewName(trip.crew, role: .pic)
+            let fo  = logbookCrewName(trip.crew, role: .fo)
+            let ro  = logbookCrewName(trip.crew, role: .ro)
+            let fo2 = logbookCrewName(trip.crew, role: .fo2)
 
             for item in trip.items {
                 let stdText = item.stdUtc ?? item.startUtc
@@ -1323,21 +1369,21 @@ final class AppViewModel: ObservableObject {
                 let flightNum = item.deadhead ? "DH \(item.flight)" : item.flight
 
                 let row = [
-                    Self.csvEscaped(depDate),
-                    Self.csvEscaped(flightNum),
-                    Self.csvEscaped(item.tailNumber ?? ""),
-                    Self.csvEscaped(item.aircraft),
-                    Self.csvEscaped(item.depAirport),
-                    Self.csvEscaped(item.arrAirport),
-                    Self.csvEscaped(stdStr),
-                    Self.csvEscaped(staStr),
-                    Self.csvEscaped(atdStr),
-                    Self.csvEscaped(ataStr),
-                    Self.csvEscaped(blockStr),
-                    Self.csvEscaped(pic),
-                    Self.csvEscaped(fo),
-                    Self.csvEscaped(ro),
-                    Self.csvEscaped(fo2)
+                    csvEscaped(depDate),
+                    csvEscaped(flightNum),
+                    csvEscaped(item.tailNumber ?? ""),
+                    csvEscaped(item.aircraft),
+                    csvEscaped(item.depAirport),
+                    csvEscaped(item.arrAirport),
+                    csvEscaped(stdStr),
+                    csvEscaped(staStr),
+                    csvEscaped(atdStr),
+                    csvEscaped(ataStr),
+                    csvEscaped(blockStr),
+                    csvEscaped(pic),
+                    csvEscaped(fo),
+                    csvEscaped(ro),
+                    csvEscaped(fo2)
                 ].joined(separator: ",")
 
                 rows.append(ExportRow(sortDate: stdDate, line: row))
@@ -1351,24 +1397,24 @@ final class AppViewModel: ObservableObject {
         if !rows.isEmpty { csvText += "\n" }
 
         guard let csvData = csvText.data(using: .utf8) else {
-            logbookExportMessage = "Failed to encode logbook CSV."
-            return nil
+            return LogbookExportResult(url: nil, message: "Failed to encode logbook CSV.")
         }
 
-        let fileNameFmt = DateFormatter()
-        fileNameFmt.locale = Locale(identifier: "en_US_POSIX")
-        fileNameFmt.dateFormat = "yyyyMMdd_HHmm"
-        let fileName = "TripData_Logbook_\(fileNameFmt.string(from: Date())).csv"
+        let fileName = "TripData_Logbook_\(logbookFileNameFmt.string(from: Date())).csv"
         let outputURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
 
         do {
             try csvData.write(to: outputURL, options: .atomic)
             NSLog("[LogbookExport] finished rows=%d bytes=%d", rows.count, csvData.count)
-            logbookExportMessage = "Logbook CSV ready — \(rows.count) flights."
-            return outputURL
+            return LogbookExportResult(
+                url: outputURL,
+                message: "Logbook CSV ready — \(rows.count) flights."
+            )
         } catch {
-            logbookExportMessage = "Failed to write logbook CSV: \(error.localizedDescription)"
-            return nil
+            return LogbookExportResult(
+                url: nil,
+                message: "Failed to write logbook CSV: \(error.localizedDescription)"
+            )
         }
     }
 

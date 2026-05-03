@@ -1,7 +1,7 @@
 import Foundation
 import PDFKit
 
-protocol CrewAccessPDFImportServiceProtocol {
+protocol CrewAccessPDFImportServiceProtocol: Sendable {
     func analyzeTrip(pdfData: Data, sourceFileName: String?) -> CrewAccessImportDraft
 }
 
@@ -438,7 +438,7 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         }
 
         let label = crewAccessLabel(from: tripDate, tripID: tripID)
-        let layoverByArrivingSequence = layoverMetadataByArrivingSequence(from: pdfData, legRows: legRows)
+        let layoverByArrivingSequence = layoverMetadataByArrivingSequence(extractedText: extractedText, legRows: legRows)
 
         var tripLegs: [TripLeg] = []
         var jsonItems: [CrewAccessTripItemJSON] = []
@@ -598,9 +598,10 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         return trimmed
     }
 
-    private func layoverMetadataByArrivingSequence(from pdfData: Data, legRows: [ParsedLegRow]) -> [Int: LayoverLeg] {
-        guard let roster = PDFTripParser.parse(from: pdfData),
-              let firstEntry = roster.entries.first,
+    private func layoverMetadataByArrivingSequence(extractedText: String, legRows: [ParsedLegRow]) -> [Int: LayoverLeg] {
+        guard !extractedText.isEmpty else { return [:] }
+        let roster = PDFTripParser.parseText(extractedText)
+        guard let firstEntry = roster.entries.first,
               case .trip(let trip) = firstEntry else {
             return [:]
         }
@@ -643,7 +644,7 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
             errors: errors,
             rawExtractStats: rawExtractStats
         )
-        Foundation.NSLog(
+        NSLog(
             "[Import] analyzeTrip result tripId=%@ tripDate=%@ legs=%d errors=%d warnings=%d",
             draft.tripId,
             draft.tripDate,
@@ -653,7 +654,6 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         )
         return draft
     }
-
 
     private func dedupWarnings(_ warnings: [ImportWarning]) -> [ImportWarning] {
         var seen = Set<String>()
@@ -701,7 +701,7 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         if let dep, !weekdayToken.isEmpty {
             let parsedWeekday = normalizeWeekdayToken(weekdayToken)
             if parsedWeekday != utcWeekdayToken(for: dep) {
-                Foundation.NSLog(
+                NSLog(
                     "[Parse] weekdayMismatch tripDay=%d token=%@ computed=%@",
                     tripDayOffset,
                     parsedWeekday,
