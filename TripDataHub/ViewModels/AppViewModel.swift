@@ -1256,36 +1256,6 @@ final class AppViewModel: ObservableObject {
 
     // MARK: - Logbook CSV Export
 
-    private static let logbookISOParser: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime]
-        f.timeZone = TimeZone(secondsFromGMT: 0)
-        return f
-    }()
-
-    private static let logbookDateFmt: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(secondsFromGMT: 0)
-        f.dateFormat = "yyyy-MM-dd"
-        return f
-    }()
-
-    private static let logbookTimeFmt: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(secondsFromGMT: 0)
-        f.dateFormat = "HH:mm"
-        return f
-    }()
-
-    private static let logbookFileNameFmt: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyyMMdd_HHmm"
-        return f
-    }()
-
     private struct LogbookExportResult: Sendable {
         let url: URL?
         let message: String
@@ -1325,12 +1295,31 @@ final class AppViewModel: ObservableObject {
             return LogbookExportResult(url: nil, message: "Failed to read import files.")
         }
 
+        // Formatters are created here (inside the detached task) and used only
+        // within this scope. DateFormatter is documented as thread-safe for
+        // reads on iOS 7+, but keeping each export's formatters local avoids
+        // any chance of two concurrent exports (e.g. button double-tap) racing
+        // on the same instance.
+        let isoParser = ISO8601DateFormatter()
+        isoParser.formatOptions = [.withInternetDateTime]
+        isoParser.timeZone = TimeZone(secondsFromGMT: 0)
+
+        let dateFmt = DateFormatter()
+        dateFmt.locale = Locale(identifier: "en_US_POSIX")
+        dateFmt.timeZone = TimeZone(secondsFromGMT: 0)
+        dateFmt.dateFormat = "yyyy-MM-dd"
+
+        let timeFmt = DateFormatter()
+        timeFmt.locale = Locale(identifier: "en_US_POSIX")
+        timeFmt.timeZone = TimeZone(secondsFromGMT: 0)
+        timeFmt.dateFormat = "HH:mm"
+
+        let fileNameFmt = DateFormatter()
+        fileNameFmt.locale = Locale(identifier: "en_US_POSIX")
+        fileNameFmt.dateFormat = "yyyyMMdd_HHmm"
+
         struct ExportRow { let sortDate: Date; let line: String }
         var rows: [ExportRow] = []
-
-        let isoParser = logbookISOParser
-        let dateFmt = logbookDateFmt
-        let timeFmt = logbookTimeFmt
 
         for url in urls {
             guard let data = try? Data(contentsOf: url),
@@ -1400,7 +1389,7 @@ final class AppViewModel: ObservableObject {
             return LogbookExportResult(url: nil, message: "Failed to encode logbook CSV.")
         }
 
-        let fileName = "TripData_Logbook_\(logbookFileNameFmt.string(from: Date())).csv"
+        let fileName = "TripData_Logbook_\(fileNameFmt.string(from: Date())).csv"
         let outputURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
 
         do {
