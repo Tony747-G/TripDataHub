@@ -31,7 +31,10 @@ struct PDFTripParser {
 
     // MARK: - Main parser
 
-    private static func parseText(_ text: String) -> Roster {
+    /// Internal entry point. Exposed so callers that have already extracted PDF text
+    /// (e.g. CrewAccessPDFImportService) can reuse it without paying for a second
+    /// PDFDocument(data:) load.
+    static func parseText(_ text: String) -> Roster {
         var roster = Roster()
 
         let rawLines = text.components(separatedBy: "\n")

@@ -7,6 +7,22 @@ struct FriendsTabView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    Label {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Prototype — local only")
+                                .font(.subheadline.weight(.semibold))
+                            Text("Friend schedules are simulated on this device. CloudKit sharing is not yet connected, so adding a GEMS ID does not contact other users or share your real schedule.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    }
+                    .padding(.vertical, 2)
+                }
+
                 Section("Add Friend") {
                     TextField("GEMS ID", text: $employeeIDInput)
                     Button("Send Request") {

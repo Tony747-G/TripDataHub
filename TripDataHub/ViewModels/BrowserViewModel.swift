@@ -33,12 +33,15 @@ final class BrowserViewModel {
             errorMessage = "AppViewModel not found"
             return
         }
-        let success = appViewModel.importCrewAccessPDFData(data, sourceFileName: sourceFileName)
-        if success {
-            statusMessage = "✅ PDF imported — please review the content"
-        } else {
-            statusMessage = "⚠️ Import skipped (already processing)"
+        Task { [weak self] in
+            let success = await appViewModel.importCrewAccessPDFData(data, sourceFileName: sourceFileName)
+            guard let self else { return }
+            if success {
+                self.statusMessage = "✅ PDF imported — please review the content"
+            } else {
+                self.statusMessage = "⚠️ Import skipped (already processing)"
+            }
+            self.popupWebView = nil
         }
-        popupWebView = nil
     }
 }

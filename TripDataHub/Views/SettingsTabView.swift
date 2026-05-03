@@ -77,9 +77,11 @@ struct SettingsTabView: View {
     private var logbookExportSection: some View {
         Section {
             Button("Export Logbook CSV") {
-                let output = viewModel.exportLogbookCSV()
-                logbookExportURL = output
-                isShowingLogbookExportShare = output != nil
+                Task {
+                    let output = await viewModel.exportLogbookCSV()
+                    logbookExportURL = output
+                    isShowingLogbookExportShare = output != nil
+                }
             }
             if let message = viewModel.logbookExportMessage {
                 Text(message)

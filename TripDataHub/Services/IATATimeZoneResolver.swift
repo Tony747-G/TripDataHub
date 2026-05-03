@@ -1,6 +1,6 @@
 import Foundation
 
-protocol IATATimeZoneResolving: AnyObject {
+protocol IATATimeZoneResolving: AnyObject, Sendable {
     var mappingVersion: String { get }
     func resolve(_ iata: String) -> String?
     func airportName(_ iata: String) -> String?
@@ -9,7 +9,7 @@ protocol IATATimeZoneResolving: AnyObject {
     func currentOverrides() -> [String: String]
 }
 
-final class IATATimeZoneResolver: IATATimeZoneResolving {
+final class IATATimeZoneResolver: IATATimeZoneResolving, @unchecked Sendable {
     static let shared = IATATimeZoneResolver()
 
     private static let baseMappingVersion = "iata-tz-2026-02-24"
