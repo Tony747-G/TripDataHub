@@ -13,6 +13,13 @@ protocol FriendScheduleCloudKitServicing: Sendable {
     func refreshConnections(myGEMSID: String, connections: [FriendConnection]) async throws -> [FriendConnection]
 }
 
+protocol FriendScheduleCloudKitDatabase {
+    func record(for recordID: CKRecord.ID) async throws -> CKRecord
+    func save(_ record: CKRecord) async throws -> CKRecord
+}
+
+extension CKDatabase: FriendScheduleCloudKitDatabase {}
+
 final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unchecked Sendable {
     private enum RecordType {
         static let sharedSchedule = "TDHSharedSchedule"
@@ -32,13 +39,22 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
     }
 
     private let containerIdentifier: String
+    private let databaseProvider: () -> FriendScheduleCloudKitDatabase
 
     init(containerIdentifier: String) {
         self.containerIdentifier = containerIdentifier
+        self.databaseProvider = {
+            CKContainer(identifier: containerIdentifier).publicCloudDatabase
+        }
+    }
+
+    init(databaseProvider: @escaping () -> FriendScheduleCloudKitDatabase) {
+        self.containerIdentifier = "test"
+        self.databaseProvider = databaseProvider
     }
 
     func uploadSchedule(gemsID: String, cloudKitRecordName: String, schedules: [PayPeriodSchedule]) async throws {
-        let database = CKContainer(identifier: containerIdentifier).publicCloudDatabase
+        let database = databaseProvider()
         let recordID = CKRecord.ID(recordName: Self.scheduleRecordName(for: gemsID))
         let record = (try? await database.record(for: recordID))
             ?? CKRecord(recordType: RecordType.sharedSchedule, recordID: recordID)
@@ -53,29 +69,36 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
     func requestFriend(myGEMSID: String, friendGEMSID: String) async throws -> FriendScheduleCloudKitLink {
         let my = normalizedGEMSID(myGEMSID)
         let friend = normalizedGEMSID(friendGEMSID)
-        let database = CKContainer(identifier: containerIdentifier).publicCloudDatabase
+        let database = databaseProvider()
         let pair = Self.orderedPair(my, friend)
         let recordID = CKRecord.ID(recordName: Self.friendLinkRecordName(first: pair.first, second: pair.second))
-        let record = (try? await database.record(for: recordID))
-            ?? CKRecord(recordType: RecordType.friendLink, recordID: recordID)
 
-        record[Field.gemsA] = pair.first as CKRecordValue
-        record[Field.gemsB] = pair.second as CKRecordValue
-        record[approvalField(for: my, pair: pair)] = true as CKRecordValue
-        record[Field.updatedAt] = Date() as CKRecordValue
+        var lastError: Error?
+        for attempt in 0..<3 {
+            do {
+                let record = try await friendLinkRecord(recordID: recordID, database: database)
+                applyApproval(
+                    to: record,
+                    myGEMSID: my,
+                    pair: pair
+                )
 
-        let accepted = boolValue(record[Field.approvedA]) && boolValue(record[Field.approvedB])
-        if accepted && record[Field.linkedAt] == nil {
-            record[Field.linkedAt] = Date() as CKRecordValue
+                let saved = try await database.save(record)
+                return link(from: saved, myGEMSID: my, friendGEMSID: friend)
+            } catch let error as CKError where Self.shouldRetryFriendLinkSave(error) && attempt < 2 {
+                lastError = error
+                try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 150_000_000)
+            } catch {
+                throw error
+            }
         }
 
-        let saved = try await database.save(record)
-        return link(from: saved, myGEMSID: my, friendGEMSID: friend)
+        throw lastError ?? CKError(.serverRecordChanged)
     }
 
     func refreshConnections(myGEMSID: String, connections: [FriendConnection]) async throws -> [FriendConnection] {
         let my = normalizedGEMSID(myGEMSID)
-        let database = CKContainer(identifier: containerIdentifier).publicCloudDatabase
+        let database = databaseProvider()
         var refreshed: [FriendConnection] = []
 
         for connection in connections {
@@ -106,11 +129,38 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         return refreshed
     }
 
-    private func fetchSchedule(gemsID: String, database: CKDatabase) async throws -> [PayPeriodSchedule] {
+    private func fetchSchedule(gemsID: String, database: FriendScheduleCloudKitDatabase) async throws -> [PayPeriodSchedule] {
         let recordID = CKRecord.ID(recordName: Self.scheduleRecordName(for: gemsID))
         let record = try await database.record(for: recordID)
         guard let data = record[Field.schedulesData] as? Data else { return [] }
         return try JSONDecoder().decode([PayPeriodSchedule].self, from: data)
+    }
+
+    private func friendLinkRecord(
+        recordID: CKRecord.ID,
+        database: FriendScheduleCloudKitDatabase
+    ) async throws -> CKRecord {
+        do {
+            return try await database.record(for: recordID)
+        } catch let error as CKError where error.code == .unknownItem {
+            return CKRecord(recordType: RecordType.friendLink, recordID: recordID)
+        }
+    }
+
+    private func applyApproval(
+        to record: CKRecord,
+        myGEMSID: String,
+        pair: (first: String, second: String)
+    ) {
+        record[Field.gemsA] = pair.first as CKRecordValue
+        record[Field.gemsB] = pair.second as CKRecordValue
+        record[approvalField(for: myGEMSID, pair: pair)] = true as CKRecordValue
+        record[Field.updatedAt] = Date() as CKRecordValue
+
+        let accepted = boolValue(record[Field.approvedA]) && boolValue(record[Field.approvedB])
+        if accepted && record[Field.linkedAt] == nil {
+            record[Field.linkedAt] = Date() as CKRecordValue
+        }
     }
 
     private func link(from record: CKRecord, myGEMSID: String, friendGEMSID: String) -> FriendScheduleCloudKitLink {
@@ -131,6 +181,20 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
 
     private func boolValue(_ value: CKRecordValue?) -> Bool {
         (value as? NSNumber)?.boolValue ?? (value as? Bool) ?? false
+    }
+
+    private static func shouldRetryFriendLinkSave(_ error: CKError) -> Bool {
+        switch error.code {
+        case .serverRecordChanged,
+             .zoneBusy,
+             .serviceUnavailable,
+             .requestRateLimited,
+             .networkFailure,
+             .networkUnavailable:
+            return true
+        default:
+            return false
+        }
     }
 
     private static func orderedPair(_ lhs: String, _ rhs: String) -> (first: String, second: String) {

@@ -1,3 +1,4 @@
+import CloudKit
 import XCTest
 @testable import TripData_Hub
 
@@ -89,6 +90,32 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertEqual(matches.flightMatchesByLegID[myLegID]?.count, 1)
     }
 
+    func test_friendCloudKitRequest_usesOneRecordForBothDirections() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+
+        let first = try await service.requestFriend(myGEMSID: "222222", friendGEMSID: "111111")
+        let second = try await service.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
+
+        XCTAssertFalse(first.isAccepted)
+        XCTAssertTrue(second.isAccepted)
+        let recordNames = await database.friendLinkRecordNames()
+        XCTAssertEqual(recordNames, ["tdh_friend_111111_222222"])
+    }
+
+    func test_friendCloudKitRequest_retriesRaceConflictAndAccepts() async throws {
+        let database = FriendCloudKitFakeDatabase(conflictFirstFriendLinkSaveWithOtherApproval: true)
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+
+        let link = try await service.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
+
+        XCTAssertTrue(link.isAccepted)
+        let recordSnapshot = await database.recordSnapshot(named: "tdh_friend_111111_222222")
+        let record = try XCTUnwrap(recordSnapshot)
+        XCTAssertEqual((record["approvedA"] as? NSNumber)?.boolValue, true)
+        XCTAssertEqual((record["approvedB"] as? NSNumber)?.boolValue, true)
+    }
+
     private func makeSchedule(legs: [TripLeg]) -> PayPeriodSchedule {
         PayPeriodSchedule(
             id: "PP26-05",
@@ -132,5 +159,48 @@ final class FriendScheduleMatchingTests: XCTestCase {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: value)!
+    }
+}
+
+private actor FriendCloudKitFakeDatabase: FriendScheduleCloudKitDatabase {
+    private var records: [String: CKRecord] = [:]
+    private var conflictFirstFriendLinkSaveWithOtherApproval: Bool
+
+    init(conflictFirstFriendLinkSaveWithOtherApproval: Bool = false) {
+        self.conflictFirstFriendLinkSaveWithOtherApproval = conflictFirstFriendLinkSaveWithOtherApproval
+    }
+
+    func record(for recordID: CKRecord.ID) async throws -> CKRecord {
+        guard let record = records[recordID.recordName] else {
+            throw CKError(.unknownItem)
+        }
+        return record
+    }
+
+    func save(_ record: CKRecord) async throws -> CKRecord {
+        let recordName = record.recordID.recordName
+        if conflictFirstFriendLinkSaveWithOtherApproval,
+           recordName.hasPrefix("tdh_friend_") {
+            conflictFirstFriendLinkSaveWithOtherApproval = false
+            let serverRecord = CKRecord(recordType: "TDHFriendLink", recordID: record.recordID)
+            serverRecord["gemsA"] = "111111" as CKRecordValue
+            serverRecord["gemsB"] = "222222" as CKRecordValue
+            serverRecord["approvedB"] = true as CKRecordValue
+            records[recordName] = serverRecord
+            throw CKError(.serverRecordChanged)
+        }
+
+        records[recordName] = record
+        return record
+    }
+
+    func friendLinkRecordNames() -> [String] {
+        records.keys
+            .filter { $0.hasPrefix("tdh_friend_") }
+            .sorted()
+    }
+
+    func recordSnapshot(named recordName: String) -> CKRecord? {
+        records[recordName]
     }
 }
