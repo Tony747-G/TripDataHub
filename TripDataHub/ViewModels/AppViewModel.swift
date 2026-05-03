@@ -9,6 +9,11 @@ enum AuthStatus: String {
     case loggedIn
 }
 
+private enum CloudKitIdentityFetchError: Error {
+    case accountStatus(CKAccountStatus)
+    case timeout
+}
+
 struct CrewAccessImportFile: Identifiable, Hashable {
     var id: String { url.absoluteString }
     let fileName: String
@@ -72,10 +77,10 @@ actor ExternalOpenImportCoordinator {
         return true
     }
 
-    func finish(key: String, success: Bool) {
+    func finish(key: String, success: Bool, now: Date = Date()) {
         inflightKeys.remove(key)
         if success {
-            recentProcessedKeys[key] = Date()
+            recentProcessedKeys[key] = now
         } else {
             // Allow immediate retry for the same file after a failed import attempt.
             recentAcceptedKeys.removeValue(forKey: key)
@@ -145,11 +150,15 @@ final class AppViewModel: ObservableObject {
     @Published var didLastFetchFail = false
     @Published var friendConnections: [FriendConnection] = []
     @Published var friendActionMessage: String?
+    @Published var friendCloudKitSyncMessage: String?
+    @Published var isScheduleSharingEnabled = false
+    @Published private(set) var isSyncingFriendCloudKit = false
     @Published var isAdmin = false
     @Published var currentCloudKitRecordName: String?
     @Published var seniorityRecords: [PilotSeniorityRecord] = []
     @Published var seniorityImportMessage: String?
     @Published var verifiedIdentity: VerifiedIdentityProfile?
+    @Published private(set) var cloudKitIdentityMessage: String?
     @Published var verifiedUsers: [VerifiedUserRecord] = []
     @Published var crewAccessImportMessage: String?
     @Published var hasQueuedImport: Bool = false
@@ -171,6 +180,7 @@ final class AppViewModel: ObservableObject {
     private let cacheService: ScheduleCacheServiceProtocol
     private let notificationService: NextReportNotificationServiceProtocol
     private let crewAccessImportService: CrewAccessPDFImportServiceProtocol
+    private let friendScheduleCloudKitService: FriendScheduleCloudKitServicing
     private let tzResolver: IATATimeZoneResolving
     private let externalOpenCoordinator: ExternalOpenImportCoordinator
     private let flightCountdownCoordinator = FlightCountdownCoordinator()
@@ -185,8 +195,10 @@ final class AppViewModel: ObservableObject {
     private let notification24hKey = "notification_24h_enabled"
     private let notification12hKey = "notification_12h_enabled"
     private let friendConnectionsKey = "friend_connections_v1"
+    private let scheduleSharingEnabledKey = "schedule_sharing_enabled_v1"
     private let seniorityRecordsKey = "pilot_seniority_records_v1"
     // Legacy keys/file names kept only for one-time migration from older builds.
+    // TODO(remove-after-1.2): delete after App Store builds that used pilot_roster_records_v1 age out.
     private let legacySeniorityRecordsKey = "pilot_roster_records_v1"
     private let verifiedIdentityKey = "verified_identity_profile_v1"
     private let verifiedUsersKey = "verified_users_v1"
@@ -194,9 +206,9 @@ final class AppViewModel: ObservableObject {
     private let seniorityFileName = "pilot_seniority_records_v1.json"
     private let legacySeniorityFileName = "pilot_roster_records_v1.json"
     private let localIdentityRecordNameKey = "local_identity_record_name_v1"
-    // Temporary safety switch: CloudKit identity call is hanging in current runtime.
-    // Set to true after confirming CKContainer.userRecordID() returns reliably.
-    private let useCloudKitIdentity = false
+    private let cloudKitContainerIdentifier = "iCloud.com.sfune.TimelineSchedule"
+    private let cloudKitIdentityTimeoutNanoseconds: UInt64 = 5_000_000_000
+    private let useCloudKitIdentity = true
     // Internal testing fallback:
     // when true, users can verify with entered GEMS ID + DOB even if Seniority DB is not loaded.
     // This never grants admin eligibility, but in Friends sharing GEMS ID itself is the
@@ -220,6 +232,9 @@ final class AppViewModel: ObservableObject {
         cacheService: ScheduleCacheServiceProtocol = ScheduleCacheService(),
         notificationService: NextReportNotificationServiceProtocol = NextReportNotificationService(),
         crewAccessImportService: CrewAccessPDFImportServiceProtocol = CrewAccessPDFImportService(),
+        friendScheduleCloudKitService: FriendScheduleCloudKitServicing = FriendScheduleCloudKitService(
+            containerIdentifier: "iCloud.com.sfune.TimelineSchedule"
+        ),
         tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared
     ) {
         self.syncService = syncService
@@ -227,6 +242,7 @@ final class AppViewModel: ObservableObject {
         self.cacheService = cacheService
         self.notificationService = notificationService
         self.crewAccessImportService = crewAccessImportService
+        self.friendScheduleCloudKitService = friendScheduleCloudKitService
         self.tzResolver = tzResolver
         self.externalOpenCoordinator = ExternalOpenImportCoordinator.shared
         let loadedAdminPolicy = Self.loadAdminPolicy()
@@ -249,6 +265,7 @@ final class AppViewModel: ObservableObject {
         )
         self.authStatus = authService.isAuthenticated(url: nil, cookies: sessionCookies) ? .loggedIn : .loggedOut
         self.friendConnections = loadFriendConnections()
+        self.isScheduleSharingEnabled = UserDefaults.standard.bool(forKey: scheduleSharingEnabledKey)
         self.seniorityRecords = []
         self.hasSeniorityDataOnDisk = Self.seniorityDataIsUsableOnDisk(
             seniorityFileName: seniorityFileName,
@@ -279,6 +296,9 @@ final class AppViewModel: ObservableObject {
 #endif
 
         Task { [weak self] in
+            await MainActor.run {
+                self?.refreshCloudKitIdentity()
+            }
             await self?.refreshNotificationAuthorizationStatus()
             await self?.rescheduleNotificationsIfAuthorized()
             await self?.applyCrewAccessRetentionPolicy()
@@ -386,7 +406,8 @@ final class AppViewModel: ObservableObject {
     }
 
     var isIdentityVerified: Bool {
-        guard let verifiedIdentity, let currentCloudKitRecordName else { return false }
+        guard let verifiedIdentity else { return false }
+        guard let currentCloudKitRecordName else { return false }
         return verifiedIdentity.cloudKitRecordName == currentCloudKitRecordName
     }
 
@@ -451,8 +472,22 @@ final class AppViewModel: ObservableObject {
     }
 
     func submitPseudoFriendRequest(employeeID rawEmployeeID: String) {
+        Task { [weak self] in
+            await self?.submitFriendRequest(employeeID: rawEmployeeID)
+        }
+    }
+
+    func submitFriendRequest(employeeID rawEmployeeID: String) async {
         guard isIdentityVerified else {
             friendActionMessage = "Verify your identity first (GEMS ID + DOB)."
+            return
+        }
+        guard isScheduleSharingEnabled else {
+            friendActionMessage = "Turn on Share My Schedule in Settings first."
+            return
+        }
+        guard let myGEMSID = verifiedIdentity?.gemsID else {
+            friendActionMessage = "GEMS verification is required."
             return
         }
         let employeeID = rawEmployeeID
@@ -463,25 +498,29 @@ final class AppViewModel: ObservableObject {
             return
         }
         if let index = friendConnections.firstIndex(where: { $0.employeeID == employeeID }) {
-            if friendConnections[index].status == .pending {
-                friendConnections[index].status = .accepted
-                friendConnections[index].linkedAt = Date()
-                friendConnections[index].sharedSchedules = buildPseudoFriendSchedules(for: employeeID)
-                saveFriendConnections()
-                friendActionMessage = "Friend linked: \(employeeID)"
-            } else {
+            if friendConnections[index].status == .accepted {
                 friendActionMessage = "Friend already linked: \(employeeID)"
+                return
             }
-            return
+        } else {
+            friendConnections.append(FriendConnection(employeeID: employeeID, status: .pending))
+            saveFriendConnections()
         }
-        // Internal-friend testing mode:
-        // requests are auto-approved once the current user has verified GEMS ID + DOB.
-        var request = FriendConnection(employeeID: employeeID, status: .accepted)
-        request.linkedAt = Date()
-        request.sharedSchedules = buildPseudoFriendSchedules(for: employeeID)
-        friendConnections.append(request)
-        saveFriendConnections()
-        friendActionMessage = "Friend linked: \(employeeID)"
+
+        await uploadSharedScheduleIfNeeded(reason: "friend request")
+        do {
+            let link = try await friendScheduleCloudKitService.requestFriend(
+                myGEMSID: myGEMSID,
+                friendGEMSID: employeeID
+            )
+            await refreshFriendSchedulesFromCloud()
+            friendActionMessage = link.isAccepted
+                ? "Friend linked: \(employeeID)"
+                : "Request saved. Ask GEMS \(employeeID) to add your GEMS ID too."
+        } catch {
+            friendActionMessage = "Failed to save friend request: \(error.localizedDescription)"
+            logNonFatal("Friend CloudKit request failed: \(error.localizedDescription)")
+        }
     }
 
     func approvePseudoFriendRequest(_ id: UUID) {
@@ -502,6 +541,77 @@ final class AppViewModel: ObservableObject {
         friendActionMessage = "Request rejected: \(employeeID)"
     }
 
+    func setScheduleSharingEnabled(_ enabled: Bool) {
+        isScheduleSharingEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: scheduleSharingEnabledKey)
+        if enabled {
+            Task { [weak self] in
+                await self?.syncFriendCloudKit(reason: "sharing enabled")
+            }
+        } else {
+            friendCloudKitSyncMessage = "Schedule sharing is off."
+        }
+    }
+
+    func handleSchedulesChangedForSharing() {
+        guard isScheduleSharingEnabled else { return }
+        Task { [weak self] in
+            await self?.uploadSharedScheduleIfNeeded(reason: "schedule changed")
+        }
+    }
+
+    func syncFriendCloudKit(reason: String = "manual") async {
+        guard !isSyncingFriendCloudKit else { return }
+        isSyncingFriendCloudKit = true
+        defer { isSyncingFriendCloudKit = false }
+
+        await uploadSharedScheduleIfNeeded(reason: reason)
+        await refreshFriendSchedulesFromCloud()
+    }
+
+    private func uploadSharedScheduleIfNeeded(reason: String) async {
+        guard isScheduleSharingEnabled else { return }
+        guard isIdentityVerified,
+              let verifiedIdentity,
+              let currentCloudKitRecordName else {
+            friendCloudKitSyncMessage = "Verify GEMS and iCloud before sharing schedules."
+            return
+        }
+
+        do {
+            try await friendScheduleCloudKitService.uploadSchedule(
+                gemsID: verifiedIdentity.gemsID,
+                cloudKitRecordName: currentCloudKitRecordName,
+                schedules: schedules
+            )
+            friendCloudKitSyncMessage = "Shared schedule updated."
+            logNonFatal("Friend CloudKit schedule uploaded: \(reason)")
+        } catch {
+            friendCloudKitSyncMessage = "Failed to update shared schedule: \(error.localizedDescription)"
+            logNonFatal("Friend CloudKit schedule upload failed: \(error.localizedDescription)")
+        }
+    }
+
+    func refreshFriendSchedulesFromCloud() async {
+        guard isIdentityVerified,
+              let verifiedIdentity else {
+            return
+        }
+        guard !friendConnections.isEmpty else { return }
+
+        do {
+            friendConnections = try await friendScheduleCloudKitService.refreshConnections(
+                myGEMSID: verifiedIdentity.gemsID,
+                connections: friendConnections
+            )
+            saveFriendConnections()
+            friendCloudKitSyncMessage = "Friend schedules updated."
+        } catch {
+            friendCloudKitSyncMessage = "Failed to update friend schedules: \(error.localizedDescription)"
+            logNonFatal("Friend CloudKit refresh failed: \(error.localizedDescription)")
+        }
+    }
+
     func refreshCloudKitIdentity() {
         guard !isRefreshingCloudKitIdentity else { return }
         isRefreshingCloudKitIdentity = true
@@ -519,25 +629,29 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        enum IdentityFetchError: Error {
-            case timeout
-        }
-
+        let containerIdentifier = cloudKitContainerIdentifier
+        let timeoutNanoseconds = cloudKitIdentityTimeoutNanoseconds
+        logCloudKitIdentityDiagnostic("begin container=\(containerIdentifier)")
         Task.detached(priority: .utility) { [weak self] in
+            let container = CKContainer(identifier: containerIdentifier)
             let result: Result<String, Error> = await withTaskGroup(of: Result<String, Error>.self) { group in
                 group.addTask {
                     do {
-                        let recordID = try await CKContainer.default().userRecordID()
+                        let status = try await container.accountStatus()
+                        guard status == .available else {
+                            return .failure(CloudKitIdentityFetchError.accountStatus(status))
+                        }
+                        let recordID = try await container.userRecordID()
                         return .success(recordID.recordName)
                     } catch {
                         return .failure(error)
                     }
                 }
                 group.addTask {
-                    try? await Task.sleep(nanoseconds: 5_000_000_000)
-                    return .failure(IdentityFetchError.timeout)
+                    try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                    return .failure(CloudKitIdentityFetchError.timeout)
                 }
-                let first = await group.next() ?? .failure(IdentityFetchError.timeout)
+                let first = await group.next() ?? .failure(CloudKitIdentityFetchError.timeout)
                 group.cancelAll()
                 return first
             }
@@ -548,6 +662,8 @@ final class AppViewModel: ObservableObject {
 
                 switch result {
                 case let .success(recordName):
+                    self.logCloudKitIdentityDiagnostic("success recordName=\(recordName)")
+                    self.cloudKitIdentityMessage = nil
                     self.currentCloudKitRecordName = recordName
                     if let verifiedIdentity = self.verifiedIdentity,
                        verifiedIdentity.cloudKitRecordName != recordName {
@@ -556,15 +672,79 @@ final class AppViewModel: ObservableObject {
                     }
                     self.updateAdminStatus()
                 case let .failure(error):
-                    self.currentCloudKitRecordName = nil
-                    self.updateAdminStatus()
-                    if (error as? IdentityFetchError) == .timeout {
+                    if case CloudKitIdentityFetchError.timeout = error {
+                        self.logCloudKitIdentityDiagnostic("timeout after \(timeoutNanoseconds / 1_000_000_000)s")
                         self.logNonFatal("CloudKit identity fetch timed out.")
+                        self.keepCachedIdentityAfterTransientCloudKitFailure("CloudKit identity timed out. Using the last verified GEMS identity for now.")
+                    } else if case let CloudKitIdentityFetchError.accountStatus(status) = error {
+                        self.logCloudKitIdentityDiagnostic("accountStatus=\(Self.cloudKitAccountStatusDescription(status))")
+                        self.logNonFatal("CloudKit identity unavailable: \(Self.cloudKitAccountStatusDescription(status))")
+                        self.handleCloudKitAccountStatusFailure(status)
                     } else {
+                        self.logCloudKitIdentityDiagnostic("failure error=\(error.localizedDescription)")
                         self.logNonFatal("Failed to fetch CloudKit identity: \(error.localizedDescription)")
+                        self.keepCachedIdentityAfterTransientCloudKitFailure("CloudKit identity is temporarily unavailable. Using the last verified GEMS identity for now.")
                     }
                 }
             }
+        }
+    }
+
+    private func handleCloudKitAccountStatusFailure(_ status: CKAccountStatus) {
+        switch status {
+        case .available:
+            keepCachedIdentityAfterTransientCloudKitFailure("CloudKit identity is temporarily unavailable. Using the last verified GEMS identity for now.")
+        case .noAccount:
+            cloudKitIdentityMessage = "Sign into iCloud to verify or share schedules."
+            currentCloudKitRecordName = nil
+            updateAdminStatus()
+        case .restricted:
+            cloudKitIdentityMessage = "iCloud access is restricted on this device."
+            currentCloudKitRecordName = nil
+            updateAdminStatus()
+        case .couldNotDetermine:
+            keepCachedIdentityAfterTransientCloudKitFailure("CloudKit account status could not be confirmed. Using the last verified GEMS identity for now.")
+        case .temporarilyUnavailable:
+            keepCachedIdentityAfterTransientCloudKitFailure("CloudKit is temporarily unavailable. Using the last verified GEMS identity for now.")
+        @unknown default:
+            keepCachedIdentityAfterTransientCloudKitFailure("CloudKit account status is unknown. Using the last verified GEMS identity for now.")
+        }
+    }
+
+    private func keepCachedIdentityAfterTransientCloudKitFailure(_ message: String) {
+        cloudKitIdentityMessage = message
+        if currentCloudKitRecordName == nil,
+           let verifiedIdentity {
+            currentCloudKitRecordName = verifiedIdentity.cloudKitRecordName
+        }
+        updateAdminStatus()
+    }
+
+    private func logCloudKitIdentityDiagnostic(_ message: String) {
+        let environment: String
+#if targetEnvironment(simulator)
+        environment = "simulator"
+#else
+        environment = "device"
+#endif
+        let ubiquityTokenState = FileManager.default.ubiquityIdentityToken == nil ? "missing" : "present"
+        logNonFatal("[CloudKitIdentity] \(message) environment=\(environment) ubiquityToken=\(ubiquityTokenState)")
+    }
+
+    private nonisolated static func cloudKitAccountStatusDescription(_ status: CKAccountStatus) -> String {
+        switch status {
+        case .available:
+            return "available"
+        case .couldNotDetermine:
+            return "couldNotDetermine"
+        case .noAccount:
+            return "noAccount"
+        case .restricted:
+            return "restricted"
+        case .temporarilyUnavailable:
+            return "temporarilyUnavailable"
+        @unknown default:
+            return "unknown(\(status.rawValue))"
         }
     }
 
@@ -2608,9 +2788,13 @@ final class AppViewModel: ObservableObject {
                     verifiedAt: Date()
                 )
             )
-            autoApprovePendingFriendRequests(for: gemsID)
             updateAdminStatus()
             friendActionMessage = "Verified for internal test as GEMS \(gemsID)."
+            if isScheduleSharingEnabled {
+                Task { [weak self] in
+                    await self?.syncFriendCloudKit(reason: "identity verified")
+                }
+            }
             return
         }
 
@@ -2646,23 +2830,12 @@ final class AppViewModel: ObservableObject {
                 verifiedAt: Date()
             )
         )
-        autoApprovePendingFriendRequests(for: record.gemsID)
         updateAdminStatus()
         friendActionMessage = "Verified as \(record.name) (\(record.gemsID))."
-    }
-
-    private func autoApprovePendingFriendRequests(for employeeID: String) {
-        var changed = false
-        for index in friendConnections.indices {
-            guard friendConnections[index].employeeID == employeeID,
-                  friendConnections[index].status == .pending else { continue }
-            friendConnections[index].status = .accepted
-            friendConnections[index].linkedAt = Date()
-            friendConnections[index].sharedSchedules = buildPseudoFriendSchedules(for: employeeID)
-            changed = true
-        }
-        if changed {
-            saveFriendConnections()
+        if isScheduleSharingEnabled {
+            Task { [weak self] in
+                await self?.syncFriendCloudKit(reason: "identity verified")
+            }
         }
     }
 

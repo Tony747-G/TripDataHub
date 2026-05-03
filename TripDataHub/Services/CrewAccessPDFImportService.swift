@@ -65,6 +65,34 @@ enum ImportWarningCode: String {
     case partialLegParseFailed
     case lowConfidence
     case dstBoundaryCrossing
+
+    var displayTitle: String {
+        switch self {
+        case .unknownIata:
+            return "Unknown airport code"
+        case .unknownTz:
+            return "Missing timezone mapping"
+        case .partialLegParseFailed:
+            return "Some PDF rows could not be imported"
+        case .lowConfidence:
+            return "Low confidence parse"
+        case .dstBoundaryCrossing:
+            return "Daylight saving time boundary"
+        }
+    }
+
+    var displayGuidance: String {
+        switch self {
+        case .unknownIata, .unknownTz:
+            return "Check the affected airport and add a timezone override if needed."
+        case .partialLegParseFailed:
+            return "Compare the previewed legs with CrewAccess before confirming."
+        case .lowConfidence:
+            return "Review the imported trip carefully before confirming."
+        case .dstBoundaryCrossing:
+            return "Verify the local and UTC times around the daylight saving time change."
+        }
+    }
 }
 
 struct ImportWarning: Identifiable {

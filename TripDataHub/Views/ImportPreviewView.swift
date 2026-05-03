@@ -100,12 +100,15 @@ struct ImportPreviewView: View {
                     }
 
                     if !pending.warnings.isEmpty {
-                        Section("Warnings") {
+                        Section("Warnings (\(pending.warnings.count))") {
                             ForEach(pending.warnings) { warning in
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("[\(warning.code.rawValue)] \(warning.message)")
-                                        .font(.subheadline)
-                                    Text("Review this item before confirm.")
+                                    Text(warning.code.displayTitle)
+                                        .font(.subheadline.weight(.semibold))
+                                    Text(warning.message)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text(warning.code.displayGuidance)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }

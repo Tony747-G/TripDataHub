@@ -68,6 +68,7 @@ struct RootTabView: View {
             viewModel.refreshFlightCountdownPresentation()
             Task {
                 await viewModel.autoFetchOnAppActiveIfEnabled(autoFetchOnOpen)
+                await viewModel.syncFriendCloudKit(reason: "app opened")
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -76,11 +77,13 @@ struct RootTabView: View {
                 viewModel.refreshFlightCountdownPresentation()
                 Task {
                     await viewModel.autoFetchOnAppActiveIfEnabled(autoFetchOnOpen)
+                    await viewModel.syncFriendCloudKit(reason: "app active")
                 }
             }
         }
         .onChange(of: viewModel.schedules) { _, _ in
             viewModel.refreshFlightCountdownPresentation()
+            viewModel.handleSchedulesChangedForSharing()
         }
         .onChange(of: viewModel.crewAccessSchedules) { _, _ in
             viewModel.refreshFlightCountdownPresentation()

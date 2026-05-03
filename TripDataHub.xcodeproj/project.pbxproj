@@ -20,6 +20,11 @@
 		4B757DBC3E4BB412A6E0A4B4 /* NextReportNotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26F1CF972BCCEF2CFFA1D9B1 /* NextReportNotificationService.swift */; };
 		4C5EC0A3F2B851101A6DF46D /* IATATimeZoneResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FC85F3B696ED2DB2C56FC18 /* IATATimeZoneResolver.swift */; };
 		4F7808E425C3280304305CB3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 906799561E65DB1AF44B2DE4 /* Assets.xcassets */; };
+		51A7C9D1E2F3456789ABC001 /* FriendScheduleMatching.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABC000 /* FriendScheduleMatching.swift */; };
+		51A7C9D1E2F3456789ABC003 /* FriendScheduleMatchingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABC002 /* FriendScheduleMatchingTests.swift */; };
+		51A7C9D1E2F3456789ABC005 /* CrewAccessParserRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABC004 /* CrewAccessParserRegressionTests.swift */; };
+		51A7C9D1E2F3456789ABC007 /* ExternalOpenImportCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABC006 /* ExternalOpenImportCoordinatorTests.swift */; };
+		51A7C9D1E2F3456789ABC009 /* FriendScheduleCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABC008 /* FriendScheduleCloudKitService.swift */; };
 		5BF750A9EB06E31DED48688D /* AdminTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F151A3C5326A78E7880243EB /* AdminTabView.swift */; };
 		5C839E2F9397C27B75B962A9 /* BidPeriodService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B6FCCCA54583B5E8D70721D /* BidPeriodService.swift */; };
 		67A567A25FC047F6B0E1810E /* PDFTripParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B958B23E0C844158F487B53 /* PDFTripParser.swift */; };
@@ -87,6 +92,11 @@
 		42BF7C6110CAC60779B38CC7 /* TripBoardAuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripBoardAuthService.swift; sourceTree = "<group>"; };
 		4F6C86491D2E927C2CEC60D5 /* FlightCountdownCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightCountdownCoordinator.swift; sourceTree = "<group>"; };
 		4FC85F3B696ED2DB2C56FC18 /* IATATimeZoneResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IATATimeZoneResolver.swift; sourceTree = "<group>"; };
+		51A7C9D1E2F3456789ABC000 /* FriendScheduleMatching.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendScheduleMatching.swift; sourceTree = "<group>"; };
+		51A7C9D1E2F3456789ABC002 /* FriendScheduleMatchingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendScheduleMatchingTests.swift; sourceTree = "<group>"; };
+		51A7C9D1E2F3456789ABC004 /* CrewAccessParserRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessParserRegressionTests.swift; sourceTree = "<group>"; };
+		51A7C9D1E2F3456789ABC006 /* ExternalOpenImportCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalOpenImportCoordinatorTests.swift; sourceTree = "<group>"; };
+		51A7C9D1E2F3456789ABC008 /* FriendScheduleCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendScheduleCloudKitService.swift; sourceTree = "<group>"; };
 		537DE7E0A39D9117D8B2DE33 /* AppViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModel.swift; sourceTree = "<group>"; };
 		55E5301B208661C3E2632FC7 /* ScheduleCacheService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleCacheService.swift; sourceTree = "<group>"; };
 		58C18FF3A67E7E968B09F58E /* FlightCountdownSharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightCountdownSharedModels.swift; sourceTree = "<group>"; };
@@ -205,6 +215,7 @@
 				0AF942899EBB7E90814E4995 /* CrewAccessPDFImportService.swift */,
 				9B958B23E0C844158F487B53 /* PDFTripParser.swift */,
 				4F6C86491D2E927C2CEC60D5 /* FlightCountdownCoordinator.swift */,
+				51A7C9D1E2F3456789ABC008 /* FriendScheduleCloudKitService.swift */,
 				4FC85F3B696ED2DB2C56FC18 /* IATATimeZoneResolver.swift */,
 				EABE1DFB8EE6CCCF77FB5717 /* ImportFileSniffer.swift */,
 				7B4DAB3D177949F363100BE8 /* KeychainService.swift */,
@@ -230,6 +241,9 @@
 			isa = PBXGroup;
 			children = (
 				30EA7A40210086623915E4DE /* CalendarSupportTests.swift */,
+				51A7C9D1E2F3456789ABC004 /* CrewAccessParserRegressionTests.swift */,
+				51A7C9D1E2F3456789ABC006 /* ExternalOpenImportCoordinatorTests.swift */,
+				51A7C9D1E2F3456789ABC002 /* FriendScheduleMatchingTests.swift */,
 				58EB09BC72A13BE9062573CC /* FlightCountdownTests.swift */,
 			);
 			path = TripDataHubTests;
@@ -259,6 +273,7 @@
 				2C935139ABDF9C6B5FE71310 /* CalendarModels.swift */,
 				58C18FF3A67E7E968B09F58E /* FlightCountdownSharedModels.swift */,
 				725719445A236E76E849AF2F /* FlightCountdownSupport.swift */,
+				51A7C9D1E2F3456789ABC000 /* FriendScheduleMatching.swift */,
 				3AA31B4F87A8944508CA4749 /* TripLegDisplaySupport.swift */,
 				8CD425A30028665C7AF3C26E /* TripModels.swift */,
 				0A05C7A4B4AE482294FEBB55 /* RosterParsingModels.swift */,
@@ -384,6 +399,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				BCA4AE729D06B2ACB035CB39 /* CalendarSupportTests.swift in Sources */,
+				51A7C9D1E2F3456789ABC005 /* CrewAccessParserRegressionTests.swift in Sources */,
+				51A7C9D1E2F3456789ABC007 /* ExternalOpenImportCoordinatorTests.swift in Sources */,
+				51A7C9D1E2F3456789ABC003 /* FriendScheduleMatchingTests.swift in Sources */,
 				9599AC8B5334199EAAC4FC49 /* FlightCountdownTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -412,6 +430,8 @@
 				27B924E6CA6484B9156032EC /* FlightCountdownCoordinator.swift in Sources */,
 				1413F694AAE3B23F47C3C436 /* FlightCountdownSharedModels.swift in Sources */,
 				F6354A96AD43D1B5043CF4E3 /* FlightCountdownSupport.swift in Sources */,
+				51A7C9D1E2F3456789ABC009 /* FriendScheduleCloudKitService.swift in Sources */,
+				51A7C9D1E2F3456789ABC001 /* FriendScheduleMatching.swift in Sources */,
 				770DDB243CCA709322ED76E2 /* FriendsSupport.swift in Sources */,
 				3922CFC31FEDE9EC3DFB97BC /* FriendsTabView.swift in Sources */,
 				4C5EC0A3F2B851101A6DF46D /* IATATimeZoneResolver.swift in Sources */,

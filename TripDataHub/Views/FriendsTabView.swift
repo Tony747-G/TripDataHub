@@ -10,15 +10,15 @@ struct FriendsTabView: View {
                 Section {
                     Label {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Prototype — local only")
+                            Text("Mutual GEMS approval")
                                 .font(.subheadline.weight(.semibold))
-                            Text("Friend schedules are simulated on this device. CloudKit sharing is not yet connected, so adding a GEMS ID does not contact other users or share your real schedule.")
+                            Text("Both pilots must add each other's GEMS ID. Shared schedules update automatically when Share My Schedule is enabled.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     } icon: {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
+                        Image(systemName: "icloud")
+                            .foregroundStyle(.blue)
                     }
                     .padding(.vertical, 2)
                 }
@@ -26,10 +26,22 @@ struct FriendsTabView: View {
                 Section("Add Friend") {
                     TextField("GEMS ID", text: $employeeIDInput)
                     Button("Send Request") {
-                        viewModel.submitPseudoFriendRequest(employeeID: employeeIDInput)
+                        let employeeID = employeeIDInput
                         employeeIDInput = ""
+                        Task {
+                            await viewModel.submitFriendRequest(employeeID: employeeID)
+                        }
                     }
                     .disabled(!viewModel.canSubmitFriendRequest)
+                    if let message = viewModel.cloudKitIdentityMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if !viewModel.isIdentityVerified {
+                        Text("Verify your GEMS ID in Settings before adding friends.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 if let message = viewModel.friendActionMessage {
@@ -37,6 +49,19 @@ struct FriendsTabView: View {
                         Text(message)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                    }
+                }
+
+                if viewModel.isSyncingFriendCloudKit || viewModel.friendCloudKitSyncMessage != nil {
+                    Section("CloudKit") {
+                        if viewModel.isSyncingFriendCloudKit {
+                            ProgressView()
+                        }
+                        if let message = viewModel.friendCloudKitSyncMessage {
+                            Text(message)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
@@ -53,9 +78,12 @@ struct FriendsTabView: View {
                                 Text("Requested: \(friend.requestedAt.formatted(date: .abbreviated, time: .shortened))")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                Text("Waiting for admin approval")
+                                Text("Waiting for mutual approval")
                                     .font(.caption)
                                     .foregroundStyle(.orange)
+                                Text("Ask this pilot to add your GEMS ID.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
                             .padding(.vertical, 2)
                         }
@@ -64,7 +92,7 @@ struct FriendsTabView: View {
 
                 Section("Friends") {
                     if viewModel.acceptedFriendConnections.isEmpty {
-                        Text("No friends yet. Approve a pending request.")
+                        Text("No friends yet.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     } else {
@@ -103,6 +131,7 @@ struct FriendsTabView: View {
             .onAppear {
                 Task {
                     await viewModel.loadSeniorityRecordsIfNeeded()
+                    await viewModel.syncFriendCloudKit(reason: "friends opened")
                 }
             }
         }

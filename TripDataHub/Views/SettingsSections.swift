@@ -70,6 +70,45 @@ struct SettingsTripBoardFetchSection: View {
     }
 }
 
+struct SettingsScheduleSharingSection: View {
+    @EnvironmentObject private var viewModel: AppViewModel
+
+    private var sharingBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.isScheduleSharingEnabled },
+            set: { viewModel.setScheduleSharingEnabled($0) }
+        )
+    }
+
+    var body: some View {
+        Section {
+            Toggle("Share My Schedule", isOn: sharingBinding)
+                .disabled(!viewModel.isIdentityVerified)
+
+            if viewModel.isSyncingFriendCloudKit {
+                ProgressView()
+            }
+
+            if let message = viewModel.friendCloudKitSyncMessage {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !viewModel.isIdentityVerified {
+                Text("Verify your GEMS ID in Account before enabling schedule sharing.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            sectionHeader("Share My Schedule")
+        } footer: {
+            Text("When enabled, Timeline schedules are uploaded automatically. Friends are approved when both pilots add each other's GEMS ID.")
+                .font(.footnote)
+        }
+    }
+}
+
 struct SettingsCrewAccessImportsSection: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @State private var isSelecting = false

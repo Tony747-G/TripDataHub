@@ -1,5 +1,11 @@
 import SwiftUI
 
+private struct FriendMatchAlert: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
+}
+
 struct TimelineTabView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @Environment(\.colorScheme) private var colorScheme
@@ -11,6 +17,8 @@ struct TimelineTabView: View {
     @State private var legData = TimelineLegData(schedules: [])
     @State private var tripDataByTripID: [String: TripDataCardInfo] = [:]
     @State private var importedUTCTimesByTripAndSequence: [String: ImportLegUTCTimes] = [:]
+    @State private var friendMatchAlert: FriendMatchAlert?
+    @State private var friendScheduleMatches: FriendScheduleMatches = .empty
     private static let nextReportTimestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -109,6 +117,14 @@ struct TimelineTabView: View {
                 viewModel.lastImportSummaryMessage = nil
                 refreshLegData()
                 refreshTripDataCards()
+                refreshFriendScheduleMatches()
+            }
+            .alert(item: $friendMatchAlert) { alert in
+                Alert(
+                    title: Text(alert.title),
+                    message: Text(alert.message),
+                    dismissButton: .default(Text("OK"))
+                )
             }
         }
     }
@@ -181,10 +197,15 @@ struct TimelineTabView: View {
             .onAppear {
                 refreshLegData()
                 refreshTripDataCards()
+                refreshFriendScheduleMatches()
             }
             .onChange(of: viewModel.schedules) { _, _ in
                 refreshLegData()
                 refreshTripDataCards()
+                refreshFriendScheduleMatches()
+            }
+            .onChange(of: viewModel.friendConnections) { _, _ in
+                refreshFriendScheduleMatches()
             }
             .onChange(of: selectedClockDisplay) { _, _ in
                 refreshLegData()
@@ -232,15 +253,16 @@ struct TimelineTabView: View {
 
     private func timelineRow(leg: TripLeg, nextLegByID: [UUID: TripLeg]) -> some View {
         let isPast = isPastLeg(leg)
+        let flightMatches = friendScheduleMatches.flightMatchesByLegID[leg.id] ?? []
+        let hasFlightMatch = !flightMatches.isEmpty
+        let iconColor: Color = hasFlightMatch ? friendMatchAmber : (isPast ? .gray : .primary)
 
         return HStack(alignment: .center, spacing: 12) {
-            MaterialIconView(
-                codePoint: iconCodePointForLegStatus(leg.status),
-                size: 20 * fontScale,
-                color: isPast ? .gray : .primary,
-                fallbackSystemName: iconFallbackSystemNameForLegStatus(leg.status)
+            matchableFlightIcon(
+                leg: leg,
+                matches: flightMatches,
+                color: iconColor
             )
-                .frame(width: 28 * fontScale, alignment: .center)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
@@ -299,7 +321,9 @@ struct TimelineTabView: View {
         let hotel    = leg.layoverHotelName
             ?? tripDataByTripID[leg.pairing]?.hotelByStation[station]
             ?? ""
-        let iconColor: Color = isPast ? .gray : .primary
+        let restOverlaps = friendScheduleMatches.restOverlapsByArrivalLegID[leg.id] ?? []
+        let hasRestOverlap = !restOverlaps.isEmpty
+        let iconColor: Color = hasRestOverlap ? friendMatchAmber : (isPast ? .gray : .primary)
 
         // 到着ローカル日付テキスト（例: "Tue, Apr 28 2026"）
         let arrLocalDate: String = arrivalLocalDateLabel(for: leg)
@@ -329,10 +353,11 @@ struct TimelineTabView: View {
 
             // ── レイオーバー行 ────────────────────────────────────
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "bed.double.fill")
-                    .font(.system(size: 16 * fontScale))
-                    .foregroundStyle(iconColor)
-                    .frame(width: 28 * fontScale, alignment: .center)
+                matchableLayoverIcon(
+                    station: station,
+                    overlaps: restOverlaps,
+                    color: iconColor
+                )
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Layover at \(station)")
@@ -355,6 +380,57 @@ struct TimelineTabView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 7)
+        }
+    }
+
+    @ViewBuilder
+    private func matchableFlightIcon(
+        leg: TripLeg,
+        matches: [FriendFlightMatch],
+        color: Color
+    ) -> some View {
+        let icon = MaterialIconView(
+            codePoint: iconCodePointForLegStatus(leg.status),
+            size: 20 * fontScale,
+            color: color,
+            fallbackSystemName: iconFallbackSystemNameForLegStatus(leg.status)
+        )
+        .frame(width: 28 * fontScale, alignment: .center)
+
+        if matches.isEmpty {
+            icon
+        } else {
+            Button {
+                friendMatchAlert = flightMatchAlert(for: leg, matches: matches)
+            } label: {
+                icon
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Friend on same flight")
+        }
+    }
+
+    @ViewBuilder
+    private func matchableLayoverIcon(
+        station: String,
+        overlaps: [FriendRestOverlap],
+        color: Color
+    ) -> some View {
+        let icon = Image(systemName: "bed.double.fill")
+            .font(.system(size: 16 * fontScale))
+            .foregroundStyle(color)
+            .frame(width: 28 * fontScale, alignment: .center)
+
+        if overlaps.isEmpty {
+            icon
+        } else {
+            Button {
+                friendMatchAlert = restOverlapAlert(station: station, overlaps: overlaps)
+            } label: {
+                icon
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Friend layover overlap")
         }
     }
 
@@ -509,6 +585,16 @@ struct TimelineTabView: View {
 
     private var daySections: [TimelineDaySection] {
         buildDisplayDaySections(from: allLegs)
+    }
+
+    private func refreshFriendScheduleMatches() {
+        let friendSchedules = viewModel.acceptedFriendConnections.map {
+            (gemsID: $0.employeeID, schedules: $0.sharedSchedules)
+        }
+        friendScheduleMatches = FriendScheduleMatchDetector.detect(
+            mySchedules: currentTimelineSchedules,
+            friendSchedules: friendSchedules
+        )
     }
 
     private func refreshLegData() {
@@ -840,6 +926,37 @@ struct TimelineTabView: View {
 
     private var dateHeaderTextColor: Color {
         ScheduleColors.timelineDateHeaderText(for: colorScheme)
+    }
+
+    private var friendMatchAmber: Color {
+        Color(red: 0.95, green: 0.58, blue: 0.12)
+    }
+
+    private func flightMatchAlert(for leg: TripLeg, matches: [FriendFlightMatch]) -> FriendMatchAlert {
+        let title = "Friends on \(leg.displayFlightNumberText)"
+        let lines = matches.map { match in
+            "GEMS \(match.friendGEMSID): \(match.departureAirport)-\(match.arrivalAirport)"
+        }
+        return FriendMatchAlert(
+            title: title,
+            message: lines.joined(separator: "\n")
+        )
+    }
+
+    private func restOverlapAlert(station: String, overlaps: [FriendRestOverlap]) -> FriendMatchAlert {
+        let title = "Friends at \(station)"
+        let lines = overlaps.map { overlap in
+            "GEMS \(overlap.friendGEMSID): \(durationText(minutes: overlap.overlapMinutes)) overlap"
+        }
+        return FriendMatchAlert(
+            title: title,
+            message: lines.joined(separator: "\n")
+        )
+    }
+
+    private func durationText(minutes: Int) -> String {
+        let safeMinutes = max(0, minutes)
+        return "\(safeMinutes / 60)h \(safeMinutes % 60)m"
     }
 
     private func blockAndLayoverText(for leg: TripLeg, nextLegByID: [UUID: TripLeg]) -> String {

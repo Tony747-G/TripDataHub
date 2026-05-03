@@ -439,7 +439,9 @@ final class IATATimeZoneResolver: IATATimeZoneResolving, @unchecked Sendable {
         guard !key.isEmpty else { return }
 
         lock.lock()
-        if let tzID, !tzID.isEmpty {
+        if let tzID = tzID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !tzID.isEmpty,
+           TimeZone(identifier: tzID) != nil {
             userOverrides[key] = tzID
         } else {
             userOverrides.removeValue(forKey: key)
@@ -467,7 +469,9 @@ final class IATATimeZoneResolver: IATATimeZoneResolving, @unchecked Sendable {
         let raw = UserDefaults.standard.dictionary(forKey: overridesUserDefaultsKey) ?? [:]
         var out: [String: String] = [:]
         for (key, value) in raw {
-            guard let tz = value as? String, !tz.isEmpty else { continue }
+            guard let tz = value as? String,
+                  !tz.isEmpty,
+                  TimeZone(identifier: tz) != nil else { continue }
             out[key.uppercased()] = tz
         }
         return out
