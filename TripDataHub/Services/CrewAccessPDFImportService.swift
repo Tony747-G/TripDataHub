@@ -105,6 +105,79 @@ struct CrewAccessTripItemJSON: Codable {
     let timeDerivation: String
     let aircraft: String
     let block: String
+    // Scheduled / Actual times for logbook CSV export
+    let stdUtc: String?       // Scheduled Time of Departure (UTC)
+    let staUtc: String?       // Scheduled Time of Arrival (UTC)
+    let atdUtc: String?       // Actual Time of Departure (UTC) — nil until actual data available
+    let ataUtc: String?       // Actual Time of Arrival (UTC)   — nil until actual data available
+    let tailNumber: String?   // Aircraft registration (e.g. N123UP)
+
+    // Memberwise initializer (required because custom Decodable init is defined below)
+    init(
+        sequence: Int,
+        depAirport: String,
+        arrAirport: String,
+        deadhead: Bool,
+        flight: String,
+        startUtc: String,
+        endUtc: String,
+        startLocalDisplay: String,
+        endLocalDisplay: String,
+        originTz: String?,
+        destinationTz: String?,
+        timeDerivation: String,
+        aircraft: String,
+        block: String,
+        stdUtc: String?,
+        staUtc: String?,
+        atdUtc: String?,
+        ataUtc: String?,
+        tailNumber: String?
+    ) {
+        self.sequence          = sequence
+        self.depAirport        = depAirport
+        self.arrAirport        = arrAirport
+        self.deadhead          = deadhead
+        self.flight            = flight
+        self.startUtc          = startUtc
+        self.endUtc            = endUtc
+        self.startLocalDisplay = startLocalDisplay
+        self.endLocalDisplay   = endLocalDisplay
+        self.originTz          = originTz
+        self.destinationTz     = destinationTz
+        self.timeDerivation    = timeDerivation
+        self.aircraft          = aircraft
+        self.block             = block
+        self.stdUtc            = stdUtc
+        self.staUtc            = staUtc
+        self.atdUtc            = atdUtc
+        self.ataUtc            = ataUtc
+        self.tailNumber        = tailNumber
+    }
+
+    // Custom decoder for backward compatibility with JSON files that lack newer fields
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        sequence          = try c.decode(Int.self,    forKey: .sequence)
+        depAirport        = try c.decode(String.self, forKey: .depAirport)
+        arrAirport        = try c.decode(String.self, forKey: .arrAirport)
+        deadhead          = try c.decode(Bool.self,   forKey: .deadhead)
+        flight            = try c.decode(String.self, forKey: .flight)
+        startUtc          = try c.decode(String.self, forKey: .startUtc)
+        endUtc            = try c.decode(String.self, forKey: .endUtc)
+        startLocalDisplay = try c.decode(String.self, forKey: .startLocalDisplay)
+        endLocalDisplay   = try c.decode(String.self, forKey: .endLocalDisplay)
+        originTz          = try c.decodeIfPresent(String.self, forKey: .originTz)
+        destinationTz     = try c.decodeIfPresent(String.self, forKey: .destinationTz)
+        timeDerivation    = try c.decode(String.self, forKey: .timeDerivation)
+        aircraft          = try c.decode(String.self, forKey: .aircraft)
+        block             = try c.decode(String.self, forKey: .block)
+        stdUtc            = try c.decodeIfPresent(String.self, forKey: .stdUtc)
+        staUtc            = try c.decodeIfPresent(String.self, forKey: .staUtc)
+        atdUtc            = try c.decodeIfPresent(String.self, forKey: .atdUtc)
+        ataUtc            = try c.decodeIfPresent(String.self, forKey: .ataUtc)
+        tailNumber        = try c.decodeIfPresent(String.self, forKey: .tailNumber)
+    }
 }
 
 struct CrewAccessCrewJSON: Codable {
@@ -169,37 +242,6 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         NSLog("[Import] analyzeTrip start file=%@ bytes=%d", sourceFileName ?? "unknown", pdfData.count)
         var warnings: [ImportWarning] = []
         var errors: [ImportErrorItem] = []
-
-        func makeDraft(
-            sourceFileName: String?,
-            tripId: String,
-            tripDate: String,
-            parsedSchedule: PayPeriodSchedule?,
-            jsonPayload: CrewAccessTripJSON?,
-            warnings: [ImportWarning],
-            errors: [ImportErrorItem],
-            rawExtractStats: RawExtractStats
-        ) -> CrewAccessImportDraft {
-            let draft = CrewAccessImportDraft(
-                sourceFileName: sourceFileName,
-                tripId: tripId,
-                tripDate: tripDate,
-                parsedSchedule: parsedSchedule,
-                jsonPayload: jsonPayload,
-                warnings: warnings,
-                errors: errors,
-                rawExtractStats: rawExtractStats
-            )
-            NSLog(
-                "[Import] analyzeTrip result tripId=%@ tripDate=%@ legs=%d errors=%d warnings=%d",
-                draft.tripId,
-                draft.tripDate,
-                draft.parsedSchedule?.legs.count ?? 0,
-                draft.errors.count,
-                draft.warnings.count
-            )
-            return draft
-        }
 
         guard let document = PDFDocument(data: pdfData) else {
             let stats = RawExtractStats(pageCount: 0, characterCount: 0, lineCount: 0)
@@ -395,10 +437,13 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
             )
         }
 
+        let label = crewAccessLabel(from: tripDate, tripID: tripID)
+        let layoverByArrivingSequence = layoverMetadataByArrivingSequence(from: pdfData, legRows: legRows)
+
         var tripLegs: [TripLeg] = []
         var jsonItems: [CrewAccessTripItemJSON] = []
-        for (index, row) in legRows.enumerated() {
-            let legSequence = index + 1
+        for row in legRows {
+            let legSequence = row.sequence
             let depTimeZoneID = tzResolver.resolve(row.depAirport)
             let arrTimeZoneID = tzResolver.resolve(row.arrAirport)
 
@@ -439,12 +484,13 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
             let normalizedInputBlock = normalizedBlockValue(row.block)
             let calculatedBlock = calculateBlock(depUTC: depUTC, arrUTC: arrUTC)
             let effectiveBlock = normalizedInputBlock ?? calculatedBlock ?? ""
+            let layover = layoverByArrivingSequence[row.sequence]
 
             let leg = TripLeg(
-                payPeriod: crewAccessLabel(from: tripDate, tripID: tripID),
+                payPeriod: label,
                 pairing: tripID,
                 leg: legSequence,
-                flight: row.flight,
+                flight: normalizeFlightNumber(row.flight, isDeadhead: row.deadhead),
                 depAirport: row.depAirport,
                 depLocal: depLocalDisplay,
                 arrAirport: row.arrAirport,
@@ -452,28 +498,38 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
                 depUTC: Self.isoUTCFormatter.string(from: depUTC),
                 arrUTC: Self.isoUTCFormatter.string(from: arrUTC),
                 status: row.deadhead ? "DH" : "-",
-                block: effectiveBlock
+                block: effectiveBlock,
+                layoverStation: layover?.station,
+                layoverHotelName: layover?.hotelName,
+                layoverDuration: layover.map { stripH($0.duration) },
+                stdUTC: Self.isoUTCFormatter.string(from: depUTC),
+                staUTC: Self.isoUTCFormatter.string(from: arrUTC),
+                atdUTC: nil,
+                ataUTC: nil
             )
             tripLegs.append(leg)
 
-            jsonItems.append(
-                CrewAccessTripItemJSON(
-                    sequence: legSequence,
-                    depAirport: row.depAirport,
-                    arrAirport: row.arrAirport,
-                    deadhead: row.deadhead,
-                    flight: row.flight,
-                    startUtc: Self.isoUTCFormatter.string(from: depUTC),
-                    endUtc: Self.isoUTCFormatter.string(from: arrUTC),
-                    startLocalDisplay: depLocalDisplay,
-                    endLocalDisplay: arrLocalDisplay,
-                    originTz: depTimeZoneID,
-                    destinationTz: arrTimeZoneID,
-                    timeDerivation: "from_utc",
-                    aircraft: row.aircraft,
-                    block: effectiveBlock
-                )
-            )
+            jsonItems.append(CrewAccessTripItemJSON(
+                sequence: legSequence,
+                depAirport: row.depAirport,
+                arrAirport: row.arrAirport,
+                deadhead: row.deadhead,
+                flight: normalizeFlightNumber(row.flight, isDeadhead: row.deadhead),
+                startUtc: Self.isoUTCFormatter.string(from: depUTC),
+                endUtc: Self.isoUTCFormatter.string(from: arrUTC),
+                startLocalDisplay: depLocalDisplay,
+                endLocalDisplay: arrLocalDisplay,
+                originTz: depTimeZoneID,
+                destinationTz: arrTimeZoneID,
+                timeDerivation: "from_utc",
+                aircraft: row.aircraft,
+                block: effectiveBlock,
+                stdUtc: Self.isoUTCFormatter.string(from: depUTC),
+                staUtc: Self.isoUTCFormatter.string(from: arrUTC),
+                atdUtc: nil,
+                ataUtc: nil,
+                tailNumber: nil
+            ))
         }
 
         if tripLegs.isEmpty {
@@ -485,8 +541,8 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         }
 
         let schedule: PayPeriodSchedule? = errors.isEmpty ? PayPeriodSchedule(
-            id: crewAccessLabel(from: tripDate, tripID: tripID),
-            label: crewAccessLabel(from: tripDate, tripID: tripID),
+            id: label,
+            label: label,
             tripCount: Set(tripLegs.map(\.pairing)).count,
             legCount: tripLegs.count,
             openTimeCount: 0,
@@ -528,6 +584,76 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
             rawExtractStats: stats
         )
     }
+
+    private func stripH(_ s: String) -> String {
+        s.hasSuffix("h") ? String(s.dropLast()) : s
+    }
+
+    private func normalizeFlightNumber(_ raw: String, isDeadhead: Bool) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.allSatisfy(\.isNumber), let numeric = Int(trimmed) {
+            let normalized = String(numeric)
+            return isDeadhead ? "5X\(normalized)" : normalized
+        }
+        return trimmed
+    }
+
+    private func layoverMetadataByArrivingSequence(from pdfData: Data, legRows: [ParsedLegRow]) -> [Int: LayoverLeg] {
+        guard let roster = PDFTripParser.parse(from: pdfData),
+              let firstEntry = roster.entries.first,
+              case .trip(let trip) = firstEntry else {
+            return [:]
+        }
+
+        var result: [Int: LayoverLeg] = [:]
+        var pendingFlightIndex: Int?
+        var flightIndex = 0
+        for pdfLeg in trip.legs {
+            switch pdfLeg {
+            case .flight:
+                flightIndex += 1
+                pendingFlightIndex = flightIndex - 1
+            case .layover(let layover):
+                guard let index = pendingFlightIndex,
+                      legRows.indices.contains(index) else { continue }
+                result[legRows[index].sequence] = layover
+                pendingFlightIndex = nil
+            }
+        }
+        return result
+    }
+
+    private func makeDraft(
+        sourceFileName: String?,
+        tripId: String,
+        tripDate: String,
+        parsedSchedule: PayPeriodSchedule?,
+        jsonPayload: CrewAccessTripJSON?,
+        warnings: [ImportWarning],
+        errors: [ImportErrorItem],
+        rawExtractStats: RawExtractStats
+    ) -> CrewAccessImportDraft {
+        let draft = CrewAccessImportDraft(
+            sourceFileName: sourceFileName,
+            tripId: tripId,
+            tripDate: tripDate,
+            parsedSchedule: parsedSchedule,
+            jsonPayload: jsonPayload,
+            warnings: warnings,
+            errors: errors,
+            rawExtractStats: rawExtractStats
+        )
+        Foundation.NSLog(
+            "[Import] analyzeTrip result tripId=%@ tripDate=%@ legs=%d errors=%d warnings=%d",
+            draft.tripId,
+            draft.tripDate,
+            draft.parsedSchedule?.legs.count ?? 0,
+            draft.errors.count,
+            draft.warnings.count
+        )
+        return draft
+    }
+
 
     private func dedupWarnings(_ warnings: [ImportWarning]) -> [ImportWarning] {
         var seen = Set<String>()
@@ -575,7 +701,7 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         if let dep, !weekdayToken.isEmpty {
             let parsedWeekday = normalizeWeekdayToken(weekdayToken)
             if parsedWeekday != utcWeekdayToken(for: dep) {
-                NSLog(
+                Foundation.NSLog(
                     "[Parse] weekdayMismatch tripDay=%d token=%@ computed=%@",
                     tripDayOffset,
                     parsedWeekday,

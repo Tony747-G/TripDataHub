@@ -4,15 +4,16 @@ struct CrewAccessImportHelpView: View {
     var body: some View {
         List {
             Section("CrewAccess Import Steps") {
-                Text("1. Open CrewAccess and go to the Roster page.")
-                Text("2. Tap the expand arrow on the right side of the trip you want to import.")
-                Text("3. Tap Details, then tap Allow when prompted.")
-                Text("4. Tap the Zscaler logo at the bottom-right.")
-                Text("5. Tap the menu (3 lines) at the top-right.")
-                Text("6. Tap Print, then tap Allow when prompted again.")
-                Text("7. In the print view, tap the Share icon (left of the printer icon).")
-                Text("8. In the Share Sheet, tap TripData Hub (it may be under More).")
-                Text("9. In TripData Hub, tap Confirm Import.")
+                Text("1. Tap the Browser tab at the bottom of the screen.")
+                Text("2. Log in to CrewAccess.")
+                Text("3. Tap the hamburger menu (≡) at the top-left.")
+                Text("4. Tap Roster.")
+                Text("5. Tap a Trip Id link, or expand a trip and tap Detail.")
+                Text("6. When the print preview appears, tap the Zscaler icon at the bottom-right.")
+                Text("7. Tap the hamburger menu (≡) at the top-right of the Zscaler sheet.")
+                Text("8. Tap Print.")
+                Text("9. Tap the Print button.")
+                Text("10. When Import Preview appears, verify the Trip Id and legs, then tap Confirm Import.")
             }
         }
         .navigationTitle("CrewAccess Import Help")

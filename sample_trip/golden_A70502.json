@@ -26,11 +26,13 @@
       "destinationTz" : "Asia\/Seoul",
       "endLocalDisplay" : "2026-01-30 14:59",
       "endUtc" : "2026-01-30T05:59:00Z",
-      "flight" : "064",
+      "flight" : "64",
       "originTz" : "America\/Anchorage",
       "sequence" : 1,
+      "staUtc" : "2026-01-30T05:59:00Z",
       "startLocalDisplay" : "2026-01-29 12:28",
       "startUtc" : "2026-01-29T21:28:00Z",
+      "stdUtc" : "2026-01-29T21:28:00Z",
       "timeDerivation" : "from_utc"
     },
     {
@@ -42,11 +44,13 @@
       "destinationTz" : "America\/Anchorage",
       "endLocalDisplay" : "2026-01-31 21:05",
       "endUtc" : "2026-02-01T06:05:00Z",
-      "flight" : "099",
+      "flight" : "99",
       "originTz" : "Asia\/Seoul",
       "sequence" : 3,
+      "staUtc" : "2026-02-01T06:05:00Z",
       "startLocalDisplay" : "2026-02-01 07:03",
       "startUtc" : "2026-01-31T22:03:00Z",
+      "stdUtc" : "2026-01-31T22:03:00Z",
       "timeDerivation" : "from_utc"
     }
   ],

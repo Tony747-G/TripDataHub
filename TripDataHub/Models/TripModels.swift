@@ -25,6 +25,16 @@ struct TripLeg: Identifiable, Codable, Hashable {
     let arrUTC: String?
     let status: String
     let block: String
+    // レイオーバー情報（到着後の滞在。既存JSONにない場合は nil）
+    let layoverStation: String?
+    let layoverHotelName: String?
+    let layoverDuration: String?
+    // Scheduled / Actual times for logbook CSV export
+    // PDF import time: stdUTC/staUTC are set from parsed times; atdUTC/ataUTC are nil until actual data is available
+    let stdUTC: String?   // Scheduled Time of Departure (UTC)
+    let staUTC: String?   // Scheduled Time of Arrival (UTC)
+    let atdUTC: String?   // Actual Time of Departure (UTC)
+    let ataUTC: String?   // Actual Time of Arrival (UTC)
 
     init(
         id: UUID = UUID(),
@@ -39,7 +49,14 @@ struct TripLeg: Identifiable, Codable, Hashable {
         depUTC: String? = nil,
         arrUTC: String? = nil,
         status: String,
-        block: String
+        block: String,
+        layoverStation: String? = nil,
+        layoverHotelName: String? = nil,
+        layoverDuration: String? = nil,
+        stdUTC: String? = nil,
+        staUTC: String? = nil,
+        atdUTC: String? = nil,
+        ataUTC: String? = nil
     ) {
         self.id = id
         self.payPeriod = payPeriod
@@ -54,6 +71,13 @@ struct TripLeg: Identifiable, Codable, Hashable {
         self.arrUTC = arrUTC
         self.status = status
         self.block = block
+        self.layoverStation = layoverStation
+        self.layoverHotelName = layoverHotelName
+        self.layoverDuration = layoverDuration
+        self.stdUTC = stdUTC
+        self.staUTC = staUTC
+        self.atdUTC = atdUTC
+        self.ataUTC = ataUTC
     }
 }
 

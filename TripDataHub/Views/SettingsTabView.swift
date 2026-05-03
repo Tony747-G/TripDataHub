@@ -14,10 +14,12 @@ struct SettingsTabView: View {
     @AppStorage("notification_12h_enabled") private var notify12h = false
     @State private var showNotificationDeniedAlert = false
     @State private var isShowingLogTenExportShare = false
+    @State private var isShowingLogbookExportShare = false
     @State private var verifyGemsIDInput = ""
     @State private var verifyDOBDate = Date()
     @State private var crewAccessImportFiles: [CrewAccessImportFile] = []
     @State private var logTenExportURL: URL?
+    @State private var logbookExportURL: URL?
 
     private static let dobFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -69,6 +71,27 @@ struct SettingsTabView: View {
             return "Added: \(dateString)"
         }
         return "Updated: \(dateString)"
+    }
+
+    @ViewBuilder
+    private var logbookExportSection: some View {
+        Section {
+            Button("Export Logbook CSV") {
+                let output = viewModel.exportLogbookCSV()
+                logbookExportURL = output
+                isShowingLogbookExportShare = output != nil
+            }
+            if let message = viewModel.logbookExportMessage {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Logbook Export")
+        } footer: {
+            Text("Exports all imported trips as CSV with departure date, flight number, aircraft, airports, STD/STA/ATD/ATA (UTC), block time, and crew (PIC/FO/RO/FO2).")
+                .font(.footnote)
+        }
     }
 
     @ViewBuilder
@@ -175,6 +198,7 @@ struct SettingsTabView: View {
 
             SettingsPayPeriodsSection()
 
+            logbookExportSection
             logTenExportSection
         }
     }
@@ -251,6 +275,16 @@ struct SettingsTabView: View {
                 Text("Enable notifications in iOS Settings to receive 48h/24h/12h reminders.")
             }
 #if canImport(UIKit)
+            .sheet(isPresented: $isShowingLogbookExportShare, onDismiss: {
+                if let url = logbookExportURL {
+                    try? FileManager.default.removeItem(at: url)
+                }
+                logbookExportURL = nil
+            }) {
+                if let url = logbookExportURL {
+                    ActivityView(activityItems: [url])
+                }
+            }
             .sheet(isPresented: $isShowingLogTenExportShare, onDismiss: {
                 if let url = logTenExportURL {
                     try? FileManager.default.removeItem(at: url)

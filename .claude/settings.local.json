@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:tripboard.bidproplus.com)",
+      "Bash(git init:*)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(wc -l /Users/sfune/Desktop/work/ios-app/TripDataHub/TripDataHub/Services/*.swift | tail -1)",
+      "Bash(wc -l /Users/sfune/Desktop/work/ios-app/TripDataHub/TripDataHub/Services/*.swift)",
+      "Bash(find /Users/sfune/Desktop/work/ios-app/TripDataHub -name \"*Test*\" -o -name \"*Tests*\" 2>/dev/null | head -20)",
+      "Bash(wc -l /Users/sfune/Desktop/work/ios-app/TripDataHub/TripDataHub/Views/*.swift | sort -rn | head -15)",
+      "Bash(wc -l /Users/sfune/Desktop/work/ios-app/TripDataHub/TripDataHub/Models/*.swift)",
+      "Bash(xcodebuild -scheme TripDataHub -destination 'generic/platform=iOS' -configuration Debug build 2>&1 | tail -40)",
+      "Bash(xcodebuild -scheme TripDataHub -destination 'generic/platform=iOS' -configuration Debug build 2>&1 | grep -E \"\\(error:|warning:|BUILD SUCCEEDED|BUILD FAILED\\)\" | head -30)",
+      "Bash(xcodebuild -scheme TripDataHub -destination 'generic/platform=iOS' -configuration Debug build 2>&1 | grep -E \"\\(error:|BUILD SUCCEEDED|BUILD FAILED\\)\" | head -20)",
+      "Bash(which xcodegen:*)",
+      "Bash(xcodegen generate:*)",
+      "Bash(xcodebuild test:*)",
+      "Bash(xcrun simctl:*)",
+      "Bash(xcodebuild clean:*)",
+      "Bash(xcodebuild build-for-testing:*)",
+      "Bash(xcodebuild build:*)",
+      "Bash(xcodebuild test-without-building:*)"
+    ]
+  }
+}

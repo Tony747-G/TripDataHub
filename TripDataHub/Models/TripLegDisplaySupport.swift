@@ -5,10 +5,7 @@ extension TripLeg {
         let normalized = status.uppercased()
         let base = flight.trimmingCharacters(in: .whitespacesAndNewlines)
         if normalized == "DH" || normalized == "CML" {
-            if let first = base.unicodeScalars.first, CharacterSet.letters.contains(first) {
-                return "\(normalized) \(base)"
-            }
-            return "\(normalized)\(base)"
+            return base.isEmpty ? normalized : "\(normalized) \(base)"
         }
         if normalized == "-" {
             if base.uppercased().hasPrefix("5X") { return base }

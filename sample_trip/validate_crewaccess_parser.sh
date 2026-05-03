@@ -54,6 +54,8 @@ xcrun swiftc \
   -o "$TMP_BIN" \
   "$TMP_SWIFT" \
   "$ROOT/TripDataHub/Services/CrewAccessPDFImportService.swift" \
+  "$ROOT/TripDataHub/Services/PDFTripParser.swift" \
+  "$ROOT/TripDataHub/Models/RosterParsingModels.swift" \
   "$ROOT/TripDataHub/Services/IATATimeZoneResolver.swift" \
   "$ROOT/TripDataHub/Models/TripModels.swift"
 
@@ -65,8 +67,8 @@ for case_entry in "${CASES[@]}"; do
 
   "$TMP_BIN" "$pdf" "$TMP_JSON"
 
-  perl -0pe 's/"generatedAt"\s*:\s*"[^"]+"/"generatedAt" : "__DYNAMIC__"/g' "$TMP_JSON" > "$TMP_NORM"
-  perl -0pe 's/"generatedAt"\s*:\s*"[^"]+"/"generatedAt" : "__DYNAMIC__"/g' "$expected" > "$EXP_NORM"
+  perl -0pe 's/"generatedAt"\s*:\s*"[^"]+"/"generatedAt" : "__DYNAMIC__"/g; $_ .= "\n" unless /\n\z/' "$TMP_JSON" > "$TMP_NORM"
+  perl -0pe 's/"generatedAt"\s*:\s*"[^"]+"/"generatedAt" : "__DYNAMIC__"/g; $_ .= "\n" unless /\n\z/' "$expected" > "$EXP_NORM"
 
   diff -u "$EXP_NORM" "$TMP_NORM"
   echo "Validated: $expected_rel"

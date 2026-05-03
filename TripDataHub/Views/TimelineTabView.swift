@@ -155,6 +155,10 @@ struct TimelineTabView: View {
                             ForEach(Array(legs.enumerated()), id: \.element.id) { _, leg in
                                 timelineRow(leg: leg, nextLegByID: connectionMap)
                                     .id("\(leg.id.uuidString)|\(selectedClockDisplay.rawValue)")
+                                // レイオーバーカード（接続時間 > 3h かつ同一ステーション）
+                                if shouldShowLayover(leg: leg, connectionMap: connectionMap) {
+                                    layoverCard(for: leg, connectionMap: connectionMap)
+                                }
                                 if tripBoundaryAfterLegs.contains(leg.id) {
                                     if let nextTripStartLeg = tripStartLegAfterBoundary[leg.id] {
                                         tripDataCard(
@@ -260,6 +264,98 @@ struct TimelineTabView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 7)
+    }
+
+    /// 到着日付ラベルを生成（"Tue, Apr 28 2026"）- UTC/LCL トグルに連動
+    private func arrivalLocalDateLabel(for leg: TripLeg) -> String {
+        guard let arrUTC = utcArrivalDate(for: leg) else { return "" }
+        if selectedClockDisplay == .utc {
+            return Self.utcDayHeaderFormatter.string(from: arrUTC)
+        }
+        guard let tzID = tzResolver.resolve(leg.arrAirport),
+              let tz   = TimeZone(identifier: tzID) else { return "" }
+        let fmt = DateFormatter()
+        fmt.locale     = Locale(identifier: "en_US")
+        fmt.timeZone   = tz
+        fmt.dateFormat = "EEE, MMM d yyyy"
+        return fmt.string(from: arrUTC)
+    }
+
+    /// レイオーバーカードを表示するか: 同トリップの次レグが 3h 超先の場合
+    private func shouldShowLayover(leg: TripLeg, connectionMap: [UUID: TripLeg]) -> Bool {
+        guard let next = connectionMap[leg.id],
+              next.pairing == leg.pairing else { return false }
+        guard let arrDate  = utcArrivalDate(for: leg),
+              let depDate  = utcDepartureDate(for: next) else { return false }
+        let gapMinutes = Int(depDate.timeIntervalSince(arrDate) / 60)
+        return gapMinutes >= 180   // 3 時間以上 = レイオーバー
+    }
+
+    @ViewBuilder
+    private func layoverCard(for leg: TripLeg, connectionMap: [UUID: TripLeg]) -> some View {
+        let isPast   = isPastLeg(leg)
+        let station  = leg.layoverStation ?? leg.arrAirport
+        // TripLeg フィールド → JSON hotelDetails の順でフォールバック
+        let hotel    = leg.layoverHotelName
+            ?? tripDataByTripID[leg.pairing]?.hotelByStation[station]
+            ?? ""
+        let iconColor: Color = isPast ? .gray : .primary
+
+        // 到着ローカル日付テキスト（例: "Tue, Apr 28 2026"）
+        let arrLocalDate: String = arrivalLocalDateLabel(for: leg)
+
+        // 滞在時間を UTC 差分から計算
+        let durationText: String = {
+            if let next    = connectionMap[leg.id],
+               let arrDate = utcArrivalDate(for: leg),
+               let depDate = utcDepartureDate(for: next) {
+                let mins = max(0, Int(depDate.timeIntervalSince(arrDate) / 60))
+                return "\(mins / 60):\(String(format: "%02d", mins % 60))"
+            }
+            return leg.layoverDuration ?? ""
+        }()
+
+        VStack(spacing: 0) {
+            // ── 到着日ヘッダー ────────────────────────────────────
+            if !arrLocalDate.isEmpty {
+                Text(arrLocalDate)
+                    .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
+                    .foregroundStyle(isPast ? .gray : dateHeaderTextColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 5)
+                    .background(dateCardBackground)
+            }
+
+            // ── レイオーバー行 ────────────────────────────────────
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "bed.double.fill")
+                    .font(.system(size: 16 * fontScale))
+                    .foregroundStyle(iconColor)
+                    .frame(width: 28 * fontScale, alignment: .center)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Layover at \(station)")
+                        .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
+                        .foregroundStyle(isPast ? .gray : .primary)
+                    HStack {
+                        if !hotel.isEmpty {
+                            Text(hotel)
+                                .appScaledFont(.footnote, scale: fontScale)
+                                .foregroundStyle(isPast ? .gray : .secondary)
+                        }
+                        Spacer()
+                        if !durationText.isEmpty {
+                            Text("Rest: \(durationText)")
+                                .appScaledFont(.caption, scale: fontScale)
+                                .foregroundStyle(isPast ? .gray : .primary)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 7)
+        }
     }
 
     private var timelineTopBar: some View {
@@ -561,6 +657,9 @@ struct TimelineTabView: View {
         let days = absMinutes / (24 * 60)
         let hours = (absMinutes % (24 * 60)) / 60
         let minutes = absMinutes % 60
+        if days == 0 {
+            return "(\(sign)\(String(format: "%02d", hours))h \(String(format: "%02d", minutes))m)"
+        }
         return "(\(sign)\(String(format: "%02d", days))d \(String(format: "%02d", hours))h \(String(format: "%02d", minutes))m)"
     }
 
@@ -745,6 +844,11 @@ struct TimelineTabView: View {
 
     private func blockAndLayoverText(for leg: TripLeg, nextLegByID: [UUID: TripLeg]) -> String {
         let text = LegConnectionTextBuilder.blockAndConnectionText(for: leg, nextLegByID: nextLegByID)
+        // レイオーバーカードを表示する場合は " / LO at ..." 部分を削除して Block のみ残す
+        if shouldShowLayover(leg: leg, connectionMap: nextLegByID),
+           let slashRange = text.range(of: " / ") {
+            return String(text[..<slashRange.lowerBound])
+        }
         return text
             .replacingOccurrences(of: "Layover at ", with: "LO at ")
             .replacingOccurrences(of: "Layover:", with: "LO:")
@@ -754,7 +858,7 @@ struct TimelineTabView: View {
         if next.leg == 1 { return true }
         if current.payPeriod != next.payPeriod { return true }
         if current.pairing != next.pairing { return true }
-        return next.leg <= current.leg
+        return false
     }
 
     private var tripBoundaryAfterLegIDs: Set<UUID> {
@@ -883,7 +987,7 @@ struct TimelineTabView: View {
             guard !tripID.isEmpty else { continue }
             let modifiedAt = values.contentModificationDate ?? .distantPast
             let current = latestFileByTripID[tripID]
-            if current == nil || modifiedAt > current!.date {
+            if current.map({ modifiedAt > $0.date }) ?? true {
                 latestFileByTripID[tripID] = (modifiedAt, url)
             }
         }
@@ -896,10 +1000,39 @@ struct TimelineTabView: View {
             else {
                 continue
             }
+            var hotelByStation: [String: String] = [:]
+            for detail in decoded.hotelDetails {
+                let (st, name) = CrewAccessTripSummaryCardJSON.parseHotelDetail(detail)
+                if !st.isEmpty && !name.isEmpty { hotelByStation[st] = name }
+            }
+            let legacyHotelDetails = decoded.hotelDetails.filter { $0.hasPrefix("Hotel details ") }
+            if !legacyHotelDetails.isEmpty {
+                var legacyHotelIndex = 0
+                let sortedItems = decoded.items.sorted { $0.sequence < $1.sequence }
+                for index in sortedItems.indices.dropLast() {
+                    guard legacyHotelIndex < legacyHotelDetails.count else { break }
+                    let item = sortedItems[index]
+                    let next = sortedItems[index + 1]
+                    guard let endDate = LegConnectionTextBuilder.parseUTC(item.endUtc),
+                          let nextStartDate = LegConnectionTextBuilder.parseUTC(next.startUtc),
+                          nextStartDate.timeIntervalSince(endDate) >= 180 * 60 else {
+                        continue
+                    }
+                    let station = item.arrAirport.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !station.isEmpty, hotelByStation[station] == nil else {
+                        legacyHotelIndex += 1
+                        continue
+                    }
+                    let (_, name) = CrewAccessTripSummaryCardJSON.parseHotelDetail(legacyHotelDetails[legacyHotelIndex])
+                    if !name.isEmpty { hotelByStation[station] = name }
+                    legacyHotelIndex += 1
+                }
+            }
             summaryByTripID[tripID] = TripDataCardInfo(
                 creditTime: decoded.creditTime,
                 tripDays: decoded.tripDays,
-                tafb: decoded.tafb
+                tafb: decoded.tafb,
+                hotelByStation: hotelByStation
             )
             for item in decoded.items {
                 let key = tripSequenceKey(tripID: tripID, sequence: item.sequence)
@@ -949,6 +1082,7 @@ private struct TripDataCardInfo {
     let creditTime: String?
     let tripDays: String?
     let tafb: String?
+    let hotelByStation: [String: String]   // station → hotel name（JSON fallback）
 }
 
 private struct CrewAccessTripSummaryCardJSON: Decodable {
@@ -956,6 +1090,7 @@ private struct CrewAccessTripSummaryCardJSON: Decodable {
     let creditTime: String?
     let tripDays: String?
     let tafb: String?
+    let hotelDetails: [String]
     let items: [CrewAccessTripSummaryCardItemJSON]
 
     private enum CodingKeys: String, CodingKey {
@@ -963,21 +1098,76 @@ private struct CrewAccessTripSummaryCardJSON: Decodable {
         case creditTime
         case tripDays
         case tafb
+        case hotelDetails
         case items
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        tripId = try container.decode(String.self, forKey: .tripId)
-        creditTime = try container.decodeIfPresent(String.self, forKey: .creditTime)
-        tripDays = try container.decodeIfPresent(String.self, forKey: .tripDays)
-        tafb = try container.decodeIfPresent(String.self, forKey: .tafb)
-        items = try container.decodeIfPresent([CrewAccessTripSummaryCardItemJSON].self, forKey: .items) ?? []
+        tripId       = try container.decode(String.self, forKey: .tripId)
+        creditTime   = try container.decodeIfPresent(String.self, forKey: .creditTime)
+        tripDays     = try container.decodeIfPresent(String.self, forKey: .tripDays)
+        tafb         = try container.decodeIfPresent(String.self, forKey: .tafb)
+        hotelDetails = try container.decodeIfPresent([String].self, forKey: .hotelDetails) ?? []
+        items        = try container.decodeIfPresent([CrewAccessTripSummaryCardItemJSON].self, forKey: .items) ?? []
+    }
+
+    /// "SGN: Caravelle Hotel +84-28-3823-4999 (15:30)" → (station:"SGN", hotel:"Caravelle Hotel")
+    static func parseHotelDetail(_ detail: String) -> (station: String, hotelName: String) {
+        if detail.hasPrefix("Hotel details ") {
+            return parseLegacyHotelDetail(detail)
+        }
+
+        guard let colonRange = detail.range(of: ": ") else {
+            return (detail.trimmingCharacters(in: .whitespaces), "")
+        }
+        let station = String(detail[..<colonRange.lowerBound]).trimmingCharacters(in: .whitespaces)
+        var rest    = String(detail[colonRange.upperBound...])
+        // 末尾の "(HH:MM)" を除去
+        if let parenRange = rest.range(of: " (", options: .backwards) {
+            rest = String(rest[..<parenRange.lowerBound])
+        }
+        // 電話番号（+始まり or ダッシュ2つ以上）を除去
+        let words = rest.split(separator: " ").map(String.init)
+        var hotelWords: [String] = []
+        for word in words {
+            let dashCount = word.filter { $0 == "-" }.count
+            if word.hasPrefix("+") || dashCount >= 2 { break }
+            hotelWords.append(word)
+        }
+        return (station, hotelWords.joined(separator: " ").trimmingCharacters(in: .whitespaces))
+    }
+
+    private static func parseLegacyHotelDetail(_ detail: String) -> (station: String, hotelName: String) {
+        guard let hotelRange = detail.range(of: "Hotel: ") else { return ("", "") }
+        let afterHotel = String(detail[hotelRange.upperBound...])
+        let hotelOnly: String
+        if let transportRange = afterHotel.range(of: " Hotel Transport:") {
+            hotelOnly = String(afterHotel[..<transportRange.lowerBound])
+        } else {
+            hotelOnly = afterHotel
+        }
+
+        let cleaned = hotelOnly
+            .replacingOccurrences(of: " UPS Only", with: "")
+            .replacingOccurrences(of: "UPS Only ", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let words = cleaned.split(separator: " ").map(String.init)
+        var hotelWords: [String] = []
+        for word in words {
+            let digitCount = word.filter(\.isNumber).count
+            let dashCount = word.filter { $0 == "-" }.count
+            if word.hasPrefix("+") || digitCount >= 3 || dashCount >= 2 { break }
+            hotelWords.append(word)
+        }
+        return ("", hotelWords.joined(separator: " ").trimmingCharacters(in: .whitespaces))
     }
 }
 
 private struct CrewAccessTripSummaryCardItemJSON: Decodable {
     let sequence: Int
+    let arrAirport: String
     let startUtc: String
     let endUtc: String
 }

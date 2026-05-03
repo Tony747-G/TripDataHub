@@ -28,11 +28,13 @@
       "destinationTz" : "America\/Kentucky\/Louisville",
       "endLocalDisplay" : "2026-02-26 00:58",
       "endUtc" : "2026-02-26T05:58:00Z",
-      "flight" : "063",
+      "flight" : "63",
       "originTz" : "America\/Anchorage",
       "sequence" : 1,
+      "staUtc" : "2026-02-26T05:58:00Z",
       "startLocalDisplay" : "2026-02-25 14:53",
       "startUtc" : "2026-02-25T23:53:00Z",
+      "stdUtc" : "2026-02-25T23:53:00Z",
       "timeDerivation" : "from_utc"
     },
     {
@@ -47,8 +49,10 @@
       "flight" : "108",
       "originTz" : "America\/Kentucky\/Louisville",
       "sequence" : 3,
+      "staUtc" : "2026-02-27T23:20:00Z",
       "startLocalDisplay" : "2026-02-27 04:38",
       "startUtc" : "2026-02-27T09:38:00Z",
+      "stdUtc" : "2026-02-27T09:38:00Z",
       "timeDerivation" : "from_utc"
     },
     {
@@ -60,11 +64,13 @@
       "destinationTz" : "America\/Anchorage",
       "endLocalDisplay" : "2026-03-02 10:23",
       "endUtc" : "2026-03-02T19:23:00Z",
-      "flight" : "109",
+      "flight" : "5X109",
       "originTz" : "Asia\/Tokyo",
       "sequence" : 6,
+      "staUtc" : "2026-03-02T19:23:00Z",
       "startLocalDisplay" : "2026-03-02 21:50",
       "startUtc" : "2026-03-02T12:50:00Z",
+      "stdUtc" : "2026-03-02T12:50:00Z",
       "timeDerivation" : "from_utc"
     }
   ],

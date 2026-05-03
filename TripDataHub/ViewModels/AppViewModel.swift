@@ -155,6 +155,7 @@ final class AppViewModel: ObservableObject {
     @Published var hasQueuedImport: Bool = false
     @Published var crewAccessDeleteMessage: String?
     @Published var logTenExportMessage: String?
+    @Published var logbookExportMessage: String?
     @Published var tzOverrideMessage: String?
     @Published var lastImportDidReplaceExistingTrip: Bool = false
     @Published var lastImportSummaryMessage: String?
@@ -1242,6 +1243,159 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Logbook CSV Export
+
+    func exportLogbookCSV() -> URL? {
+        let fm = FileManager.default
+        guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            logbookExportMessage = "Documents directory is unavailable."
+            return nil
+        }
+        let dir = documents.appendingPathComponent("CrewAccessImports", isDirectory: true)
+        guard fm.fileExists(atPath: dir.path) else {
+            logbookExportMessage = "No imported trips found."
+            return nil
+        }
+
+        let urls: [URL]
+        do {
+            urls = try fm.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            ).filter { $0.pathExtension.lowercased() == "json" }
+        } catch {
+            logbookExportMessage = "Failed to read import files."
+            return nil
+        }
+
+        let isoParser = ISO8601DateFormatter()
+        isoParser.formatOptions = [.withInternetDateTime]
+        isoParser.timeZone = TimeZone(secondsFromGMT: 0)
+
+        let dateFmt = DateFormatter()
+        dateFmt.locale = Locale(identifier: "en_US_POSIX")
+        dateFmt.timeZone = TimeZone(secondsFromGMT: 0)
+        dateFmt.dateFormat = "yyyy-MM-dd"
+
+        let timeFmt = DateFormatter()
+        timeFmt.locale = Locale(identifier: "en_US_POSIX")
+        timeFmt.timeZone = TimeZone(secondsFromGMT: 0)
+        timeFmt.dateFormat = "HH:mm"
+
+        struct ExportRow { let sortDate: Date; let line: String }
+        var rows: [ExportRow] = []
+
+        for url in urls {
+            guard let data = try? Data(contentsOf: url),
+                  let trip = try? JSONDecoder().decode(CrewAccessTripJSON.self, from: data)
+            else { continue }
+
+            let pic = Self.logbookCrewName(trip.crew, role: .pic)
+            let fo  = Self.logbookCrewName(trip.crew, role: .fo)
+            let ro  = Self.logbookCrewName(trip.crew, role: .ro)
+            let fo2 = Self.logbookCrewName(trip.crew, role: .fo2)
+
+            for item in trip.items {
+                let stdText = item.stdUtc ?? item.startUtc
+                let staText = item.staUtc ?? item.endUtc
+                guard let stdDate = isoParser.date(from: stdText) else { continue }
+
+                let depDate = dateFmt.string(from: stdDate)
+                let stdStr  = timeFmt.string(from: stdDate)
+                let staStr  = isoParser.date(from: staText).map { timeFmt.string(from: $0) } ?? ""
+                let atdStr  = item.atdUtc.flatMap { isoParser.date(from: $0) }.map { timeFmt.string(from: $0) } ?? ""
+                let ataStr  = item.ataUtc.flatMap { isoParser.date(from: $0) }.map { timeFmt.string(from: $0) } ?? ""
+
+                // Block: ATA-ATD if both available, else strip parens from block field
+                let blockStr: String
+                if let atd = item.atdUtc.flatMap({ isoParser.date(from: $0) }),
+                   let ata = item.ataUtc.flatMap({ isoParser.date(from: $0) }) {
+                    let mins = max(0, Int(ata.timeIntervalSince(atd) / 60))
+                    blockStr = "\(mins / 60):\(String(format: "%02d", mins % 60))"
+                } else {
+                    let raw = item.block.trimmingCharacters(in: .whitespacesAndNewlines)
+                    blockStr = raw.hasPrefix("(") && raw.hasSuffix(")")
+                        ? String(raw.dropFirst().dropLast())
+                        : raw
+                }
+
+                let flightNum = item.deadhead ? "DH \(item.flight)" : item.flight
+
+                let row = [
+                    Self.csvEscaped(depDate),
+                    Self.csvEscaped(flightNum),
+                    Self.csvEscaped(item.tailNumber ?? ""),
+                    Self.csvEscaped(item.aircraft),
+                    Self.csvEscaped(item.depAirport),
+                    Self.csvEscaped(item.arrAirport),
+                    Self.csvEscaped(stdStr),
+                    Self.csvEscaped(staStr),
+                    Self.csvEscaped(atdStr),
+                    Self.csvEscaped(ataStr),
+                    Self.csvEscaped(blockStr),
+                    Self.csvEscaped(pic),
+                    Self.csvEscaped(fo),
+                    Self.csvEscaped(ro),
+                    Self.csvEscaped(fo2)
+                ].joined(separator: ",")
+
+                rows.append(ExportRow(sortDate: stdDate, line: row))
+            }
+        }
+
+        rows.sort { $0.sortDate < $1.sortDate }
+
+        let header = "Departure Date,Flight Number,Aircraft Registration,Aircraft Type,Departure Airport,Arrival Airport,STD,STA,ATD,ATA,Block Time,PIC,FO,RO,FO2"
+        var csvText = header + "\n" + rows.map(\.line).joined(separator: "\n")
+        if !rows.isEmpty { csvText += "\n" }
+
+        guard let csvData = csvText.data(using: .utf8) else {
+            logbookExportMessage = "Failed to encode logbook CSV."
+            return nil
+        }
+
+        let fileNameFmt = DateFormatter()
+        fileNameFmt.locale = Locale(identifier: "en_US_POSIX")
+        fileNameFmt.dateFormat = "yyyyMMdd_HHmm"
+        let fileName = "TripData_Logbook_\(fileNameFmt.string(from: Date())).csv"
+        let outputURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+
+        do {
+            try csvData.write(to: outputURL, options: .atomic)
+            NSLog("[LogbookExport] finished rows=%d bytes=%d", rows.count, csvData.count)
+            logbookExportMessage = "Logbook CSV ready — \(rows.count) flights."
+            return outputURL
+        } catch {
+            logbookExportMessage = "Failed to write logbook CSV: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    private enum LogbookCrewRole { case pic, fo, ro, fo2 }
+
+    private nonisolated static func normalizeCrewPosition(_ position: String) -> String {
+        position.uppercased()
+            .replacingOccurrences(of: "/", with: "")
+            .replacingOccurrences(of: " ", with: "")
+    }
+
+    private nonisolated static func logbookCrewName(
+        _ crew: [CrewAccessCrewJSON],
+        role: LogbookCrewRole
+    ) -> String {
+        let match = crew.first { member in
+            let p = normalizeCrewPosition(member.position)
+            switch role {
+            case .pic:  return p == "CA" || p == "CAPT" || p == "CAPTAIN" || p == "PIC"
+            case .fo2:  return p == "FO2"
+            case .ro:   return p == "RO"
+            case .fo:   return p == "FO"    // FO2 is already "FO2", so "FO" only matches plain FO
+            }
+        }
+        return match?.name ?? ""
+    }
+
     func importSeniorityCSVFromDocuments(named preferredFileName: String = "ups_sen.csv") {
         let fm = FileManager.default
         guard let documentsURL = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
@@ -2004,7 +2158,11 @@ final class AppViewModel: ObservableObject {
                 depUTC: item.startUtc,
                 arrUTC: item.endUtc,
                 status: item.deadhead ? "DH" : "-",
-                block: item.block
+                block: item.block,
+                stdUTC: item.stdUtc ?? item.startUtc,
+                staUTC: item.staUtc ?? item.endUtc,
+                atdUTC: item.atdUtc,
+                ataUTC: item.ataUtc
             )
         }.sorted { lhs, rhs in
             if lhs.leg == rhs.leg {
@@ -2255,6 +2413,25 @@ final class AppViewModel: ObservableObject {
                 code: 1002,
                 userInfo: [NSLocalizedDescriptionKey: "JSON output path is a directory: \(finalURL.path)"]
             )
+        }
+
+        // Remove any existing files for the same Trip Id with a different date prefix
+        let tripIDSuffix = "_\(safeTripID).json"
+        if let existingFiles = try? fm.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) {
+            for fileURL in existingFiles {
+                let name = fileURL.lastPathComponent
+                guard name.hasSuffix(tripIDSuffix), fileURL.path != finalURL.path else { continue }
+                do {
+                    try fm.removeItem(at: fileURL)
+                    NSLog("[Import] Removed stale trip file: %@", name)
+                } catch {
+                    NSLog("[Import] Failed to remove stale trip file %@: %@", name, error.localizedDescription)
+                }
+            }
         }
 
         let backupURL = dir.appendingPathComponent(".\(fileName).bak-\(UUID().uuidString)")

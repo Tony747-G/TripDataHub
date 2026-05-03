@@ -30,6 +30,11 @@ struct RootTabView: View {
                     Label("Friends", systemImage: "person.2")
                 }
 
+            BrowserTabView()
+                .tabItem {
+                    Label("Browser", systemImage: "globe")
+                }
+
             if viewModel.canAccessAdminTab {
                 AdminTabView()
                     .tabItem {
