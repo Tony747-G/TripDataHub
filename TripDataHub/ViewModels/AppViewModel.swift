@@ -502,9 +502,6 @@ final class AppViewModel: ObservableObject {
                 friendActionMessage = "Friend already linked: \(employeeID)"
                 return
             }
-        } else {
-            friendConnections.append(FriendConnection(employeeID: employeeID, status: .pending))
-            saveFriendConnections()
         }
 
         await uploadSharedScheduleIfNeeded(reason: "friend request")
@@ -513,6 +510,7 @@ final class AppViewModel: ObservableObject {
                 myGEMSID: myGEMSID,
                 friendGEMSID: employeeID
             )
+            upsertFriendConnection(from: link)
             await refreshFriendSchedulesFromCloud()
             friendActionMessage = link.isAccepted
                 ? "Friend linked: \(employeeID)"
@@ -521,6 +519,24 @@ final class AppViewModel: ObservableObject {
             friendActionMessage = "Failed to save friend request: \(error.localizedDescription)"
             logNonFatal("Friend CloudKit request failed: \(error.localizedDescription)")
         }
+    }
+
+    private func upsertFriendConnection(from link: FriendScheduleCloudKitLink) {
+        if let index = friendConnections.firstIndex(where: { $0.employeeID == link.friendGEMSID }) {
+            friendConnections[index].status = link.isAccepted ? .accepted : .pending
+            if link.isAccepted {
+                friendConnections[index].linkedAt = link.linkedAt ?? friendConnections[index].linkedAt ?? Date()
+            }
+        } else {
+            friendConnections.append(
+                FriendConnection(
+                    employeeID: link.friendGEMSID,
+                    status: link.isAccepted ? .accepted : .pending,
+                    linkedAt: link.isAccepted ? (link.linkedAt ?? Date()) : nil
+                )
+            )
+        }
+        saveFriendConnections()
     }
 
     func approvePseudoFriendRequest(_ id: UUID) {
