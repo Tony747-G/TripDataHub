@@ -203,8 +203,7 @@ final class AppViewModel: ObservableObject {
     private let friendConnectionsKey = "friend_connections_v1"
     private let scheduleSharingEnabledKey = "schedule_sharing_enabled_v1"
     private let seniorityRecordsKey = "pilot_seniority_records_v1"
-    // Legacy keys/file names kept only for one-time migration from older builds.
-    // TODO(remove-after-1.2): delete after App Store builds that used pilot_roster_records_v1 age out.
+    // Legacy keys/file names are kept so upgrades from pre-CloudKit verification builds can clean up local seniority data.
     private let legacySeniorityRecordsKey = "pilot_roster_records_v1"
     private let verifiedIdentityKey = "verified_identity_profile_v1"
     private let verifiedUsersKey = "verified_users_v1"
@@ -561,24 +560,6 @@ final class AppViewModel: ObservableObject {
             friendActionMessage = "Failed to cancel friend request: \(error.localizedDescription)"
             logNonFatal("Friend CloudKit cancel failed: \(error.localizedDescription)")
         }
-    }
-
-    func approvePseudoFriendRequest(_ id: UUID) {
-        guard let index = friendConnections.firstIndex(where: { $0.id == id }) else { return }
-        guard friendConnections[index].status == .pending else { return }
-        friendConnections[index].status = .accepted
-        friendConnections[index].linkedAt = Date()
-        friendConnections[index].sharedSchedules = buildPseudoFriendSchedules(for: friendConnections[index].employeeID)
-        saveFriendConnections()
-        friendActionMessage = "Friend linked: \(friendConnections[index].employeeID)"
-    }
-
-    func rejectPseudoFriendRequest(_ id: UUID) {
-        guard let index = friendConnections.firstIndex(where: { $0.id == id }) else { return }
-        let employeeID = friendConnections[index].employeeID
-        friendConnections.remove(at: index)
-        saveFriendConnections()
-        friendActionMessage = "Request rejected: \(employeeID)"
     }
 
     func setScheduleSharingEnabled(_ enabled: Bool) {
@@ -3739,39 +3720,6 @@ final class AppViewModel: ObservableObject {
         return yy * 100 + pp
     }
 
-    private func buildPseudoFriendSchedules(for employeeID: String) -> [PayPeriodSchedule] {
-        if !schedules.isEmpty {
-            return schedules
-        }
-#if DEBUG
-        if !Self.previewSchedules.isEmpty {
-            return Self.previewSchedules
-        }
-#endif
-        let syntheticLeg = TripLeg(
-            payPeriod: "PP-SAMPLE",
-            pairing: "F\(employeeID)",
-            leg: 1,
-            flight: "123",
-            depAirport: "ANC",
-            depLocal: "2026-02-18 08:00",
-            arrAirport: "SEA",
-            arrLocal: "2026-02-18 12:10",
-            status: "-",
-            block: "4:10"
-        )
-        let syntheticSchedule = PayPeriodSchedule(
-            id: "PP-SAMPLE",
-            label: "PP-SAMPLE",
-            tripCount: 1,
-            legCount: 1,
-            openTimeCount: 0,
-            updatedAt: Date(),
-            legs: [syntheticLeg],
-            openTimeTrips: []
-        )
-        return [syntheticSchedule]
-    }
 }
 
 private struct AdminPolicy {

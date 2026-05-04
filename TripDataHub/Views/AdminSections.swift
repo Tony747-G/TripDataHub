@@ -66,42 +66,6 @@ struct AdminSeniorityImportSection: View {
     }
 }
 
-struct AdminPendingApprovalSection: View {
-    @EnvironmentObject private var viewModel: AppViewModel
-
-    var body: some View {
-        Section("Pending Approval") {
-            if viewModel.pendingFriendConnections.isEmpty {
-                Text("No pending friend requests.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(viewModel.pendingFriendConnections) { friend in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(friend.employeeID)
-                            .font(.headline)
-                        Text("Requested: \(friend.requestedAt.formatted(date: .abbreviated, time: .shortened))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        HStack(spacing: 10) {
-                            Button("Approve") {
-                                viewModel.approvePseudoFriendRequest(friend.id)
-                            }
-                            .buttonStyle(.borderedProminent)
-
-                            Button("Reject") {
-                                viewModel.rejectPseudoFriendRequest(friend.id)
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-            }
-        }
-    }
-}
-
 struct AdminVerifiedUsersSection: View {
     @EnvironmentObject private var viewModel: AppViewModel
 

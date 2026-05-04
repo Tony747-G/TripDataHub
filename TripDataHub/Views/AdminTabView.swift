@@ -14,7 +14,6 @@ struct AdminTabView: View {
                 AdminSeniorityImportSection {
                     isShowingSeniorityImporter = true
                 }
-                AdminPendingApprovalSection()
                 AdminVerifiedUsersSection()
             }
 #if os(iOS)
