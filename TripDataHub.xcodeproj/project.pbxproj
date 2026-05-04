@@ -582,7 +582,7 @@
 				CODE_SIGN_ENTITLEMENTS = TripDataHub/TripDataHub.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 15;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TripDataHub/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "TripData Hub";
@@ -693,7 +693,7 @@
 				CODE_SIGN_ENTITLEMENTS = TripDataHub/TripDataHub.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 15;
 				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TripDataHub/Info.plist;

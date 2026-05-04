@@ -93,6 +93,8 @@ struct WebCrewAccessTripItem: Codable, Equatable {
 
 enum TripScheduleSnapshotEncoder {
     static let schemaVersion = 3
+    private static let legacyScheduleSchemaVersion = 1
+    private static let minimumLayoverMinutes = 180
 
     static func encode(
         ownerDisplayName: String,
@@ -125,7 +127,7 @@ enum TripScheduleSnapshotEncoder {
         let legs = sortedLegs(from: schedules)
         let items = legs.compactMap(scheduleItem)
         return WebSchedulePayload(
-            schemaVersion: 1,
+            schemaVersion: legacyScheduleSchemaVersion,
             generatedAtUTC: formatUTC(now),
             owner: WebScheduleOwner(displayName: ownerDisplayName),
             currentTrip: currentTrip(from: legs, now: now),
@@ -279,7 +281,7 @@ enum TripScheduleSnapshotEncoder {
               let arrival = parseUTC(arrivingItem.endUTC),
               let departure = parseUTC(departingItem.startUTC) else { return nil }
         let minutes = Int(departure.timeIntervalSince(arrival) / 60)
-        guard minutes >= 180 else { return nil }
+        guard minutes >= minimumLayoverMinutes else { return nil }
 
         let station = normalizedAirport(arrivingItem.arrAirport)
         let hotel = hotelByStation[station]
@@ -323,7 +325,7 @@ enum TripScheduleSnapshotEncoder {
             let next = items[nextIndex]
             guard let end = parseUTC(item.endUTC),
                   let nextStart = parseUTC(next.startUTC),
-                  nextStart.timeIntervalSince(end) >= 180 * 60 else {
+                  nextStart.timeIntervalSince(end) >= TimeInterval(minimumLayoverMinutes * 60) else {
                 continue
             }
             let station = normalizedAirport(item.arrAirport)

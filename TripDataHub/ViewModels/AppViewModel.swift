@@ -655,7 +655,7 @@ final class AppViewModel: ObservableObject {
         )
         async let webSnapshotUpload: Void = friendScheduleCloudKitService.uploadScheduleSnapshot(
             gemsID: verifiedIdentity.gemsID,
-            ownerDisplayName: verifiedIdentity.gemsID,
+            ownerDisplayName: verifiedIdentity.name,
             crewAccessTrips: crewAccessTrips
         )
 

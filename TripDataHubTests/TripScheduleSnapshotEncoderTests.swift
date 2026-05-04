@@ -264,6 +264,65 @@ final class TripScheduleSnapshotEncoderTests: XCTestCase {
         XCTAssertEqual(payload.timelineCards[1].trailing, "Rest: 26:00")
     }
 
+    func test_crewAccessTrips_layoverRequiresAtLeast180Minutes() {
+        let belowThreshold = TripScheduleSnapshotEncoder.encode(
+            ownerDisplayName: "7793942",
+            crewAccessTrips: [
+                makeCrewAccessTrip(
+                    firstEndUTC: "2026-04-27T19:45:00Z",
+                    secondStartUTC: "2026-04-27T22:44:00Z"
+                )
+            ],
+            now: iso("2026-05-04T00:00:00Z")
+        )
+        let atThreshold = TripScheduleSnapshotEncoder.encode(
+            ownerDisplayName: "7793942",
+            crewAccessTrips: [
+                makeCrewAccessTrip(
+                    firstEndUTC: "2026-04-27T19:45:00Z",
+                    secondStartUTC: "2026-04-27T22:45:00Z"
+                )
+            ],
+            now: iso("2026-05-04T00:00:00Z")
+        )
+
+        XCTAssertEqual(belowThreshold.timelineCards.map(\.type), ["flight", "flight"])
+        XCTAssertEqual(atThreshold.timelineCards.map(\.type), ["flight", "layover", "flight"])
+    }
+
+    func test_crewAccessTrips_formatsDeadheadAnd5XFlightText() {
+        let payload = TripScheduleSnapshotEncoder.encode(
+            ownerDisplayName: "7793942",
+            crewAccessTrips: [
+                makeCrewAccessTrip(
+                    firstFlight: "5X100",
+                    firstDeadhead: true,
+                    secondFlight: "101",
+                    secondDeadhead: false
+                )
+            ],
+            now: iso("2026-05-04T00:00:00Z")
+        )
+
+        let flightCards = payload.timelineCards.filter { $0.type == "flight" }
+        XCTAssertEqual(flightCards[0].subtitle, "DH 5X100")
+        XCTAssertEqual(flightCards[0].icon, "paperplane")
+        XCTAssertEqual(flightCards[1].subtitle, "5X101")
+        XCTAssertEqual(flightCards[1].icon, "airplane")
+    }
+
+    func test_crewAccessTrips_parsesModernHotelDetailFormat() {
+        let payload = TripScheduleSnapshotEncoder.encode(
+            ownerDisplayName: "7793942",
+            crewAccessTrips: [
+                makeCrewAccessTrip(hotelDetails: ["SDF: Brown Hotel +1 555 0100 (CrewAccess)"])
+            ],
+            now: iso("2026-05-04T00:00:00Z")
+        )
+
+        XCTAssertEqual(payload.timelineCards.first(where: { $0.type == "layover" })?.hotelName, "Brown Hotel")
+    }
+
     func test_crewAccessTrips_jsonExcludesCrewList() throws {
         let jsonString = try TripScheduleSnapshotEncoder.json(
             ownerDisplayName: "7793942",
@@ -320,7 +379,15 @@ final class TripScheduleSnapshotEncoderTests: XCTestCase {
         return formatter.date(from: value)!
     }
 
-    private func makeCrewAccessTrip() -> CrewAccessTripJSON {
+    private func makeCrewAccessTrip(
+        hotelDetails: [String] = ["Hotel details SDF: Test Hotel / +1 555 0100"],
+        firstFlight: String = "5X100",
+        firstDeadhead: Bool = false,
+        firstEndUTC: String = "2026-04-27T19:45:00Z",
+        secondFlight: String = "5X101",
+        secondDeadhead: Bool = false,
+        secondStartUTC: String = "2026-04-28T21:45:00Z"
+    ) -> CrewAccessTripJSON {
         CrewAccessTripJSON(
             schemaVersion: 1,
             source: "crewaccess-pdf",
@@ -333,7 +400,7 @@ final class TripScheduleSnapshotEncoderTests: XCTestCase {
             tripDays: "2",
             tafb: "36:00",
             dutyTotals: ["Duty 1 Time 12:30 Block 9:00 Rest 24:00"],
-            hotelDetails: ["Hotel details SDF: Test Hotel / +1 555 0100"],
+            hotelDetails: hotelDetails,
             crew: [
                 CrewAccessCrewJSON(
                     position: "CA",
@@ -345,18 +412,20 @@ final class TripScheduleSnapshotEncoderTests: XCTestCase {
             items: [
                 makeCrewAccessItem(
                     sequence: 1,
-                    flight: "5X100",
+                    flight: firstFlight,
+                    deadhead: firstDeadhead,
                     depAirport: "ANC",
                     arrAirport: "SDF",
                     startUTC: "2026-04-27T07:24:00Z",
-                    endUTC: "2026-04-27T19:45:00Z"
+                    endUTC: firstEndUTC
                 ),
                 makeCrewAccessItem(
                     sequence: 2,
-                    flight: "5X101",
+                    flight: secondFlight,
+                    deadhead: secondDeadhead,
                     depAirport: "SDF",
                     arrAirport: "ONT",
-                    startUTC: "2026-04-28T21:45:00Z",
+                    startUTC: secondStartUTC,
                     endUTC: "2026-04-29T00:15:00Z"
                 )
             ]
@@ -366,6 +435,7 @@ final class TripScheduleSnapshotEncoderTests: XCTestCase {
     private func makeCrewAccessItem(
         sequence: Int,
         flight: String,
+        deadhead: Bool = false,
         depAirport: String,
         arrAirport: String,
         startUTC: String,
@@ -375,7 +445,7 @@ final class TripScheduleSnapshotEncoderTests: XCTestCase {
             sequence: sequence,
             depAirport: depAirport,
             arrAirport: arrAirport,
-            deadhead: false,
+            deadhead: deadhead,
             flight: flight,
             startUtc: startUTC,
             endUtc: endUTC,

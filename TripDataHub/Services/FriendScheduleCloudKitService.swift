@@ -166,36 +166,58 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
     func refreshConnections(myGEMSID: String, connections: [FriendConnection]) async throws -> [FriendConnection] {
         let my = normalizedGEMSID(myGEMSID)
         let database = databaseProvider()
-        var refreshed: [FriendConnection] = []
+        var refreshed = Array(repeating: FriendConnection(employeeID: "", status: .pending), count: connections.count)
 
-        for connection in connections {
-            let friend = normalizedGEMSID(connection.employeeID)
-            let pair = Self.orderedPair(my, friend)
-            let recordID = CKRecord.ID(recordName: Self.friendLinkRecordName(first: pair.first, second: pair.second))
-            let record: CKRecord?
-            do {
-                record = try await database.record(for: recordID)
-            } catch let error as CKError where error.code == .unknownItem {
-                record = nil
-            } catch {
-                throw error
+        try await withThrowingTaskGroup(of: (Int, FriendConnection).self) { group in
+            for (index, connection) in connections.enumerated() {
+                group.addTask {
+                    let updated = try await self.refreshConnection(
+                        connection,
+                        myGEMSID: my,
+                        database: database
+                    )
+                    return (index, updated)
+                }
             }
-            let link = record.map { self.link(from: $0, myGEMSID: my, friendGEMSID: friend) }
 
-            var updated = connection
-            if link?.isAccepted == true {
-                updated.status = .accepted
-                updated.linkedAt = link?.linkedAt ?? updated.linkedAt ?? Date()
-                updated.sharedSchedules = (try? await fetchSchedule(gemsID: friend, database: database)) ?? updated.sharedSchedules
-                updated.sharedTimelineCards = (try? await fetchScheduleSnapshot(gemsID: friend, database: database))
-                    ?? updated.sharedTimelineCards
-            } else {
-                updated.status = .pending
+            for try await (index, connection) in group {
+                refreshed[index] = connection
             }
-            refreshed.append(updated)
         }
 
         return refreshed
+    }
+
+    private func refreshConnection(
+        _ connection: FriendConnection,
+        myGEMSID: String,
+        database: FriendScheduleCloudKitDatabase
+    ) async throws -> FriendConnection {
+        let friend = normalizedGEMSID(connection.employeeID)
+        let pair = Self.orderedPair(myGEMSID, friend)
+        let recordID = CKRecord.ID(recordName: Self.friendLinkRecordName(first: pair.first, second: pair.second))
+        let record: CKRecord?
+        do {
+            record = try await database.record(for: recordID)
+        } catch let error as CKError where error.code == .unknownItem {
+            record = nil
+        } catch {
+            throw error
+        }
+        let link = record.map { self.link(from: $0, myGEMSID: myGEMSID, friendGEMSID: friend) }
+
+        var updated = connection
+        if link?.isAccepted == true {
+            updated.status = .accepted
+            updated.linkedAt = link?.linkedAt ?? updated.linkedAt ?? Date()
+            async let schedules = fetchSchedule(gemsID: friend, database: database)
+            async let timelineCards = fetchScheduleSnapshot(gemsID: friend, database: database)
+            updated.sharedSchedules = (try? await schedules) ?? updated.sharedSchedules
+            updated.sharedTimelineCards = (try? await timelineCards) ?? updated.sharedTimelineCards
+        } else {
+            updated.status = .pending
+        }
+        return updated
     }
 
     private func fetchSchedule(gemsID: String, database: FriendScheduleCloudKitDatabase) async throws -> [PayPeriodSchedule] {
