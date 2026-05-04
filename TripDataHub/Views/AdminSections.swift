@@ -24,17 +24,30 @@ struct AdminSeniorityImportSection: View {
     @State private var isShowingResetConfirmation = false
 
     var body: some View {
-        Section("Seniority Import") {
-            Text("Seniority Records: \(viewModel.seniorityCount)")
+        Section("GEMS Verification Import") {
+            Text("Verification Records Uploaded: \(viewModel.seniorityCount)")
                 .font(.footnote)
-            Button("Import Seniority CSV") {
+            Button("Upload GEMS/DOB CSV") {
                 onTapImportCSV()
             }
+            .disabled(viewModel.isUploadingGEMSVerification)
             Button("Import from App Documents") {
-                viewModel.importSeniorityCSVFromDocuments()
+                Task {
+                    await viewModel.importSeniorityCSVFromDocuments()
+                }
             }
+            .disabled(viewModel.isUploadingGEMSVerification)
             Button("Reset Seniority DB", role: .destructive) {
                 isShowingResetConfirmation = true
+            }
+            .disabled(viewModel.isUploadingGEMSVerification)
+            if viewModel.isUploadingGEMSVerification {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("Uploading verification records...")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
             if let message = viewModel.seniorityImportMessage {
                 Text(message)
@@ -48,7 +61,7 @@ struct AdminSeniorityImportSection: View {
                 viewModel.resetSeniorityDatabase()
             }
         } message: {
-            Text("This deletes imported seniority data on this device. You can re-import the CSV anytime.")
+            Text("This deletes legacy local seniority data on this device. CloudKit verification records are not deleted.")
         }
     }
 }

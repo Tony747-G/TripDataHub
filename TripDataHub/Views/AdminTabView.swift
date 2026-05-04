@@ -52,7 +52,9 @@ struct AdminTabView: View {
                     defer { url.stopAccessingSecurityScopedResource() }
                     do {
                         let data = try Data(contentsOf: url)
-                        viewModel.importSeniorityCSVData(data)
+                        Task {
+                            await viewModel.importSeniorityCSVData(data)
+                        }
                     } catch {
                         viewModel.seniorityImportMessage = "Failed to load CSV: \(error.localizedDescription)"
                     }

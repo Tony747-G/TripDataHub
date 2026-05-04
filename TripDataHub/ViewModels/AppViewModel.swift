@@ -157,6 +157,8 @@ final class AppViewModel: ObservableObject {
     @Published var currentCloudKitRecordName: String?
     @Published var seniorityRecords: [PilotSeniorityRecord] = []
     @Published var seniorityImportMessage: String?
+    @Published private(set) var gemsVerificationRecordCount = 0
+    @Published private(set) var isUploadingGEMSVerification = false
     @Published var verifiedIdentity: VerifiedIdentityProfile?
     @Published private(set) var cloudKitIdentityMessage: String?
     @Published var verifiedUsers: [VerifiedUserRecord] = []
@@ -181,6 +183,7 @@ final class AppViewModel: ObservableObject {
     private let notificationService: NextReportNotificationServiceProtocol
     private let crewAccessImportService: CrewAccessPDFImportServiceProtocol
     private let friendScheduleCloudKitService: FriendScheduleCloudKitServicing
+    private let gemsVerificationCloudKitService: GEMSVerificationCloudKitServicing
     private let tzResolver: IATATimeZoneResolving
     private let externalOpenCoordinator: ExternalOpenImportCoordinator
     private let flightCountdownCoordinator = FlightCountdownCoordinator()
@@ -212,16 +215,9 @@ final class AppViewModel: ObservableObject {
     private let cloudKitContainerIdentifier = "iCloud.com.sfune.TimelineSchedule"
     private let cloudKitIdentityTimeoutNanoseconds: UInt64 = 5_000_000_000
     private let useCloudKitIdentity = true
-    // Internal testing fallback:
-    // when true, users can verify with entered GEMS ID + DOB even if Seniority DB is not loaded.
-    // This never grants admin eligibility, but in Friends sharing GEMS ID itself is the
-    // trust boundary, so this fallback must NOT ship in App Store builds. Gate it to
-    // Xcode/local builds and TestFlight sandbox receipts only.
-#if DEBUG
-    private let allowVerificationWithoutSeniorityDB = true
-#else
-    private let allowVerificationWithoutSeniorityDB = AppViewModel.isRunningFromTestFlight()
-#endif
+    // GEMS verification must use CloudKit records. Do not allow TestFlight/App Store
+    // clients to self-verify without the verification database.
+    private let allowVerificationWithoutSeniorityDB = false
     // Add your own CloudKit recordName(s) here to grant admin access in TestFlight.
     private let adminCloudKitRecordAllowlist: Set<String> = []
     private let adminPolicy: AdminPolicy
@@ -238,6 +234,9 @@ final class AppViewModel: ObservableObject {
         friendScheduleCloudKitService: FriendScheduleCloudKitServicing = FriendScheduleCloudKitService(
             containerIdentifier: "iCloud.com.sfune.TimelineSchedule"
         ),
+        gemsVerificationCloudKitService: GEMSVerificationCloudKitServicing = GEMSVerificationCloudKitService(
+            containerIdentifier: "iCloud.com.sfune.TimelineSchedule"
+        ),
         tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared
     ) {
         self.syncService = syncService
@@ -246,6 +245,7 @@ final class AppViewModel: ObservableObject {
         self.notificationService = notificationService
         self.crewAccessImportService = crewAccessImportService
         self.friendScheduleCloudKitService = friendScheduleCloudKitService
+        self.gemsVerificationCloudKitService = gemsVerificationCloudKitService
         self.tzResolver = tzResolver
         self.externalOpenCoordinator = ExternalOpenImportCoordinator.shared
         let loadedAdminPolicy = Self.loadAdminPolicy()
@@ -414,7 +414,7 @@ final class AppViewModel: ObservableObject {
         return verifiedIdentity.cloudKitRecordName == currentCloudKitRecordName
     }
 
-    var seniorityCount: Int { seniorityRecords.count }
+    var seniorityCount: Int { gemsVerificationRecordCount }
 
     var canAccessAdminTab: Bool {
         isAdmin
@@ -833,28 +833,41 @@ final class AppViewModel: ObservableObject {
     }
 
     @discardableResult
-    func importSeniorityCSVData(_ data: Data) -> Bool {
+    func importSeniorityCSVData(_ data: Data) async -> Bool {
+        guard !isUploadingGEMSVerification else {
+            seniorityImportMessage = "GEMS verification upload is already running."
+            return false
+        }
+        isUploadingGEMSVerification = true
+        defer { isUploadingGEMSVerification = false }
+
         guard let text = String(data: data, encoding: .utf8) else {
             seniorityImportMessage = "Failed to decode CSV as UTF-8."
             return false
         }
 
-        let parsedRecords = parseSeniorityCSV(text)
+        let parsedRecords = parseGEMSVerificationCSV(text)
         guard !parsedRecords.isEmpty else {
-            seniorityImportMessage = "No valid seniority records found."
+            seniorityImportMessage = "No valid GEMS/DOB verification records found."
             return false
         }
 
-        seniorityRecords = parsedRecords
-        hasLoadedSeniorityRecords = true
         do {
-            try Self.saveSeniorityRecordsToDisk(records: parsedRecords, seniorityFileName: seniorityFileName)
-            hasSeniorityDataOnDisk = true
-            seniorityImportMessage = "Imported \(parsedRecords.count) seniority records."
+            seniorityImportMessage = "Uploading \(parsedRecords.count) GEMS verification records..."
+            let uploadedCount = try await gemsVerificationCloudKitService.uploadVerificationRecords(
+                parsedRecords,
+                progress: { [weak self] uploaded, total in
+                    self?.seniorityImportMessage = "Uploaded \(uploaded) / \(total) GEMS verification records..."
+                }
+            )
+            seniorityRecords = []
+            gemsVerificationRecordCount = uploadedCount
+            hasLoadedSeniorityRecords = true
+            hasSeniorityDataOnDisk = false
+            seniorityImportMessage = "Uploaded \(uploadedCount) GEMS verification records to CloudKit."
             return true
         } catch {
-            hasSeniorityDataOnDisk = false
-            seniorityImportMessage = "Imported in memory, but failed to save Seniority DB: \(error.localizedDescription)"
+            seniorityImportMessage = "Failed to upload GEMS verification records: \(error.localizedDescription)"
             return false
         }
     }
@@ -1695,7 +1708,7 @@ final class AppViewModel: ObservableObject {
         return match?.name ?? ""
     }
 
-    func importSeniorityCSVFromDocuments(named preferredFileName: String = "ups_sen.csv") {
+    func importSeniorityCSVFromDocuments(named preferredFileName: String = "ups_sen.csv") async {
         let fm = FileManager.default
         guard let documentsURL = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
             seniorityImportMessage = "Documents directory is unavailable."
@@ -1706,8 +1719,8 @@ final class AppViewModel: ObservableObject {
         if fm.fileExists(atPath: preferredURL.path) {
             do {
                 let data = try Data(contentsOf: preferredURL)
-                if importSeniorityCSVData(data) {
-                    seniorityImportMessage = "Imported from Documents/\(preferredFileName)."
+                if await importSeniorityCSVData(data) {
+                    seniorityImportMessage = "Uploaded GEMS verification records from Documents/\(preferredFileName)."
                 }
             } catch {
                 seniorityImportMessage = "Failed to read Documents/\(preferredFileName): \(error.localizedDescription)"
@@ -1723,8 +1736,8 @@ final class AppViewModel: ObservableObject {
             )
             if let firstCSV = urls.first(where: { $0.pathExtension.lowercased() == "csv" }) {
                 let data = try Data(contentsOf: firstCSV)
-                if importSeniorityCSVData(data) {
-                    seniorityImportMessage = "Imported from Documents/\(firstCSV.lastPathComponent)."
+                if await importSeniorityCSVData(data) {
+                    seniorityImportMessage = "Uploaded GEMS verification records from Documents/\(firstCSV.lastPathComponent)."
                 }
             } else {
                 seniorityImportMessage = "No CSV found in Documents. Copy ups_sen.csv into the app Documents folder."
@@ -2844,7 +2857,7 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func verifyIdentity(gemsID rawGemsID: String, dateOfBirth rawDateOfBirth: String) {
+    func verifyIdentity(gemsID rawGemsID: String, dateOfBirth rawDateOfBirth: String) async {
         guard let currentCloudKitRecordName else {
             friendActionMessage = "Apple identity is unavailable. Sign into iCloud first."
             return
@@ -2861,63 +2874,32 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        if seniorityRecords.isEmpty {
-            guard allowVerificationWithoutSeniorityDB else {
-                friendActionMessage = "Verification database is unavailable. Please update the app or contact support."
-                return
-            }
-
-            let verified = VerifiedIdentityProfile(
-                cloudKitRecordName: currentCloudKitRecordName,
-                name: "Internal Tester",
+        let isVerified: Bool
+        do {
+            isVerified = try await gemsVerificationCloudKitService.verify(
                 gemsID: gemsID,
-                domicile: "-",
-                equipment: "-",
-                seat: "-",
-                dateOfHire: "-",
-                isAdminEligible: false,
-                adminPolicyFingerprint: adminPolicyFingerprint,
-                verifiedAt: Date()
+                dateOfBirth: normalizedDOB
             )
-            verifiedIdentity = verified
-            saveVerifiedIdentity(verified)
-            upsertVerifiedUser(
-                VerifiedUserRecord(
-                    identityRecordName: currentCloudKitRecordName,
-                    name: verified.name,
-                    gemsID: verified.gemsID,
-                    domicile: verified.domicile,
-                    equipment: verified.equipment,
-                    seat: verified.seat,
-                    verifiedAt: Date()
-                )
-            )
-            updateAdminStatus()
-            friendActionMessage = "Verified as GEMS \(gemsID)."
-            if isScheduleSharingEnabled {
-                Task { [weak self] in
-                    await self?.syncFriendCloudKit(reason: "identity verified")
-                }
-            }
+        } catch {
+            friendActionMessage = "Verification database is unavailable: \(error.localizedDescription)"
             return
         }
 
-        guard let record = seniorityRecords.first(where: {
-            $0.gemsID == gemsID && normalizeDOB($0.dateOfBirth) == normalizedDOB
-        }) else {
+        let isAdminBootstrap = !isVerified && isAdminEligible(gemsID: gemsID, dob: normalizedDOB)
+        guard isVerified || isAdminBootstrap || allowVerificationWithoutSeniorityDB else {
             friendActionMessage = "Verification failed. Check GEMS ID / DOB."
             return
         }
 
         let verified = VerifiedIdentityProfile(
             cloudKitRecordName: currentCloudKitRecordName,
-            name: record.name,
-            gemsID: record.gemsID,
-            domicile: record.domicile,
-            equipment: record.equipment,
-            seat: record.seat,
-            dateOfHire: record.dateOfHire,
-            isAdminEligible: isAdminEligible(gemsID: record.gemsID, dob: normalizedDOB),
+            name: "GEMS \(gemsID)",
+            gemsID: gemsID,
+            domicile: "-",
+            equipment: "-",
+            seat: "-",
+            dateOfHire: "-",
+            isAdminEligible: isAdminBootstrap || isAdminEligible(gemsID: gemsID, dob: normalizedDOB),
             adminPolicyFingerprint: adminPolicyFingerprint,
             verifiedAt: Date()
         )
@@ -2926,16 +2908,18 @@ final class AppViewModel: ObservableObject {
         upsertVerifiedUser(
             VerifiedUserRecord(
                 identityRecordName: currentCloudKitRecordName,
-                name: record.name,
-                gemsID: record.gemsID,
-                domicile: record.domicile,
-                equipment: record.equipment,
-                seat: record.seat,
+                name: verified.name,
+                gemsID: verified.gemsID,
+                domicile: verified.domicile,
+                equipment: verified.equipment,
+                seat: verified.seat,
                 verifiedAt: Date()
             )
         )
         updateAdminStatus()
-        friendActionMessage = "Verified as \(record.name) (\(record.gemsID))."
+        friendActionMessage = isAdminBootstrap
+            ? "Verified as bootstrap admin. Upload GEMS verification records to CloudKit."
+            : "Verified as GEMS \(gemsID)."
         if isScheduleSharingEnabled {
             Task { [weak self] in
                 await self?.syncFriendCloudKit(reason: "identity verified")
@@ -3362,9 +3346,11 @@ final class AppViewModel: ObservableObject {
     }
 
     private func isAdminEligible(gemsID: String, dob canonicalDOB: String) -> Bool {
-        let normalizedGems = gemsID.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        return adminPolicy.gemsIDAllowlist.contains(normalizedGems)
-            && adminPolicy.dobAllowlist.contains(canonicalDOB)
+        let hash = GEMSVerificationCloudKitService.verificationHash(
+            gemsID: gemsID,
+            normalizedDOB: canonicalDOB
+        )
+        return adminPolicy.verificationHashes.contains(hash)
     }
 
     private static func seniorityDataIsUsableOnDisk(
@@ -3452,9 +3438,8 @@ final class AppViewModel: ObservableObject {
     }
 
     private static func fingerprint(for policy: AdminPolicy) -> String {
-        let gems = policy.gemsIDAllowlist.sorted().joined(separator: ",")
-        let dobs = policy.dobAllowlist.sorted().joined(separator: ",")
-        let payload = "gems:\(gems)|dobs:\(dobs)"
+        let hashes = policy.verificationHashes.sorted().joined(separator: ",")
+        let payload = "adminVerificationHashes:\(hashes)"
         let digest = SHA256.hash(data: Data(payload.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
     }
@@ -3464,12 +3449,13 @@ final class AppViewModel: ObservableObject {
               let data = try? Data(contentsOf: url),
               let raw = try? JSONDecoder().decode(AdminPolicyRaw.self, from: data)
         else {
-            return AdminPolicy(gemsIDAllowlist: [], dobAllowlist: [])
+            return AdminPolicy(verificationHashes: [])
         }
 
-        let gems = Set(raw.adminGemsIDs.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() })
-        let dobs = Set(raw.adminDOBs.compactMap(normalizeDOBStatic))
-        return AdminPolicy(gemsIDAllowlist: gems, dobAllowlist: dobs)
+        let hashes = Set(raw.adminVerificationHashes.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }.filter { !$0.isEmpty })
+        return AdminPolicy(verificationHashes: hashes)
     }
 
     private static func normalizeDOBStatic(_ value: String) -> String? {
@@ -3498,8 +3484,43 @@ final class AppViewModel: ObservableObject {
         return String(format: "%02d/%02d/%04d", month, day, fullYear)
     }
 
-    private static func isRunningFromTestFlight() -> Bool {
-        Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt"
+    private func parseGEMSVerificationCSV(_ text: String) -> [GEMSVerificationImportRecord] {
+        let lines = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
+        guard !lines.isEmpty else { return [] }
+
+        let headerFields = parseCSVLine(lines[0]).map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        }
+        var headerMap: [String: Int] = [:]
+        for (index, field) in headerFields.enumerated() where !field.isEmpty {
+            headerMap[field] = headerMap[field] ?? index
+        }
+        guard let gemsIndex = headerMap["GEMS"],
+              let dobIndex = headerMap["DOB"]
+        else {
+            return []
+        }
+
+        var records: [GEMSVerificationImportRecord] = []
+        var seenGEMS: Set<String> = []
+        records.reserveCapacity(max(0, lines.count - 1))
+        for line in lines.dropFirst() {
+            let fields = parseCSVLine(line)
+            guard fields.indices.contains(gemsIndex), fields.indices.contains(dobIndex) else {
+                continue
+            }
+            let gems = fields[gemsIndex].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            let dob = fields[dobIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !gems.isEmpty, !dob.isEmpty, normalizeDOB(dob) != nil, seenGEMS.insert(gems).inserted else {
+                continue
+            }
+            records.append(GEMSVerificationImportRecord(gemsID: gems, dateOfBirth: dob))
+        }
+        return records
     }
 
     private func parseSeniorityCSV(_ text: String) -> [PilotSeniorityRecord] {
@@ -3511,7 +3532,10 @@ final class AppViewModel: ObservableObject {
         guard !lines.isEmpty else { return [] }
 
         let headerFields = parseCSVLine(lines[0]).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-        let headerMap = Dictionary(uniqueKeysWithValues: headerFields.enumerated().map { ($0.element, $0.offset) })
+        var headerMap: [String: Int] = [:]
+        for (index, field) in headerFields.enumerated() where !field.isEmpty {
+            headerMap[field] = headerMap[field] ?? index
+        }
         guard let nameIndex = headerMap["NAME"],
               let gemsIndex = headerMap["GEMS"],
               let domIndex = headerMap["DOM"],
@@ -3696,13 +3720,11 @@ final class AppViewModel: ObservableObject {
 }
 
 private struct AdminPolicy {
-    let gemsIDAllowlist: Set<String>
-    let dobAllowlist: Set<String>
+    let verificationHashes: Set<String>
 }
 
 private struct AdminPolicyRaw: Decodable {
-    let adminGemsIDs: [String]
-    let adminDOBs: [String]
+    let adminVerificationHashes: [String]
 }
 
 #if DEBUG

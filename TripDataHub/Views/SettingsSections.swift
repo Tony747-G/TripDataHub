@@ -36,10 +36,12 @@ struct SettingsAccountSection: View {
                 TextField("GEMS ID", text: $verifyGemsIDInput)
                 DatePicker("DOB", selection: $verifyDOBDate, displayedComponents: .date)
                 Button("Verify Identity") {
-                    viewModel.verifyIdentity(
-                        gemsID: verifyGemsIDInput,
-                        dateOfBirth: formatDOB(verifyDOBDate)
-                    )
+                    Task {
+                        await viewModel.verifyIdentity(
+                            gemsID: verifyGemsIDInput,
+                            dateOfBirth: formatDOB(verifyDOBDate)
+                        )
+                    }
                 }
             }
             if let message = viewModel.friendActionMessage {
