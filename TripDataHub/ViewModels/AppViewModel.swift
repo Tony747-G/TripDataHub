@@ -578,17 +578,30 @@ final class AppViewModel: ObservableObject {
             return
         }
 
+        async let scheduleUpload: Void = friendScheduleCloudKitService.uploadSchedule(
+            gemsID: verifiedIdentity.gemsID,
+            cloudKitRecordName: currentCloudKitRecordName,
+            schedules: schedules
+        )
+        async let snapshotUpload: Void = friendScheduleCloudKitService.uploadScheduleSnapshot(
+            gemsID: verifiedIdentity.gemsID,
+            ownerDisplayName: verifiedIdentity.name,
+            schedules: schedules
+        )
+
         do {
-            try await friendScheduleCloudKitService.uploadSchedule(
-                gemsID: verifiedIdentity.gemsID,
-                cloudKitRecordName: currentCloudKitRecordName,
-                schedules: schedules
-            )
+            try await scheduleUpload
             friendCloudKitSyncMessage = "Shared schedule updated."
             logNonFatal("Friend CloudKit schedule uploaded: \(reason)")
         } catch {
             friendCloudKitSyncMessage = "Failed to update shared schedule: \(error.localizedDescription)"
             logNonFatal("Friend CloudKit schedule upload failed: \(error.localizedDescription)")
+        }
+
+        do {
+            try await snapshotUpload
+        } catch {
+            logNonFatal("TripScheduleSnapshot upload failed: \(error.localizedDescription)")
         }
     }
 
