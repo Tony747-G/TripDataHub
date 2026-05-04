@@ -10,12 +10,14 @@ struct FriendScheduleCloudKitLink: Sendable {
 protocol FriendScheduleCloudKitServicing: Sendable {
     func uploadSchedule(gemsID: String, cloudKitRecordName: String, schedules: [PayPeriodSchedule]) async throws
     func requestFriend(myGEMSID: String, friendGEMSID: String) async throws -> FriendScheduleCloudKitLink
+    func cancelFriendRequest(myGEMSID: String, friendGEMSID: String) async throws
     func refreshConnections(myGEMSID: String, connections: [FriendConnection]) async throws -> [FriendConnection]
 }
 
 protocol FriendScheduleCloudKitDatabase {
     func record(for recordID: CKRecord.ID) async throws -> CKRecord
     func save(_ record: CKRecord) async throws -> CKRecord
+    func deleteRecord(withID recordID: CKRecord.ID) async throws -> CKRecord.ID
 }
 
 extension CKDatabase: FriendScheduleCloudKitDatabase {}
@@ -85,6 +87,44 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
 
                 let saved = try await database.save(record)
                 return link(from: saved, myGEMSID: my, friendGEMSID: friend)
+            } catch let error as CKError where Self.shouldRetryFriendLinkSave(error) && attempt < 2 {
+                lastError = error
+                try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 150_000_000)
+            } catch {
+                throw error
+            }
+        }
+
+        throw lastError ?? CKError(.serverRecordChanged)
+    }
+
+    func cancelFriendRequest(myGEMSID: String, friendGEMSID: String) async throws {
+        let my = normalizedGEMSID(myGEMSID)
+        let friend = normalizedGEMSID(friendGEMSID)
+        let database = databaseProvider()
+        let pair = Self.orderedPair(my, friend)
+        let recordID = CKRecord.ID(recordName: Self.friendLinkRecordName(first: pair.first, second: pair.second))
+
+        var lastError: Error?
+        for attempt in 0..<3 {
+            do {
+                let record: CKRecord
+                do {
+                    record = try await database.record(for: recordID)
+                } catch let error as CKError where error.code == .unknownItem {
+                    return
+                }
+
+                record[approvalField(for: my, pair: pair)] = false as CKRecordValue
+                record[Field.linkedAt] = nil
+                record[Field.updatedAt] = Date() as CKRecordValue
+
+                if !boolValue(record[Field.approvedA]) && !boolValue(record[Field.approvedB]) {
+                    _ = try await database.deleteRecord(withID: recordID)
+                } else {
+                    _ = try await database.save(record)
+                }
+                return
             } catch let error as CKError where Self.shouldRetryFriendLinkSave(error) && attempt < 2 {
                 lastError = error
                 try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 150_000_000)

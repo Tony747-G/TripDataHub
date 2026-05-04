@@ -86,6 +86,15 @@ struct FriendsTabView: View {
                                     .foregroundStyle(.secondary)
                             }
                             .padding(.vertical, 2)
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    Task {
+                                        await viewModel.cancelPendingFriendRequest(friend.id)
+                                    }
+                                } label: {
+                                    Label("Cancel", systemImage: "xmark.circle")
+                                }
+                            }
                         }
                     }
                 }

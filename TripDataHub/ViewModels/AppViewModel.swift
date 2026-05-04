@@ -539,6 +539,29 @@ final class AppViewModel: ObservableObject {
         saveFriendConnections()
     }
 
+    func cancelPendingFriendRequest(_ id: UUID) async {
+        guard let index = friendConnections.firstIndex(where: { $0.id == id }) else { return }
+        let connection = friendConnections[index]
+        guard connection.status == .pending else { return }
+        guard let myGEMSID = verifiedIdentity?.gemsID else {
+            friendActionMessage = "GEMS verification is required."
+            return
+        }
+
+        do {
+            try await friendScheduleCloudKitService.cancelFriendRequest(
+                myGEMSID: myGEMSID,
+                friendGEMSID: connection.employeeID
+            )
+            friendConnections.removeAll { $0.id == id }
+            saveFriendConnections()
+            friendActionMessage = "Request canceled: \(connection.employeeID)"
+        } catch {
+            friendActionMessage = "Failed to cancel friend request: \(error.localizedDescription)"
+            logNonFatal("Friend CloudKit cancel failed: \(error.localizedDescription)")
+        }
+    }
+
     func approvePseudoFriendRequest(_ id: UUID) {
         guard let index = friendConnections.firstIndex(where: { $0.id == id }) else { return }
         guard friendConnections[index].status == .pending else { return }

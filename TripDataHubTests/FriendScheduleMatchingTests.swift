@@ -116,6 +116,32 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertEqual((record["approvedB"] as? NSNumber)?.boolValue, true)
     }
 
+    func test_friendCloudKitCancel_deletesSingleSidedPendingRequest() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+
+        _ = try await service.requestFriend(myGEMSID: "222222", friendGEMSID: "111111")
+        try await service.cancelFriendRequest(myGEMSID: "222222", friendGEMSID: "111111")
+
+        let recordNames = await database.friendLinkRecordNames()
+        XCTAssertTrue(recordNames.isEmpty)
+    }
+
+    func test_friendCloudKitCancel_preservesOtherPilotsApproval() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+
+        _ = try await service.requestFriend(myGEMSID: "222222", friendGEMSID: "111111")
+        _ = try await service.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
+        try await service.cancelFriendRequest(myGEMSID: "111111", friendGEMSID: "222222")
+
+        let recordSnapshot = await database.recordSnapshot(named: "tdh_friend_111111_222222")
+        let record = try XCTUnwrap(recordSnapshot)
+        XCTAssertEqual((record["approvedA"] as? NSNumber)?.boolValue, false)
+        XCTAssertEqual((record["approvedB"] as? NSNumber)?.boolValue, true)
+        XCTAssertNil(record["linkedAt"])
+    }
+
     private func makeSchedule(legs: [TripLeg]) -> PayPeriodSchedule {
         PayPeriodSchedule(
             id: "PP26-05",
@@ -192,6 +218,13 @@ private actor FriendCloudKitFakeDatabase: FriendScheduleCloudKitDatabase {
 
         records[recordName] = record
         return record
+    }
+
+    func deleteRecord(withID recordID: CKRecord.ID) async throws -> CKRecord.ID {
+        guard records.removeValue(forKey: recordID.recordName) != nil else {
+            throw CKError(.unknownItem)
+        }
+        return recordID
     }
 
     func friendLinkRecordNames() -> [String] {
