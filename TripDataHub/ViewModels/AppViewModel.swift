@@ -493,9 +493,7 @@ final class AppViewModel: ObservableObject {
             friendActionMessage = "GEMS verification is required."
             return
         }
-        let employeeID = rawEmployeeID
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .uppercased()
+        let employeeID = GEMSIDNormalizer.normalize(rawEmployeeID)
         guard !employeeID.isEmpty else {
             friendActionMessage = "GEMS ID is required."
             return
@@ -2863,7 +2861,7 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        let gemsID = rawGemsID.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let gemsID = GEMSIDNormalizer.normalize(rawGemsID)
         let dobInput = rawDateOfBirth.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !gemsID.isEmpty, !dobInput.isEmpty else {
             friendActionMessage = "GEMS ID and DOB are required."
@@ -3175,11 +3173,52 @@ final class AppViewModel: ObservableObject {
         let defaults = UserDefaults.standard
         guard let data = defaults.data(forKey: friendConnectionsKey) else { return [] }
         do {
-            return try JSONDecoder().decode([FriendConnection].self, from: data)
+            let decoded = try JSONDecoder().decode([FriendConnection].self, from: data)
+            let normalized = normalizeFriendConnections(decoded)
+            if normalized != decoded,
+               let migratedData = try? JSONEncoder().encode(normalized) {
+                defaults.set(migratedData, forKey: friendConnectionsKey)
+            }
+            return normalized
         } catch {
             logNonFatal("Failed to decode friend connections: \(error.localizedDescription)")
             return []
         }
+    }
+
+    private func normalizeFriendConnections(_ connections: [FriendConnection]) -> [FriendConnection] {
+        var normalized: [FriendConnection] = []
+        for connection in connections {
+            let employeeID = GEMSIDNormalizer.normalize(connection.employeeID)
+            let migrated = FriendConnection(
+                id: connection.id,
+                employeeID: employeeID,
+                status: connection.status,
+                requestedAt: connection.requestedAt,
+                linkedAt: connection.linkedAt,
+                sharedSchedules: connection.sharedSchedules,
+                sharedTimelineCards: connection.sharedTimelineCards
+            )
+            if let index = normalized.firstIndex(where: { $0.employeeID == employeeID }) {
+                normalized[index] = mergedFriendConnection(normalized[index], migrated)
+            } else {
+                normalized.append(migrated)
+            }
+        }
+        return normalized
+    }
+
+    private func mergedFriendConnection(_ lhs: FriendConnection, _ rhs: FriendConnection) -> FriendConnection {
+        let accepted = lhs.status == .accepted || rhs.status == .accepted
+        return FriendConnection(
+            id: lhs.id,
+            employeeID: lhs.employeeID,
+            status: accepted ? .accepted : .pending,
+            requestedAt: min(lhs.requestedAt, rhs.requestedAt),
+            linkedAt: lhs.linkedAt ?? rhs.linkedAt,
+            sharedSchedules: lhs.sharedSchedules.isEmpty ? rhs.sharedSchedules : lhs.sharedSchedules,
+            sharedTimelineCards: lhs.sharedTimelineCards.isEmpty ? rhs.sharedTimelineCards : lhs.sharedTimelineCards
+        )
     }
 
     private func saveFriendConnections() {
@@ -3273,7 +3312,23 @@ final class AppViewModel: ObservableObject {
     private func loadVerifiedIdentity() -> VerifiedIdentityProfile? {
         guard let data = UserDefaults.standard.data(forKey: verifiedIdentityKey) else { return nil }
         do {
-            return try JSONDecoder().decode(VerifiedIdentityProfile.self, from: data)
+            let profile = try JSONDecoder().decode(VerifiedIdentityProfile.self, from: data)
+            let normalizedGEMS = GEMSIDNormalizer.normalize(profile.gemsID)
+            guard normalizedGEMS != profile.gemsID else { return profile }
+            let migrated = VerifiedIdentityProfile(
+                cloudKitRecordName: profile.cloudKitRecordName,
+                name: profile.name,
+                gemsID: normalizedGEMS,
+                domicile: profile.domicile,
+                equipment: profile.equipment,
+                seat: profile.seat,
+                dateOfHire: profile.dateOfHire,
+                isAdminEligible: profile.isAdminEligible,
+                adminPolicyFingerprint: profile.adminPolicyFingerprint,
+                verifiedAt: profile.verifiedAt
+            )
+            saveVerifiedIdentity(migrated)
+            return migrated
         } catch {
             logNonFatal("Failed to decode verified identity: \(error.localizedDescription)")
             UserDefaults.standard.removeObject(forKey: verifiedIdentityKey)
@@ -3513,7 +3568,7 @@ final class AppViewModel: ObservableObject {
             guard fields.indices.contains(gemsIndex), fields.indices.contains(dobIndex) else {
                 continue
             }
-            let gems = fields[gemsIndex].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            let gems = GEMSIDNormalizer.normalize(fields[gemsIndex])
             let dob = fields[dobIndex].trimmingCharacters(in: .whitespacesAndNewlines)
             guard !gems.isEmpty, !dob.isEmpty, normalizeDOB(dob) != nil, seenGEMS.insert(gems).inserted else {
                 continue
@@ -3556,7 +3611,7 @@ final class AppViewModel: ObservableObject {
                 continue
             }
             let name = fields[nameIndex].trimmingCharacters(in: .whitespacesAndNewlines)
-            let gems = fields[gemsIndex].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            let gems = GEMSIDNormalizer.normalize(fields[gemsIndex])
             let dob = fields[dobIndex].trimmingCharacters(in: .whitespacesAndNewlines)
             guard !name.isEmpty, !gems.isEmpty, !dob.isEmpty else { continue }
 

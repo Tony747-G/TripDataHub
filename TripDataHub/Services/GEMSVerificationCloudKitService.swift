@@ -107,7 +107,7 @@ final class GEMSVerificationCloudKitService: GEMSVerificationCloudKitServicing, 
         recordsToSave.reserveCapacity(records.count)
 
         for record in records {
-            let normalizedGEMS = Self.normalizedGEMSID(record.gemsID)
+            let normalizedGEMS = GEMSIDNormalizer.normalize(record.gemsID)
             guard let normalizedDOB = Self.normalizedDOB(record.dateOfBirth), !normalizedGEMS.isEmpty else {
                 continue
             }
@@ -131,7 +131,7 @@ final class GEMSVerificationCloudKitService: GEMSVerificationCloudKitServicing, 
     }
 
     func verify(gemsID: String, dateOfBirth: String) async throws -> Bool {
-        let normalizedGEMS = Self.normalizedGEMSID(gemsID)
+        let normalizedGEMS = GEMSIDNormalizer.normalize(gemsID)
         guard let normalizedDOB = Self.normalizedDOB(dateOfBirth), !normalizedGEMS.isEmpty else {
             return false
         }
@@ -149,11 +149,7 @@ final class GEMSVerificationCloudKitService: GEMSVerificationCloudKitServicing, 
     }
 
     static func recordName(for gemsID: String) -> String {
-        "tdh_verify_\(normalizedGEMSID(gemsID))"
-    }
-
-    static func normalizedGEMSID(_ value: String) -> String {
-        value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        "tdh_verify_\(GEMSIDNormalizer.normalize(gemsID))"
     }
 
     static func normalizedDOB(_ value: String) -> String? {
@@ -186,7 +182,7 @@ final class GEMSVerificationCloudKitService: GEMSVerificationCloudKitServicing, 
     }
 
     static func verificationHash(gemsID: String, normalizedDOB: String) -> String {
-        let payload = "\(hashPrefix)|\(normalizedGEMSID(gemsID))|\(normalizedDOB)|\(hashPepper)"
+        let payload = "\(hashPrefix)|\(GEMSIDNormalizer.normalize(gemsID))|\(normalizedDOB)|\(hashPepper)"
         let digest = SHA256.hash(data: Data(payload.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
     }

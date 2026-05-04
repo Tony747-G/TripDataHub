@@ -71,7 +71,7 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         let record = (try? await database.record(for: recordID))
             ?? CKRecord(recordType: RecordType.sharedSchedule, recordID: recordID)
         let data = try JSONEncoder().encode(schedules)
-        record[Field.ownerGEMSID] = normalizedGEMSID(gemsID) as CKRecordValue
+        record[Field.ownerGEMSID] = GEMSIDNormalizer.normalize(gemsID) as CKRecordValue
         record[Field.ownerRecordName] = cloudKitRecordName as CKRecordValue
         record[Field.schedulesData] = data as CKRecordValue
         record[Field.updatedAt] = Date() as CKRecordValue
@@ -87,7 +87,7 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
             ownerDisplayName: ownerDisplayName,
             crewAccessTrips: crewAccessTrips
         )
-        record[SnapshotField.ownerGEMSID] = normalizedGEMSID(gemsID) as CKRecordValue
+        record[SnapshotField.ownerGEMSID] = GEMSIDNormalizer.normalize(gemsID) as CKRecordValue
         record[SnapshotField.ownerDisplayName] = ownerDisplayName as CKRecordValue
         record[SnapshotField.scheduleJSON] = json as CKRecordValue
         record[SnapshotField.schemaVersion] = Int64(TripScheduleSnapshotEncoder.schemaVersion) as CKRecordValue
@@ -96,8 +96,8 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
     }
 
     func requestFriend(myGEMSID: String, friendGEMSID: String) async throws -> FriendScheduleCloudKitLink {
-        let my = normalizedGEMSID(myGEMSID)
-        let friend = normalizedGEMSID(friendGEMSID)
+        let my = GEMSIDNormalizer.normalize(myGEMSID)
+        let friend = GEMSIDNormalizer.normalize(friendGEMSID)
         let database = databaseProvider()
         let pair = Self.orderedPair(my, friend)
         let recordID = CKRecord.ID(recordName: Self.friendLinkRecordName(first: pair.first, second: pair.second))
@@ -126,8 +126,8 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
     }
 
     func cancelFriendRequest(myGEMSID: String, friendGEMSID: String) async throws {
-        let my = normalizedGEMSID(myGEMSID)
-        let friend = normalizedGEMSID(friendGEMSID)
+        let my = GEMSIDNormalizer.normalize(myGEMSID)
+        let friend = GEMSIDNormalizer.normalize(friendGEMSID)
         let database = databaseProvider()
         let pair = Self.orderedPair(my, friend)
         let recordID = CKRecord.ID(recordName: Self.friendLinkRecordName(first: pair.first, second: pair.second))
@@ -164,7 +164,7 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
     }
 
     func refreshConnections(myGEMSID: String, connections: [FriendConnection]) async throws -> [FriendConnection] {
-        let my = normalizedGEMSID(myGEMSID)
+        let my = GEMSIDNormalizer.normalize(myGEMSID)
         let database = databaseProvider()
         var refreshed = Array(repeating: FriendConnection(employeeID: "", status: .pending), count: connections.count)
 
@@ -193,7 +193,7 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         myGEMSID: String,
         database: FriendScheduleCloudKitDatabase
     ) async throws -> FriendConnection {
-        let friend = normalizedGEMSID(connection.employeeID)
+        let friend = GEMSIDNormalizer.normalize(connection.employeeID)
         let pair = Self.orderedPair(myGEMSID, friend)
         let recordID = CKRecord.ID(recordName: Self.friendLinkRecordName(first: pair.first, second: pair.second))
         let record: CKRecord?
@@ -313,11 +313,7 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
     }
 
     private static func normalizedRecordComponent(_ raw: String) -> String {
-        normalizedGEMSID(raw)
+        GEMSIDNormalizer.normalize(raw)
             .filter { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" }
     }
-}
-
-private func normalizedGEMSID(_ raw: String) -> String {
-    raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
 }

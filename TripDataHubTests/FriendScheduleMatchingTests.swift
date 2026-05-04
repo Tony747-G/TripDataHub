@@ -100,7 +100,7 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertFalse(first.isAccepted)
         XCTAssertTrue(second.isAccepted)
         let recordNames = await database.friendLinkRecordNames()
-        XCTAssertEqual(recordNames, ["tdh_friend_111111_222222"])
+        XCTAssertEqual(recordNames, ["tdh_friend_0111111_0222222"])
     }
 
     func test_friendCloudKitRequest_retriesRaceConflictAndAccepts() async throws {
@@ -110,7 +110,7 @@ final class FriendScheduleMatchingTests: XCTestCase {
         let link = try await service.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
 
         XCTAssertTrue(link.isAccepted)
-        let recordSnapshot = await database.recordSnapshot(named: "tdh_friend_111111_222222")
+        let recordSnapshot = await database.recordSnapshot(named: "tdh_friend_0111111_0222222")
         let record = try XCTUnwrap(recordSnapshot)
         XCTAssertEqual((record["approvedA"] as? NSNumber)?.boolValue, true)
         XCTAssertEqual((record["approvedB"] as? NSNumber)?.boolValue, true)
@@ -135,7 +135,7 @@ final class FriendScheduleMatchingTests: XCTestCase {
         _ = try await service.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
         try await service.cancelFriendRequest(myGEMSID: "111111", friendGEMSID: "222222")
 
-        let recordSnapshot = await database.recordSnapshot(named: "tdh_friend_111111_222222")
+        let recordSnapshot = await database.recordSnapshot(named: "tdh_friend_0111111_0222222")
         let record = try XCTUnwrap(recordSnapshot)
         XCTAssertEqual((record["approvedA"] as? NSNumber)?.boolValue, false)
         XCTAssertEqual((record["approvedB"] as? NSNumber)?.boolValue, true)
@@ -300,8 +300,8 @@ private actor FriendCloudKitFakeDatabase: FriendScheduleCloudKitDatabase {
            recordName.hasPrefix("tdh_friend_") {
             conflictFirstFriendLinkSaveWithOtherApproval = false
             let serverRecord = CKRecord(recordType: "TDHFriendLink", recordID: record.recordID)
-            serverRecord["gemsA"] = "111111" as CKRecordValue
-            serverRecord["gemsB"] = "222222" as CKRecordValue
+            serverRecord["gemsA"] = "0111111" as CKRecordValue
+            serverRecord["gemsB"] = "0222222" as CKRecordValue
             serverRecord["approvedB"] = true as CKRecordValue
             records[recordName] = serverRecord
             throw CKError(.serverRecordChanged)

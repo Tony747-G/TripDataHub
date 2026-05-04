@@ -3,6 +3,14 @@ import XCTest
 @testable import TripData_Hub
 
 final class GEMSVerificationCloudKitServiceTests: XCTestCase {
+    func test_gemsIDNormalizerHandlesCurrentSevenDigitRules() {
+        XCTAssertEqual(GEMSIDNormalizer.normalize("7793942"), "7793942")
+        XCTAssertEqual(GEMSIDNormalizer.normalize(" 557068 "), "0557068")
+        XCTAssertEqual(GEMSIDNormalizer.normalize("55706"), "55706")
+        XCTAssertEqual(GEMSIDNormalizer.normalize("A57068"), "A57068")
+        XCTAssertEqual(GEMSIDNormalizer.normalize("٥٥٧٠٦٨"), "٥٥٧٠٦٨")
+    }
+
     func test_verificationHashMatchesBundledAdminPolicyHash() {
         let hash = GEMSVerificationCloudKitService.verificationHash(
             gemsID: "7793942",
@@ -62,9 +70,28 @@ final class GEMSVerificationCloudKitServiceTests: XCTestCase {
             GEMSVerificationImportRecord(gemsID: "557068", dateOfBirth: "9/24/64")
         ])
 
-        let snapshot = await database.recordSnapshot(named: "tdh_verify_557068")
+        let snapshot = await database.recordSnapshot(named: "tdh_verify_0557068")
         XCTAssertEqual(count, 1)
         XCTAssertNotNil(snapshot)
+    }
+
+    func test_sixDigitGEMSIDIsLeftPaddedToSevenDigits() async throws {
+        let database = GEMSVerificationFakeDatabase()
+        let service = GEMSVerificationCloudKitService(databaseProvider: { database })
+
+        _ = try await service.uploadVerificationRecords([
+            GEMSVerificationImportRecord(gemsID: "557068", dateOfBirth: "9/24/64")
+        ])
+
+        let unpaddedRecord = await database.recordSnapshot(named: "tdh_verify_557068")
+        let paddedRecord = await database.recordSnapshot(named: "tdh_verify_0557068")
+        let verifiesUnpaddedInput = try await service.verify(gemsID: "557068", dateOfBirth: "09/24/1964")
+        let verifiesPaddedInput = try await service.verify(gemsID: "0557068", dateOfBirth: "09/24/1964")
+
+        XCTAssertNil(unpaddedRecord)
+        XCTAssertNotNil(paddedRecord)
+        XCTAssertTrue(verifiesUnpaddedInput)
+        XCTAssertTrue(verifiesPaddedInput)
     }
 }
 

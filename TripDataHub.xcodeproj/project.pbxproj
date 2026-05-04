@@ -27,6 +27,7 @@
 		51A7C9D1E2F3456789ABC009 /* FriendScheduleCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABC008 /* FriendScheduleCloudKitService.swift */; };
 		51A7C9D1E2F3456789ABD001 /* GEMSVerificationCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABD000 /* GEMSVerificationCloudKitService.swift */; };
 		51A7C9D1E2F3456789ABD003 /* GEMSVerificationCloudKitServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABD002 /* GEMSVerificationCloudKitServiceTests.swift */; };
+		51A7C9D1E2F3456789ABD005 /* GEMSIDNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABD004 /* GEMSIDNormalizer.swift */; };
 		51A7C9D1E2F3456789ABCF11 /* TripScheduleSnapshotEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABCF10 /* TripScheduleSnapshotEncoder.swift */; };
 		51A7C9D1E2F3456789ABCF13 /* TripScheduleSnapshotEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABCF12 /* TripScheduleSnapshotEncoderTests.swift */; };
 		5BF750A9EB06E31DED48688D /* AdminTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F151A3C5326A78E7880243EB /* AdminTabView.swift */; };
@@ -103,6 +104,7 @@
 		51A7C9D1E2F3456789ABC008 /* FriendScheduleCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendScheduleCloudKitService.swift; sourceTree = "<group>"; };
 		51A7C9D1E2F3456789ABD000 /* GEMSVerificationCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GEMSVerificationCloudKitService.swift; sourceTree = "<group>"; };
 		51A7C9D1E2F3456789ABD002 /* GEMSVerificationCloudKitServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GEMSVerificationCloudKitServiceTests.swift; sourceTree = "<group>"; };
+		51A7C9D1E2F3456789ABD004 /* GEMSIDNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GEMSIDNormalizer.swift; sourceTree = "<group>"; };
 		51A7C9D1E2F3456789ABCF10 /* TripScheduleSnapshotEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripScheduleSnapshotEncoder.swift; sourceTree = "<group>"; };
 		51A7C9D1E2F3456789ABCF12 /* TripScheduleSnapshotEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripScheduleSnapshotEncoderTests.swift; sourceTree = "<group>"; };
 		537DE7E0A39D9117D8B2DE33 /* AppViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModel.swift; sourceTree = "<group>"; };
@@ -225,6 +227,7 @@
 				4F6C86491D2E927C2CEC60D5 /* FlightCountdownCoordinator.swift */,
 				51A7C9D1E2F3456789ABC008 /* FriendScheduleCloudKitService.swift */,
 				51A7C9D1E2F3456789ABD000 /* GEMSVerificationCloudKitService.swift */,
+				51A7C9D1E2F3456789ABD004 /* GEMSIDNormalizer.swift */,
 				51A7C9D1E2F3456789ABCF10 /* TripScheduleSnapshotEncoder.swift */,
 				4FC85F3B696ED2DB2C56FC18 /* IATATimeZoneResolver.swift */,
 				EABE1DFB8EE6CCCF77FB5717 /* ImportFileSniffer.swift */,
@@ -455,6 +458,7 @@
 				51A7C9D1E2F3456789ABC009 /* FriendScheduleCloudKitService.swift in Sources */,
 				51A7C9D1E2F3456789ABC001 /* FriendScheduleMatching.swift in Sources */,
 				51A7C9D1E2F3456789ABD001 /* GEMSVerificationCloudKitService.swift in Sources */,
+				51A7C9D1E2F3456789ABD005 /* GEMSIDNormalizer.swift in Sources */,
 				51A7C9D1E2F3456789ABCF11 /* TripScheduleSnapshotEncoder.swift in Sources */,
 				770DDB243CCA709322ED76E2 /* FriendsSupport.swift in Sources */,
 				3922CFC31FEDE9EC3DFB97BC /* FriendsTabView.swift in Sources */,
@@ -590,7 +594,7 @@
 				CODE_SIGN_ENTITLEMENTS = TripDataHub/TripDataHub.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 16;
+				CURRENT_PROJECT_VERSION = 17;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TripDataHub/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "TripData Hub";
@@ -701,7 +705,7 @@
 				CODE_SIGN_ENTITLEMENTS = TripDataHub/TripDataHub.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 16;
+				CURRENT_PROJECT_VERSION = 17;
 				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TripDataHub/Info.plist;
