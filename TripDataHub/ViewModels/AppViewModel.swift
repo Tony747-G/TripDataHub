@@ -405,7 +405,7 @@ final class AppViewModel: ObservableObject {
     }
 
     var canSubmitFriendRequest: Bool {
-        isIdentityVerified
+        isIdentityVerified && isScheduleSharingEnabled
     }
 
     var isIdentityVerified: Bool {

@@ -40,9 +40,8 @@ struct BrowserWebView: UIViewRepresentable {
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
-        if let current = webView.url, current != url {
-            webView.load(URLRequest(url: url))
-        }
+        // Intentionally empty: the WebView drives its own navigation after makeUIView.
+        // Reloading here would interrupt in-progress auth flows (e.g. Zscaler MFA redirects).
     }
 }
 
