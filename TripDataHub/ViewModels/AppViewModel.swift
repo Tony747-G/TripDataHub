@@ -190,6 +190,9 @@ final class AppViewModel: ObservableObject {
     private var lastConsumedAppGroupHandoffFileName: String?
     private var isConsumingAppGroupHandoff = false
     private var crewAccessLegImportReferenceTimes: [String: Date] = [:]
+    private var isUploadingSharedSchedule = false
+    private var needsSharedScheduleUpload = false
+    private var pendingSharedScheduleUploadReason: String?
 
     private let notification48hKey = "notification_48h_enabled"
     private let notification24hKey = "notification_24h_enabled"
@@ -609,6 +612,33 @@ final class AppViewModel: ObservableObject {
     }
 
     private func uploadSharedScheduleIfNeeded(reason: String) async {
+        if isUploadingSharedSchedule {
+            needsSharedScheduleUpload = true
+            pendingSharedScheduleUploadReason = reason
+            logNonFatal("Friend CloudKit schedule upload coalesced: \(reason)")
+            return
+        }
+
+        isUploadingSharedSchedule = true
+        var nextReason: String? = reason
+        defer {
+            isUploadingSharedSchedule = false
+            needsSharedScheduleUpload = false
+            pendingSharedScheduleUploadReason = nil
+        }
+
+        while let currentReason = nextReason {
+            nextReason = nil
+            needsSharedScheduleUpload = false
+            pendingSharedScheduleUploadReason = nil
+            await performSharedScheduleUploadIfNeeded(reason: currentReason)
+            if needsSharedScheduleUpload {
+                nextReason = pendingSharedScheduleUploadReason ?? "coalesced"
+            }
+        }
+    }
+
+    private func performSharedScheduleUploadIfNeeded(reason: String) async {
         guard isScheduleSharingEnabled else { return }
         guard isIdentityVerified,
               let verifiedIdentity,
@@ -616,18 +646,33 @@ final class AppViewModel: ObservableObject {
             friendCloudKitSyncMessage = "Verify GEMS and iCloud before sharing schedules."
             return
         }
+        let crewAccessTrips = await Self.loadCrewAccessTripJSONPayloadsFromImportFiles()
+
+        async let sharedScheduleUpload: Void = friendScheduleCloudKitService.uploadSchedule(
+            gemsID: verifiedIdentity.gemsID,
+            cloudKitRecordName: currentCloudKitRecordName,
+            schedules: schedules
+        )
+        async let webSnapshotUpload: Void = friendScheduleCloudKitService.uploadScheduleSnapshot(
+            gemsID: verifiedIdentity.gemsID,
+            ownerDisplayName: verifiedIdentity.gemsID,
+            crewAccessTrips: crewAccessTrips
+        )
 
         do {
-            try await friendScheduleCloudKitService.uploadSchedule(
-                gemsID: verifiedIdentity.gemsID,
-                cloudKitRecordName: currentCloudKitRecordName,
-                schedules: schedules
-            )
+            try await sharedScheduleUpload
             friendCloudKitSyncMessage = "Shared schedule updated."
             logNonFatal("Friend CloudKit schedule uploaded: \(reason)")
         } catch {
             friendCloudKitSyncMessage = "Failed to update shared schedule: \(error.localizedDescription)"
             logNonFatal("Friend CloudKit schedule upload failed: \(error.localizedDescription)")
+        }
+
+        do {
+            try await webSnapshotUpload
+            logNonFatal("TripScheduleSnapshot uploaded: \(reason)")
+        } catch {
+            logNonFatal("TripScheduleSnapshot upload failed: \(error.localizedDescription)")
         }
     }
 
@@ -2351,6 +2396,26 @@ final class AppViewModel: ObservableObject {
     }
 
     private nonisolated static func loadCrewAccessSchedulesFromImportFiles() -> [PayPeriodSchedule] {
+        let payloads = loadCrewAccessTripJSONPayloadsFromImportFilesSync()
+        return payloads.compactMap { payload, modifiedAt in
+            buildCrewAccessSchedule(from: payload, modifiedAt: modifiedAt)
+        }.sorted { lhs, rhs in
+            let lhsKey = lhs.legs.compactMap(\.depUTC).sorted().first ?? lhs.label
+            let rhsKey = rhs.legs.compactMap(\.depUTC).sorted().first ?? rhs.label
+            if lhsKey == rhsKey {
+                return lhs.label < rhs.label
+            }
+            return lhsKey < rhsKey
+        }
+    }
+
+    private nonisolated static func loadCrewAccessTripJSONPayloadsFromImportFiles() async -> [CrewAccessTripJSON] {
+        await Task.detached(priority: .utility) {
+            loadCrewAccessTripJSONPayloadsFromImportFilesSync().map(\.payload)
+        }.value
+    }
+
+    private nonisolated static func loadCrewAccessTripJSONPayloadsFromImportFilesSync() -> [(payload: CrewAccessTripJSON, modifiedAt: Date)] {
         let fm = FileManager.default
         guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
             return []
@@ -2373,12 +2438,12 @@ final class AppViewModel: ObservableObject {
             else {
                 return nil
             }
-            return buildCrewAccessSchedule(from: payload, modifiedAt: values.contentModificationDate ?? Date())
+            return (payload, values.contentModificationDate ?? Date())
         }.sorted { lhs, rhs in
-            let lhsKey = lhs.legs.compactMap(\.depUTC).sorted().first ?? lhs.label
-            let rhsKey = rhs.legs.compactMap(\.depUTC).sorted().first ?? rhs.label
+            let lhsKey = lhs.payload.items.map(\.startUtc).sorted().first ?? lhs.payload.tripInformationDate
+            let rhsKey = rhs.payload.items.map(\.startUtc).sorted().first ?? rhs.payload.tripInformationDate
             if lhsKey == rhsKey {
-                return lhs.label < rhs.label
+                return lhs.payload.tripId < rhs.payload.tripId
             }
             return lhsKey < rhsKey
         }

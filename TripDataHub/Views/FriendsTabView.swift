@@ -154,14 +154,19 @@ struct FriendTimelineView: View {
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                if daySections.isEmpty {
-                    Text("No shared timeline data for \(friend.employeeID).")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 16)
-                } else {
+                if !cardDaySections.isEmpty {
+                    ForEach(cardDaySections) { section in
+                        Text(section.label)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(dateHeaderTextColor)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 6)
+                            .background(dayHeaderBackground)
+
+                        ForEach(section.cards, content: timelineCardRow)
+                    }
+                } else if !daySections.isEmpty {
                     ForEach(daySections) { section in
                         Text(section.label)
                             .font(.subheadline.weight(.bold))
@@ -202,6 +207,13 @@ struct FriendTimelineView: View {
                             Divider()
                         }
                     }
+                } else {
+                    Text("No shared timeline data for \(friend.employeeID).")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 16)
                 }
             }
         }
@@ -213,6 +225,59 @@ struct FriendTimelineView: View {
 
     private var daySections: [FriendTimelineDaySection] {
         FriendTimelineSectionBuilder.build(from: friend.sharedSchedules)
+    }
+
+    private var cardDaySections: [FriendTimelineCardDaySection] {
+        FriendTimelineSectionBuilder.build(from: friend.sharedTimelineCards)
+    }
+
+    @ViewBuilder
+    private func timelineCardRow(_ card: WebTimelineCard) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: iconName(for: card))
+                .foregroundStyle(iconColor(for: card))
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(card.title)
+                        .font(.subheadline.weight(.bold))
+                    Spacer()
+                    if let trailing = card.trailing {
+                        Text(trailing)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    } else if let timeRange = card.timeRange {
+                        Text(timeRange)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                HStack(alignment: .firstTextBaseline) {
+                    if let subtitle = card.subtitle {
+                        Text(subtitle)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if let detail = card.detail {
+                        Text(detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if card.type == "layover", let hotelName = card.hotelName {
+                    Text(hotelName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        Divider()
     }
 
     private func timeRangeText(for leg: TripLeg) -> String {
@@ -227,5 +292,20 @@ struct FriendTimelineView: View {
 
     private var dateHeaderTextColor: Color {
         ScheduleColors.timelineDateHeaderText(for: colorScheme)
+    }
+
+    private func iconName(for card: WebTimelineCard) -> String {
+        switch card.icon {
+        case "hotel":
+            return "bed.double.fill"
+        case "paperplane":
+            return "paperplane.fill"
+        default:
+            return "airplane"
+        }
+    }
+
+    private func iconColor(for card: WebTimelineCard) -> Color {
+        card.iconTone == "amber" ? .orange : .primary
     }
 }

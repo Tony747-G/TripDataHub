@@ -9,6 +9,7 @@ struct FriendScheduleCloudKitLink: Sendable {
 
 protocol FriendScheduleCloudKitServicing: Sendable {
     func uploadSchedule(gemsID: String, cloudKitRecordName: String, schedules: [PayPeriodSchedule]) async throws
+    func uploadScheduleSnapshot(gemsID: String, ownerDisplayName: String, crewAccessTrips: [CrewAccessTripJSON]) async throws
     func requestFriend(myGEMSID: String, friendGEMSID: String) async throws -> FriendScheduleCloudKitLink
     func cancelFriendRequest(myGEMSID: String, friendGEMSID: String) async throws
     func refreshConnections(myGEMSID: String, connections: [FriendConnection]) async throws -> [FriendConnection]
@@ -26,6 +27,15 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
     private enum RecordType {
         static let sharedSchedule = "TDHSharedSchedule"
         static let friendLink = "TDHFriendLink"
+        static let snapshot = "TripScheduleSnapshot"
+    }
+
+    private enum SnapshotField {
+        static let ownerGEMSID = "ownerGEMSID"
+        static let ownerDisplayName = "ownerDisplayName"
+        static let scheduleJSON = "scheduleJSON"
+        static let schemaVersion = "schemaVersion"
+        static let updatedAt = "updatedAt"
     }
 
     private enum Field {
@@ -65,6 +75,23 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         record[Field.ownerRecordName] = cloudKitRecordName as CKRecordValue
         record[Field.schedulesData] = data as CKRecordValue
         record[Field.updatedAt] = Date() as CKRecordValue
+        _ = try await database.save(record)
+    }
+
+    func uploadScheduleSnapshot(gemsID: String, ownerDisplayName: String, crewAccessTrips: [CrewAccessTripJSON]) async throws {
+        let database = databaseProvider()
+        let recordID = CKRecord.ID(recordName: Self.snapshotRecordName(for: gemsID))
+        let record = (try? await database.record(for: recordID))
+            ?? CKRecord(recordType: RecordType.snapshot, recordID: recordID)
+        let json = try TripScheduleSnapshotEncoder.json(
+            ownerDisplayName: ownerDisplayName,
+            crewAccessTrips: crewAccessTrips
+        )
+        record[SnapshotField.ownerGEMSID] = normalizedGEMSID(gemsID) as CKRecordValue
+        record[SnapshotField.ownerDisplayName] = ownerDisplayName as CKRecordValue
+        record[SnapshotField.scheduleJSON] = json as CKRecordValue
+        record[SnapshotField.schemaVersion] = Int64(TripScheduleSnapshotEncoder.schemaVersion) as CKRecordValue
+        record[SnapshotField.updatedAt] = Date() as CKRecordValue
         _ = try await database.save(record)
     }
 
@@ -160,6 +187,8 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
                 updated.status = .accepted
                 updated.linkedAt = link?.linkedAt ?? updated.linkedAt ?? Date()
                 updated.sharedSchedules = (try? await fetchSchedule(gemsID: friend, database: database)) ?? updated.sharedSchedules
+                updated.sharedTimelineCards = (try? await fetchScheduleSnapshot(gemsID: friend, database: database))
+                    ?? updated.sharedTimelineCards
             } else {
                 updated.status = .pending
             }
@@ -174,6 +203,14 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         let record = try await database.record(for: recordID)
         guard let data = record[Field.schedulesData] as? Data else { return [] }
         return try JSONDecoder().decode([PayPeriodSchedule].self, from: data)
+    }
+
+    private func fetchScheduleSnapshot(gemsID: String, database: FriendScheduleCloudKitDatabase) async throws -> [WebTimelineCard] {
+        let recordID = CKRecord.ID(recordName: Self.snapshotRecordName(for: gemsID))
+        let record = try await database.record(for: recordID)
+        guard let json = record[SnapshotField.scheduleJSON] as? String,
+              let data = json.data(using: .utf8) else { return [] }
+        return try JSONDecoder().decode(WebSchedulePayload.self, from: data).timelineCards
     }
 
     private func friendLinkRecord(
@@ -243,6 +280,10 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
 
     private static func scheduleRecordName(for gemsID: String) -> String {
         "tdh_schedule_\(normalizedRecordComponent(gemsID))"
+    }
+
+    private static func snapshotRecordName(for gemsID: String) -> String {
+        "tdh_snapshot_\(normalizedRecordComponent(gemsID))"
     }
 
     private static func friendLinkRecordName(first: String, second: String) -> String {

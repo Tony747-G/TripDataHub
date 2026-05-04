@@ -142,6 +142,30 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertNil(record["linkedAt"])
     }
 
+    func test_refreshConnections_loadsFriendTimelineCardsFromSnapshot() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+
+        _ = try await service.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
+        _ = try await service.requestFriend(myGEMSID: "222222", friendGEMSID: "111111")
+        try await service.uploadScheduleSnapshot(
+            gemsID: "222222",
+            ownerDisplayName: "222222",
+            crewAccessTrips: [makeCrewAccessTrip()]
+        )
+
+        let refreshed = try await service.refreshConnections(
+            myGEMSID: "111111",
+            connections: [
+                FriendConnection(employeeID: "222222", status: .pending)
+            ]
+        )
+
+        XCTAssertEqual(refreshed.first?.status, .accepted)
+        XCTAssertEqual(refreshed.first?.sharedTimelineCards.map(\.type), ["flight", "layover", "flight"])
+        XCTAssertEqual(refreshed.first?.sharedTimelineCards[1].hotelName, "Test Hotel")
+    }
+
     private func makeSchedule(legs: [TripLeg]) -> PayPeriodSchedule {
         PayPeriodSchedule(
             id: "PP26-05",
@@ -185,6 +209,73 @@ final class FriendScheduleMatchingTests: XCTestCase {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: value)!
+    }
+
+    private func makeCrewAccessTrip() -> CrewAccessTripJSON {
+        CrewAccessTripJSON(
+            schemaVersion: 1,
+            source: "crewaccess-pdf",
+            sourceVersion: "test",
+            mappingVersion: "test",
+            generatedAt: "2026-05-04T00:00:00Z",
+            tripId: "A70628",
+            tripInformationDate: "2026-04-27",
+            creditTime: "15:00",
+            tripDays: "2",
+            tafb: "36:00",
+            dutyTotals: ["Duty 1 Time 12:30 Block 9:00 Rest 24:00"],
+            hotelDetails: ["Hotel details SDF: Test Hotel / +1 555 0100"],
+            crew: [],
+            items: [
+                makeCrewAccessItem(
+                    sequence: 1,
+                    flight: "5X100",
+                    depAirport: "ANC",
+                    arrAirport: "SDF",
+                    startUTC: "2026-04-27T07:24:00Z",
+                    endUTC: "2026-04-27T19:45:00Z"
+                ),
+                makeCrewAccessItem(
+                    sequence: 2,
+                    flight: "5X101",
+                    depAirport: "SDF",
+                    arrAirport: "ONT",
+                    startUTC: "2026-04-28T21:45:00Z",
+                    endUTC: "2026-04-29T00:15:00Z"
+                )
+            ]
+        )
+    }
+
+    private func makeCrewAccessItem(
+        sequence: Int,
+        flight: String,
+        depAirport: String,
+        arrAirport: String,
+        startUTC: String,
+        endUTC: String
+    ) -> CrewAccessTripItemJSON {
+        CrewAccessTripItemJSON(
+            sequence: sequence,
+            depAirport: depAirport,
+            arrAirport: arrAirport,
+            deadhead: false,
+            flight: flight,
+            startUtc: startUTC,
+            endUtc: endUTC,
+            startLocalDisplay: startUTC,
+            endLocalDisplay: endUTC,
+            originTz: "America/Anchorage",
+            destinationTz: "America/New_York",
+            timeDerivation: "pdf",
+            aircraft: "747",
+            block: "4:00",
+            stdUtc: startUTC,
+            staUtc: endUTC,
+            atdUtc: nil,
+            ataUtc: nil,
+            tailNumber: nil
+        )
     }
 }
 

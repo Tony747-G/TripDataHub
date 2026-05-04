@@ -130,6 +130,7 @@ struct FriendConnection: Identifiable, Codable, Hashable {
     let requestedAt: Date
     var linkedAt: Date?
     var sharedSchedules: [PayPeriodSchedule]
+    var sharedTimelineCards: [WebTimelineCard]
 
     init(
         id: UUID = UUID(),
@@ -137,7 +138,8 @@ struct FriendConnection: Identifiable, Codable, Hashable {
         status: FriendConnectionStatus,
         requestedAt: Date = Date(),
         linkedAt: Date? = nil,
-        sharedSchedules: [PayPeriodSchedule] = []
+        sharedSchedules: [PayPeriodSchedule] = [],
+        sharedTimelineCards: [WebTimelineCard] = []
     ) {
         self.id = id
         self.employeeID = employeeID
@@ -145,6 +147,7 @@ struct FriendConnection: Identifiable, Codable, Hashable {
         self.requestedAt = requestedAt
         self.linkedAt = linkedAt
         self.sharedSchedules = sharedSchedules
+        self.sharedTimelineCards = sharedTimelineCards
     }
 }
 
