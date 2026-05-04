@@ -212,12 +212,12 @@ final class AppViewModel: ObservableObject {
     // Internal testing fallback:
     // when true, users can verify with entered GEMS ID + DOB even if Seniority DB is not loaded.
     // This never grants admin eligibility, but in Friends sharing GEMS ID itself is the
-    // trust boundary — so this fallback must NOT ship in App Store builds. Gate strictly
-    // on DEBUG (Xcode/local builds only). TestFlight and Release default to false.
+    // trust boundary, so this fallback must NOT ship in App Store builds. Gate it to
+    // Xcode/local builds and TestFlight sandbox receipts only.
 #if DEBUG
     private let allowVerificationWithoutSeniorityDB = true
 #else
-    private let allowVerificationWithoutSeniorityDB = false
+    private let allowVerificationWithoutSeniorityDB = AppViewModel.isRunningFromTestFlight()
 #endif
     // Add your own CloudKit recordName(s) here to grant admin access in TestFlight.
     private let adminCloudKitRecordAllowlist: Set<String> = []
@@ -2759,7 +2759,7 @@ final class AppViewModel: ObservableObject {
 
         if seniorityRecords.isEmpty {
             guard allowVerificationWithoutSeniorityDB else {
-                friendActionMessage = "Seniority DB is empty. Ask admin to import the CSV."
+                friendActionMessage = "Verification database is unavailable. Please update the app or contact support."
                 return
             }
 
@@ -2789,7 +2789,7 @@ final class AppViewModel: ObservableObject {
                 )
             )
             updateAdminStatus()
-            friendActionMessage = "Verified for internal test as GEMS \(gemsID)."
+            friendActionMessage = "Verified as GEMS \(gemsID)."
             if isScheduleSharingEnabled {
                 Task { [weak self] in
                     await self?.syncFriendCloudKit(reason: "identity verified")
@@ -3392,6 +3392,10 @@ final class AppViewModel: ObservableObject {
         }
 
         return String(format: "%02d/%02d/%04d", month, day, fullYear)
+    }
+
+    private static func isRunningFromTestFlight() -> Bool {
+        Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt"
     }
 
     private func parseSeniorityCSV(_ text: String) -> [PilotSeniorityRecord] {

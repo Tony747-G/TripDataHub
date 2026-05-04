@@ -14,6 +14,24 @@ struct SettingsAccountSection: View {
             Text("Verification Status: \(viewModel.isIdentityVerified ? "Verified" : "Not Verified")")
                 .font(.footnote)
                 .foregroundStyle(viewModel.isIdentityVerified ? .green : .secondary)
+            if viewModel.isIdentityVerified {
+                Label("Identity Verified", systemImage: "checkmark.circle.fill")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.green)
+            }
+            if viewModel.isRefreshingCloudKitIdentity {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("Checking iCloud identity...")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if let message = viewModel.cloudKitIdentityMessage {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+            }
             if !viewModel.isIdentityVerified {
                 TextField("GEMS ID", text: $verifyGemsIDInput)
                 DatePicker("DOB", selection: $verifyDOBDate, displayedComponents: .date)
@@ -27,7 +45,7 @@ struct SettingsAccountSection: View {
             if let message = viewModel.friendActionMessage {
                 Text(message)
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(message.localizedCaseInsensitiveContains("verified") ? .green : .orange)
             }
         } header: {
             sectionHeader("Account")
