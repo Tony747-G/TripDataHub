@@ -204,6 +204,7 @@ struct SettingsTabView: View {
             logbookExportSection
             logTenExportSection
         }
+        .scrollDismissesKeyboard(.interactively)
     }
 
     var body: some View {

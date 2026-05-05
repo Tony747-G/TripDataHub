@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct FriendsTabView: View {
     @EnvironmentObject private var viewModel: AppViewModel
@@ -7,30 +10,38 @@ struct FriendsTabView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    Label {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Mutual GEMS approval")
-                                .font(.subheadline.weight(.semibold))
-                            Text("Both pilots must add each other's GEMS ID. Shared schedules update automatically when Share My Schedule is enabled.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                Section("Friends") {
+                    if viewModel.acceptedFriendConnections.isEmpty {
+                        Text("No friends yet.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(viewModel.acceptedFriendConnections) { friend in
+                            NavigationLink {
+                                FriendTimelineView(friend: friend)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(friend.employeeID)
+                                        .font(.headline)
+                                    if let linkedAt = friend.linkedAt {
+                                        Text("Linked: \(linkedAt.formatted(date: .abbreviated, time: .shortened))")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
                         }
-                    } icon: {
-                        Image(systemName: "icloud")
-                            .foregroundStyle(.blue)
                     }
-                    .padding(.vertical, 2)
                 }
 
                 Section("Add Friend") {
                     TextField("GEMS ID", text: $employeeIDInput)
+                        .keyboardType(.numberPad)
+                        .textContentType(.username)
+                        .submitLabel(.done)
+                        .onSubmit(sendFriendRequest)
                     Button("Send Request") {
-                        let employeeID = employeeIDInput
-                        employeeIDInput = ""
-                        Task {
-                            await viewModel.submitFriendRequest(employeeID: employeeID)
-                        }
+                        sendFriendRequest()
                     }
                     .disabled(!viewModel.canSubmitFriendRequest)
                     if let message = viewModel.cloudKitIdentityMessage {
@@ -40,14 +51,6 @@ struct FriendsTabView: View {
                     } else if !viewModel.isIdentityVerified {
                         Text("Verify your GEMS ID in Settings before adding friends.")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                if let message = viewModel.friendActionMessage {
-                    Section("Status") {
-                        Text(message)
-                            .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -98,31 +101,8 @@ struct FriendsTabView: View {
                         }
                     }
                 }
-
-                Section("Friends") {
-                    if viewModel.acceptedFriendConnections.isEmpty {
-                        Text("No friends yet.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(viewModel.acceptedFriendConnections) { friend in
-                            NavigationLink {
-                                FriendTimelineView(friend: friend)
-                            } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(friend.employeeID)
-                                        .font(.headline)
-                                    if let linkedAt = friend.linkedAt {
-                                        Text("Linked: \(linkedAt.formatted(date: .abbreviated, time: .shortened))")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
             }
+            .scrollDismissesKeyboard(.interactively)
 #if os(iOS)
             .toolbar(.hidden, for: .navigationBar)
 #endif
@@ -143,7 +123,40 @@ struct FriendsTabView: View {
                     await viewModel.syncFriendCloudKit(reason: "friends opened")
                 }
             }
+            .alert("Friends", isPresented: friendMessageBinding) {
+                Button("OK") {
+                    viewModel.friendActionMessage = nil
+                }
+            } message: {
+                Text(viewModel.friendActionMessage ?? "")
+            }
         }
+    }
+
+    private var friendMessageBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.friendActionMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    viewModel.friendActionMessage = nil
+                }
+            }
+        )
+    }
+
+    private func sendFriendRequest() {
+        dismissKeyboard()
+        let employeeID = employeeIDInput
+        employeeIDInput = ""
+        Task {
+            await viewModel.submitFriendRequest(employeeID: employeeID)
+        }
+    }
+
+    private func dismissKeyboard() {
+#if canImport(UIKit)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+#endif
     }
 }
 

@@ -150,6 +150,7 @@ final class AppViewModel: ObservableObject {
     @Published var didLastFetchFail = false
     @Published var friendConnections: [FriendConnection] = []
     @Published var friendActionMessage: String?
+    @Published var identityActionMessage: String?
     @Published var friendCloudKitSyncMessage: String?
     @Published var isScheduleSharingEnabled = false
     @Published private(set) var isSyncingFriendCloudKit = false
@@ -678,7 +679,6 @@ final class AppViewModel: ObservableObject {
               let verifiedIdentity else {
             return
         }
-        guard !friendConnections.isEmpty else { return }
 
         do {
             friendConnections = try await friendScheduleCloudKitService.refreshConnections(
@@ -2856,18 +2856,18 @@ final class AppViewModel: ObservableObject {
 
     func verifyIdentity(gemsID rawGemsID: String, dateOfBirth rawDateOfBirth: String) async {
         guard let currentCloudKitRecordName else {
-            friendActionMessage = "Apple identity is unavailable. Sign into iCloud first."
+            identityActionMessage = "Apple identity is unavailable. Sign into iCloud first."
             return
         }
 
         let gemsID = GEMSIDNormalizer.normalize(rawGemsID)
         let dobInput = rawDateOfBirth.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !gemsID.isEmpty, !dobInput.isEmpty else {
-            friendActionMessage = "GEMS ID and DOB are required."
+            identityActionMessage = "GEMS ID and DOB are required."
             return
         }
         guard let normalizedDOB = normalizeDOB(dobInput) else {
-            friendActionMessage = "DOB format must be MM/DD/YYYY."
+            identityActionMessage = "DOB format must be MM/DD/YYYY."
             return
         }
 
@@ -2878,13 +2878,13 @@ final class AppViewModel: ObservableObject {
                 dateOfBirth: normalizedDOB
             )
         } catch {
-            friendActionMessage = "Verification database is unavailable: \(error.localizedDescription)"
+            identityActionMessage = "Verification database is unavailable: \(error.localizedDescription)"
             return
         }
 
         let isAdminBootstrap = !isVerified && isAdminEligible(gemsID: gemsID, dob: normalizedDOB)
         guard isVerified || isAdminBootstrap || allowVerificationWithoutSeniorityDB else {
-            friendActionMessage = "Verification failed. Check GEMS ID / DOB."
+            identityActionMessage = "Verification failed. Check GEMS ID / DOB."
             return
         }
 
@@ -2908,7 +2908,7 @@ final class AppViewModel: ObservableObject {
             logNonFatal("Failed to record verified app user: \(error.localizedDescription)")
         }
         updateAdminStatus()
-        friendActionMessage = isAdminBootstrap
+        identityActionMessage = isAdminBootstrap
             ? "Verified as bootstrap admin. Upload GEMS verification records to CloudKit."
             : "Verified as GEMS \(gemsID)."
         if isScheduleSharingEnabled {

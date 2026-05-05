@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct SettingsAccountSection: View {
     @EnvironmentObject private var viewModel: AppViewModel
@@ -34,17 +37,16 @@ struct SettingsAccountSection: View {
             }
             if !viewModel.isIdentityVerified {
                 TextField("GEMS ID", text: $verifyGemsIDInput)
+                    .keyboardType(.numberPad)
+                    .textContentType(.username)
+                    .submitLabel(.done)
+                    .onSubmit(verifyIdentity)
                 DatePicker("DOB", selection: $verifyDOBDate, displayedComponents: .date)
                 Button("Verify Identity") {
-                    Task {
-                        await viewModel.verifyIdentity(
-                            gemsID: verifyGemsIDInput,
-                            dateOfBirth: formatDOB(verifyDOBDate)
-                        )
-                    }
+                    verifyIdentity()
                 }
             }
-            if let message = viewModel.friendActionMessage {
+            if let message = viewModel.identityActionMessage {
                 Text(message)
                     .font(.footnote)
                     .foregroundStyle(message.localizedCaseInsensitiveContains("verified") ? .green : .orange)
@@ -52,6 +54,22 @@ struct SettingsAccountSection: View {
         } header: {
             sectionHeader("Account")
         }
+    }
+
+    private func verifyIdentity() {
+        dismissKeyboard()
+        Task {
+            await viewModel.verifyIdentity(
+                gemsID: verifyGemsIDInput,
+                dateOfBirth: formatDOB(verifyDOBDate)
+            )
+        }
+    }
+
+    private func dismissKeyboard() {
+#if canImport(UIKit)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+#endif
     }
 }
 

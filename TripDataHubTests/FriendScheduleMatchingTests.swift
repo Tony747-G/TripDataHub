@@ -166,6 +166,47 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertEqual(refreshed.first?.sharedTimelineCards[1].hotelName, "Test Hotel")
     }
 
+    func test_refreshConnections_restoresAcceptedFriendLinksFromCloudWhenLocalCacheIsEmpty() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+
+        _ = try await service.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
+        _ = try await service.requestFriend(myGEMSID: "222222", friendGEMSID: "111111")
+
+        let refreshed = try await service.refreshConnections(
+            myGEMSID: "111111",
+            connections: []
+        )
+
+        XCTAssertEqual(refreshed.count, 1)
+        XCTAssertEqual(refreshed.first?.employeeID, "0222222")
+        XCTAssertEqual(refreshed.first?.status, .accepted)
+        XCTAssertNotNil(refreshed.first?.linkedAt)
+    }
+
+    func test_refreshConnections_keepsAcceptedStatusFromPersistedCloudStatus() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+        await database.insertFriendLink(
+            gemsA: "0111111",
+            gemsB: "0222222",
+            approvedA: true,
+            approvedB: false,
+            status: "accepted",
+            linkedAt: Date(timeIntervalSince1970: 10)
+        )
+
+        let refreshed = try await service.refreshConnections(
+            myGEMSID: "111111",
+            connections: []
+        )
+
+        XCTAssertEqual(refreshed.count, 1)
+        XCTAssertEqual(refreshed.first?.employeeID, "0222222")
+        XCTAssertEqual(refreshed.first?.status, .accepted)
+        XCTAssertEqual(refreshed.first?.linkedAt, Date(timeIntervalSince1970: 10))
+    }
+
     private func makeSchedule(legs: [TripLeg]) -> PayPeriodSchedule {
         PayPeriodSchedule(
             id: "PP26-05",
@@ -316,6 +357,42 @@ private actor FriendCloudKitFakeDatabase: FriendScheduleCloudKitDatabase {
             throw CKError(.unknownItem)
         }
         return recordID
+    }
+
+    func records(matching query: CKQuery) async throws -> [CKRecord] {
+        records.values.filter { record in
+            guard record.recordType == query.recordType else { return false }
+            guard let comparison = query.predicate as? NSComparisonPredicate,
+                  comparison.leftExpression.expressionType == .keyPath,
+                  comparison.rightExpression.expressionType == .constantValue,
+                  let expected = comparison.rightExpression.constantValue as? String
+            else { return true }
+            let field = comparison.leftExpression.keyPath
+            return record[field] as? String == expected
+        }
+    }
+
+    func insertFriendLink(
+        gemsA: String,
+        gemsB: String,
+        approvedA: Bool,
+        approvedB: Bool,
+        status: String?,
+        linkedAt: Date?
+    ) {
+        let recordID = CKRecord.ID(recordName: "tdh_friend_\(gemsA)_\(gemsB)")
+        let record = CKRecord(recordType: "TDHFriendLink", recordID: recordID)
+        record["gemsA"] = gemsA as CKRecordValue
+        record["gemsB"] = gemsB as CKRecordValue
+        record["approvedA"] = approvedA as CKRecordValue
+        record["approvedB"] = approvedB as CKRecordValue
+        if let status {
+            record["status"] = status as CKRecordValue
+        }
+        if let linkedAt {
+            record["linkedAt"] = linkedAt as CKRecordValue
+        }
+        records[recordID.recordName] = record
     }
 
     func friendLinkRecordNames() -> [String] {

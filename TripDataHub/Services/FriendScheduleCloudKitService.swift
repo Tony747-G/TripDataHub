@@ -5,6 +5,7 @@ struct FriendScheduleCloudKitLink: Sendable {
     let friendGEMSID: String
     let isAccepted: Bool
     let linkedAt: Date?
+    let requestedAt: Date?
 }
 
 protocol FriendScheduleCloudKitServicing: Sendable {
@@ -19,6 +20,7 @@ protocol FriendScheduleCloudKitDatabase {
     func record(for recordID: CKRecord.ID) async throws -> CKRecord
     func save(_ record: CKRecord) async throws -> CKRecord
     func deleteRecord(withID recordID: CKRecord.ID) async throws -> CKRecord.ID
+    func records(matching query: CKQuery) async throws -> [CKRecord]
 }
 
 extension CKDatabase: FriendScheduleCloudKitDatabase {}
@@ -48,6 +50,13 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         static let approvedA = "approvedA"
         static let approvedB = "approvedB"
         static let linkedAt = "linkedAt"
+        static let status = "status"
+    }
+
+    private enum LinkStatus {
+        static let pending = "pending"
+        static let accepted = "accepted"
+        static let canceled = "canceled"
     }
 
     private let containerIdentifier: String
@@ -149,6 +158,7 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
                 if !boolValue(record[Field.approvedA]) && !boolValue(record[Field.approvedB]) {
                     _ = try await database.deleteRecord(withID: recordID)
                 } else {
+                    record[Field.status] = LinkStatus.pending as CKRecordValue
                     _ = try await database.save(record)
                 }
                 return
@@ -166,10 +176,12 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
     func refreshConnections(myGEMSID: String, connections: [FriendConnection]) async throws -> [FriendConnection] {
         let my = GEMSIDNormalizer.normalize(myGEMSID)
         let database = databaseProvider()
-        var refreshed = Array(repeating: FriendConnection(employeeID: "", status: .pending), count: connections.count)
+        let cloudConnections = try await cloudConnections(myGEMSID: my, database: database)
+        let mergedConnections = mergeConnections(connections + cloudConnections)
+        var refreshed = Array(repeating: FriendConnection(employeeID: "", status: .pending), count: mergedConnections.count)
 
         try await withThrowingTaskGroup(of: (Int, FriendConnection).self) { group in
-            for (index, connection) in connections.enumerated() {
+            for (index, connection) in mergedConnections.enumerated() {
                 group.addTask {
                     let updated = try await self.refreshConnection(
                         connection,
@@ -188,6 +200,50 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         return refreshed
     }
 
+    private func cloudConnections(
+        myGEMSID: String,
+        database: FriendScheduleCloudKitDatabase
+    ) async throws -> [FriendConnection] {
+        async let firstSide = friendLinkRecords(field: Field.gemsA, gemsID: myGEMSID, database: database)
+        async let secondSide = friendLinkRecords(field: Field.gemsB, gemsID: myGEMSID, database: database)
+        let firstRecords = try await firstSide
+        let secondRecords = try await secondSide
+        let records = firstRecords + secondRecords
+        var seenRecordNames: Set<String> = []
+        var connections: [FriendConnection] = []
+
+        for record in records where seenRecordNames.insert(record.recordID.recordName).inserted {
+            let gemsA = GEMSIDNormalizer.normalize(record[Field.gemsA] as? String ?? "")
+            let gemsB = GEMSIDNormalizer.normalize(record[Field.gemsB] as? String ?? "")
+            guard gemsA == myGEMSID || gemsB == myGEMSID else { continue }
+            let friend = gemsA == myGEMSID ? gemsB : gemsA
+            guard !friend.isEmpty else { continue }
+            let link = self.link(from: record, myGEMSID: myGEMSID, friendGEMSID: friend)
+            connections.append(
+                FriendConnection(
+                    employeeID: friend,
+                    status: link.isAccepted ? .accepted : .pending,
+                    requestedAt: link.requestedAt ?? Date(),
+                    linkedAt: link.isAccepted ? (link.linkedAt ?? Date()) : nil
+                )
+            )
+        }
+
+        return mergeConnections(connections)
+    }
+
+    private func friendLinkRecords(
+        field: String,
+        gemsID: String,
+        database: FriendScheduleCloudKitDatabase
+    ) async throws -> [CKRecord] {
+        let query = CKQuery(
+            recordType: RecordType.friendLink,
+            predicate: NSPredicate(format: "%K == %@", field, gemsID)
+        )
+        return try await database.records(matching: query)
+    }
+
     private func refreshConnection(
         _ connection: FriendConnection,
         myGEMSID: String,
@@ -203,6 +259,13 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
             record = nil
         } catch {
             throw error
+        }
+        if let record {
+            do {
+                try await backfillAcceptedStatusIfNeeded(record, database: database)
+            } catch {
+                NSLog("[TDHFriendLink] accepted-status backfill failed: \(error.localizedDescription)")
+            }
         }
         let link = record.map { self.link(from: $0, myGEMSID: myGEMSID, friendGEMSID: friend) }
 
@@ -256,18 +319,88 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         record[approvalField(for: myGEMSID, pair: pair)] = true as CKRecordValue
         record[Field.updatedAt] = Date() as CKRecordValue
 
-        let accepted = boolValue(record[Field.approvedA]) && boolValue(record[Field.approvedB])
-        if accepted && record[Field.linkedAt] == nil {
-            record[Field.linkedAt] = Date() as CKRecordValue
+        if isAccepted(record) {
+            record[Field.status] = LinkStatus.accepted as CKRecordValue
+            if record[Field.linkedAt] == nil {
+                record[Field.linkedAt] = Date() as CKRecordValue
+            }
+        } else if record[Field.status] == nil {
+            record[Field.status] = LinkStatus.pending as CKRecordValue
         }
     }
 
     private func link(from record: CKRecord, myGEMSID: String, friendGEMSID: String) -> FriendScheduleCloudKitLink {
-        let accepted = boolValue(record[Field.approvedA]) && boolValue(record[Field.approvedB])
         return FriendScheduleCloudKitLink(
             friendGEMSID: friendGEMSID,
-            isAccepted: accepted,
-            linkedAt: record[Field.linkedAt] as? Date
+            isAccepted: isAccepted(record),
+            linkedAt: record[Field.linkedAt] as? Date,
+            requestedAt: record.creationDate
+        )
+    }
+
+    private func backfillAcceptedStatusIfNeeded(
+        _ record: CKRecord,
+        database: FriendScheduleCloudKitDatabase
+    ) async throws {
+        guard isAccepted(record) else { return }
+        var needsSave = false
+        if (record[Field.status] as? String) != LinkStatus.accepted {
+            record[Field.status] = LinkStatus.accepted as CKRecordValue
+            needsSave = true
+        }
+        if record[Field.linkedAt] == nil {
+            record[Field.linkedAt] = Date() as CKRecordValue
+            needsSave = true
+        }
+        if needsSave {
+            record[Field.updatedAt] = Date() as CKRecordValue
+            _ = try await database.save(record)
+        }
+    }
+
+    private func isAccepted(_ record: CKRecord) -> Bool {
+        if (record[Field.status] as? String) == LinkStatus.accepted {
+            return true
+        }
+        if record[Field.linkedAt] != nil {
+            return true
+        }
+        return boolValue(record[Field.approvedA]) && boolValue(record[Field.approvedB])
+    }
+
+    private func mergeConnections(_ connections: [FriendConnection]) -> [FriendConnection] {
+        var merged: [FriendConnection] = []
+        for connection in connections {
+            let employeeID = GEMSIDNormalizer.normalize(connection.employeeID)
+            guard !employeeID.isEmpty else { continue }
+            let normalized = FriendConnection(
+                id: connection.id,
+                employeeID: employeeID,
+                status: connection.status,
+                requestedAt: connection.requestedAt,
+                linkedAt: connection.linkedAt,
+                sharedSchedules: connection.sharedSchedules,
+                sharedTimelineCards: connection.sharedTimelineCards
+            )
+            if let index = merged.firstIndex(where: { $0.employeeID == employeeID }) {
+                merged[index] = mergedConnection(merged[index], normalized)
+            } else {
+                merged.append(normalized)
+            }
+        }
+        return merged
+    }
+
+    private func mergedConnection(_ lhs: FriendConnection, _ rhs: FriendConnection) -> FriendConnection {
+        let accepted = lhs.status == .accepted || rhs.status == .accepted
+        return FriendConnection(
+            id: lhs.id,
+            employeeID: lhs.employeeID,
+            status: accepted ? .accepted : .pending,
+            requestedAt: min(lhs.requestedAt, rhs.requestedAt),
+            linkedAt: lhs.linkedAt ?? rhs.linkedAt,
+            sharedSchedules: lhs.sharedSchedules.isEmpty ? rhs.sharedSchedules : lhs.sharedSchedules,
+            sharedTimelineCards: lhs.sharedTimelineCards.isEmpty ? rhs.sharedTimelineCards : lhs.sharedTimelineCards
         )
     }
 
