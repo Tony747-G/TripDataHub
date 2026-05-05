@@ -10,11 +10,10 @@ struct AdminTabView: View {
     var body: some View {
         NavigationStack {
             List {
-                AdminIdentitySection()
                 AdminSeniorityImportSection {
                     isShowingSeniorityImporter = true
                 }
-                AdminVerifiedUsersSection()
+                AdminVerifiedAppUsersSection()
             }
 #if os(iOS)
             .toolbar(.hidden, for: .navigationBar)

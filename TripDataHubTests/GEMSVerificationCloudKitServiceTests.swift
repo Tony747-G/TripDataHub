@@ -93,6 +93,32 @@ final class GEMSVerificationCloudKitServiceTests: XCTestCase {
         XCTAssertTrue(verifiesUnpaddedInput)
         XCTAssertTrue(verifiesPaddedInput)
     }
+
+    func test_recordVerifiedUserStoresOnlyGEMSAndTimestamp() async throws {
+        let database = GEMSVerificationFakeDatabase()
+        let service = GEMSVerificationCloudKitService(databaseProvider: { database })
+
+        try await service.recordVerifiedUser(gemsID: "557068")
+
+        let record = await database.recordSnapshot(named: "tdh_verified_user_0557068")
+        XCTAssertEqual(record?["gemsID"] as? String, "0557068")
+        XCTAssertNotNil(record?["verifiedAt"] as? Date)
+        XCTAssertNil(record?["DOB"])
+        XCTAssertNil(record?["dateOfBirth"])
+        XCTAssertNil(record?["name"])
+    }
+
+    func test_fetchVerifiedUsersReturnsBothUsers() async throws {
+        let database = GEMSVerificationFakeDatabase()
+        let service = GEMSVerificationCloudKitService(databaseProvider: { database })
+
+        try await service.recordVerifiedUser(gemsID: "557068")
+        try await service.recordVerifiedUser(gemsID: "7793942")
+
+        let users = try await service.fetchVerifiedUsers()
+
+        XCTAssertEqual(Set(users.map(\.gemsID)), Set(["0557068", "7793942"]))
+    }
 }
 
 private actor GEMSVerificationFakeDatabase: GEMSVerificationCloudKitDatabase {
@@ -115,6 +141,11 @@ private actor GEMSVerificationFakeDatabase: GEMSVerificationCloudKitDatabase {
             records[record.recordID.recordName] = record
         }
         return recordsToSave
+    }
+
+    func records(matching query: CKQuery) async throws -> [CKRecord] {
+        XCTAssertEqual(query.predicate, NSPredicate(value: true))
+        return records.values.filter { $0.recordType == query.recordType }
     }
 
     func recordSnapshot(named recordName: String) -> CKRecord? {

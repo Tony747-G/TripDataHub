@@ -1,23 +1,5 @@
 import SwiftUI
 
-struct AdminIdentitySection: View {
-    @EnvironmentObject private var viewModel: AppViewModel
-
-    var body: some View {
-        Section("Admin Identity") {
-            Text("CloudKit Record Name")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(viewModel.currentCloudKitRecordName ?? "Unavailable")
-                .font(.footnote)
-                .textSelection(.enabled)
-            Button("Refresh Apple Identity") {
-                viewModel.refreshCloudKitIdentity()
-            }
-        }
-    }
-}
-
 struct AdminSeniorityImportSection: View {
     @EnvironmentObject private var viewModel: AppViewModel
     let onTapImportCSV: () -> Void
@@ -66,29 +48,55 @@ struct AdminSeniorityImportSection: View {
     }
 }
 
-struct AdminVerifiedUsersSection: View {
+struct AdminVerifiedAppUsersSection: View {
     @EnvironmentObject private var viewModel: AppViewModel
 
     var body: some View {
-        Section("Verified Users") {
-            if viewModel.verifiedUsers.isEmpty {
-                Text("No verified users yet.")
+        Section("Verified App Users") {
+            Button {
+                Task {
+                    await viewModel.refreshVerifiedAppUsers()
+                }
+            } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
+            }
+            .disabled(viewModel.isLoadingVerifiedAppUsers)
+
+            if viewModel.isLoadingVerifiedAppUsers {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("Loading verified app users...")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let message = viewModel.verifiedAppUsersMessage {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            if viewModel.verifiedAppUsers.isEmpty {
+                Text("No verified app users loaded.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(viewModel.verifiedUsers) { user in
+                ForEach(viewModel.verifiedAppUsers) { user in
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("\(user.name)  (GEMS \(user.gemsID))")
+                        Text("GEMS \(user.gemsID)")
                             .font(.subheadline.weight(.semibold))
-                        Text("\(user.domicile)  \(user.equipment)  \(user.seat)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                         Text("Verified: \(user.verifiedAt.formatted(date: .abbreviated, time: .shortened))")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 2)
                 }
+            }
+        }
+        .task {
+            if viewModel.verifiedAppUsers.isEmpty {
+                await viewModel.refreshVerifiedAppUsers()
             }
         }
     }

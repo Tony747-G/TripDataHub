@@ -161,7 +161,9 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var isUploadingGEMSVerification = false
     @Published var verifiedIdentity: VerifiedIdentityProfile?
     @Published private(set) var cloudKitIdentityMessage: String?
-    @Published var verifiedUsers: [VerifiedUserRecord] = []
+    @Published private(set) var verifiedAppUsers: [VerifiedAppUser] = []
+    @Published private(set) var isLoadingVerifiedAppUsers = false
+    @Published var verifiedAppUsersMessage: String?
     @Published var crewAccessImportMessage: String?
     @Published var hasQueuedImport: Bool = false
     @Published var crewAccessDeleteMessage: String?
@@ -206,7 +208,6 @@ final class AppViewModel: ObservableObject {
     // Legacy keys/file names are kept so upgrades from pre-CloudKit verification builds can clean up local seniority data.
     private let legacySeniorityRecordsKey = "pilot_roster_records_v1"
     private let verifiedIdentityKey = "verified_identity_profile_v1"
-    private let verifiedUsersKey = "verified_users_v1"
     private let crewAccessLegImportReferenceTimesKey = "crewaccess_leg_import_reference_times_v1"
     private let seniorityFileName = "pilot_seniority_records_v1.json"
     private let legacySeniorityFileName = "pilot_roster_records_v1.json"
@@ -281,7 +282,6 @@ final class AppViewModel: ObservableObject {
         if let loadedVerifiedIdentity {
             saveVerifiedIdentity(loadedVerifiedIdentity)
         }
-        self.verifiedUsers = loadVerifiedUsers()
         backfillCrewAccessLegImportReferenceTimesIfNeeded()
         pruneCrewAccessLegImportReferenceTimes()
         if !useCloudKitIdentity {
@@ -516,7 +516,7 @@ final class AppViewModel: ObservableObject {
                 ? "Friend linked: \(employeeID)"
                 : "Request saved. Ask GEMS \(employeeID) to add your GEMS ID too."
         } catch {
-            friendActionMessage = "Failed to save friend request: \(error.localizedDescription)"
+            friendActionMessage = friendRequestErrorMessage(error)
             logNonFatal("Friend CloudKit request failed: \(error.localizedDescription)")
         }
     }
@@ -557,9 +557,27 @@ final class AppViewModel: ObservableObject {
             saveFriendConnections()
             friendActionMessage = "Request canceled: \(connection.employeeID)"
         } catch {
-            friendActionMessage = "Failed to cancel friend request: \(error.localizedDescription)"
+            friendActionMessage = friendRequestErrorMessage(error)
             logNonFatal("Friend CloudKit cancel failed: \(error.localizedDescription)")
         }
+    }
+
+    private func friendRequestErrorMessage(_ error: Error) -> String {
+        if let ckError = error as? CKError {
+            switch ckError.code {
+            case .permissionFailure:
+                return "Friend request could not be saved due to a CloudKit permissions issue. Please contact support if this persists."
+            case .networkUnavailable, .networkFailure:
+                return "Friend request could not be saved because the network is unavailable. Please try again."
+            case .notAuthenticated:
+                return "Friend request could not be saved. Please sign into iCloud and try again."
+            case .serviceUnavailable, .zoneBusy, .requestRateLimited:
+                return "CloudKit is temporarily busy. Please try again in a moment."
+            default:
+                break
+            }
+        }
+        return "Friend request could not be saved. Please try again."
     }
 
     func setScheduleSharingEnabled(_ enabled: Bool) {
@@ -2884,17 +2902,11 @@ final class AppViewModel: ObservableObject {
         )
         verifiedIdentity = verified
         saveVerifiedIdentity(verified)
-        upsertVerifiedUser(
-            VerifiedUserRecord(
-                identityRecordName: currentCloudKitRecordName,
-                name: verified.name,
-                gemsID: verified.gemsID,
-                domicile: verified.domicile,
-                equipment: verified.equipment,
-                seat: verified.seat,
-                verifiedAt: Date()
-            )
-        )
+        do {
+            try await gemsVerificationCloudKitService.recordVerifiedUser(gemsID: gemsID)
+        } catch {
+            logNonFatal("Failed to record verified app user: \(error.localizedDescription)")
+        }
         updateAdminStatus()
         friendActionMessage = isAdminBootstrap
             ? "Verified as bootstrap admin. Upload GEMS verification records to CloudKit."
@@ -2903,6 +2915,26 @@ final class AppViewModel: ObservableObject {
             Task { [weak self] in
                 await self?.syncFriendCloudKit(reason: "identity verified")
             }
+        }
+    }
+
+    func refreshVerifiedAppUsers() async {
+        guard isAdmin else {
+            verifiedAppUsersMessage = "Admin verification is required."
+            return
+        }
+        guard !isLoadingVerifiedAppUsers else { return }
+        isLoadingVerifiedAppUsers = true
+        defer { isLoadingVerifiedAppUsers = false }
+
+        do {
+            verifiedAppUsers = try await gemsVerificationCloudKitService.fetchVerifiedUsers()
+            verifiedAppUsersMessage = verifiedAppUsers.isEmpty
+                ? "No verified app users found."
+                : "Loaded \(verifiedAppUsers.count) verified app users."
+        } catch {
+            verifiedAppUsersMessage = "Failed to load verified app users: \(error.localizedDescription)"
+            logNonFatal("Failed to load verified app users: \(error.localizedDescription)")
         }
     }
 
@@ -3329,35 +3361,6 @@ final class AppViewModel: ObservableObject {
     private func clearVerifiedIdentity() {
         UserDefaults.standard.removeObject(forKey: verifiedIdentityKey)
         updateAdminStatus()
-    }
-
-    private func loadVerifiedUsers() -> [VerifiedUserRecord] {
-        guard let data = UserDefaults.standard.data(forKey: verifiedUsersKey) else { return [] }
-        do {
-            return try JSONDecoder().decode([VerifiedUserRecord].self, from: data)
-        } catch {
-            logNonFatal("Failed to decode verified users: \(error.localizedDescription)")
-            return []
-        }
-    }
-
-    private func saveVerifiedUsers() {
-        do {
-            let data = try JSONEncoder().encode(verifiedUsers)
-            UserDefaults.standard.set(data, forKey: verifiedUsersKey)
-        } catch {
-            logNonFatal("Failed to save verified users: \(error.localizedDescription)")
-        }
-    }
-
-    private func upsertVerifiedUser(_ record: VerifiedUserRecord) {
-        if let index = verifiedUsers.firstIndex(where: { $0.id == record.id }) {
-            verifiedUsers[index] = record
-        } else {
-            verifiedUsers.append(record)
-        }
-        verifiedUsers.sort { $0.verifiedAt > $1.verifiedAt }
-        saveVerifiedUsers()
     }
 
     private func localIdentityRecordName() -> String {

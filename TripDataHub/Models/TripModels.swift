@@ -226,14 +226,3 @@ struct VerifiedIdentityProfile: Codable, Hashable {
         verifiedAt = try container.decode(Date.self, forKey: .verifiedAt)
     }
 }
-
-struct VerifiedUserRecord: Identifiable, Codable, Hashable {
-    var id: String { "\(gemsID)-\(identityRecordName)" }
-    let identityRecordName: String
-    let name: String
-    let gemsID: String
-    let domicile: String
-    let equipment: String
-    let seat: String
-    let verifiedAt: Date
-}

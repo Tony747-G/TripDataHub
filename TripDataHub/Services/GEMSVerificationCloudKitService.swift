@@ -7,6 +7,12 @@ struct GEMSVerificationImportRecord: Equatable, Sendable {
     let dateOfBirth: String
 }
 
+struct VerifiedAppUser: Identifiable, Hashable, Sendable {
+    var id: String { gemsID }
+    let gemsID: String
+    let verifiedAt: Date
+}
+
 enum GEMSVerificationCloudKitError: LocalizedError {
     case invalidRecord
     case uploadTimedOut
@@ -27,12 +33,15 @@ protocol GEMSVerificationCloudKitServicing: Sendable {
         progress: (@MainActor @Sendable (_ uploaded: Int, _ total: Int) -> Void)?
     ) async throws -> Int
     func verify(gemsID: String, dateOfBirth: String) async throws -> Bool
+    func recordVerifiedUser(gemsID: String) async throws
+    func fetchVerifiedUsers() async throws -> [VerifiedAppUser]
 }
 
 protocol GEMSVerificationCloudKitDatabase {
     func record(for recordID: CKRecord.ID) async throws -> CKRecord
     func save(_ record: CKRecord) async throws -> CKRecord
     func save(_ records: [CKRecord]) async throws -> [CKRecord]
+    func records(matching query: CKQuery) async throws -> [CKRecord]
 }
 
 extension CKDatabase: GEMSVerificationCloudKitDatabase {}
@@ -49,6 +58,48 @@ extension GEMSVerificationCloudKitDatabase {
 }
 
 extension CKDatabase {
+    func records(matching query: CKQuery) async throws -> [CKRecord] {
+        try await withCheckedThrowingContinuation { continuation in
+            let lock = NSLock()
+            var records: [CKRecord] = []
+            var queryError: Error?
+
+            let operation = CKQueryOperation(query: query)
+            // CloudKit Dashboard use only: keep this bounded and sorted for the admin list.
+            operation.resultsLimit = 500
+            operation.qualityOfService = .userInitiated
+            operation.recordMatchedBlock = { _, result in
+                switch result {
+                case let .success(record):
+                    lock.lock()
+                    records.append(record)
+                    lock.unlock()
+                case let .failure(error):
+                    lock.lock()
+                    queryError = queryError ?? error
+                    lock.unlock()
+                }
+            }
+            operation.queryResultBlock = { result in
+                switch result {
+                case .success:
+                    lock.lock()
+                    let output = records
+                    let error = queryError
+                    lock.unlock()
+                    if output.isEmpty, let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume(returning: output)
+                    }
+                case let .failure(error):
+                    continuation.resume(throwing: error)
+                }
+            }
+            add(operation)
+        }
+    }
+
     func save(_ records: [CKRecord]) async throws -> [CKRecord] {
         guard !records.isEmpty else { return [] }
         return try await withCheckedThrowingContinuation { continuation in
@@ -71,6 +122,7 @@ extension CKDatabase {
 final class GEMSVerificationCloudKitService: GEMSVerificationCloudKitServicing, @unchecked Sendable {
     private enum RecordType {
         static let verification = "TDHGEMSVerification"
+        static let verifiedUser = "TDHVerifiedUser"
     }
 
     private enum Field {
@@ -78,6 +130,7 @@ final class GEMSVerificationCloudKitService: GEMSVerificationCloudKitServicing, 
         static let dobHash = "dobHash"
         static let schemaVersion = "schemaVersion"
         static let updatedAt = "updatedAt"
+        static let verifiedAt = "verifiedAt"
     }
 
     private static let hashPrefix = "TDH_GEMS_VERIFY_V1"
@@ -148,8 +201,47 @@ final class GEMSVerificationCloudKitService: GEMSVerificationCloudKitServicing, 
         }
     }
 
+    func recordVerifiedUser(gemsID: String) async throws {
+        let normalizedGEMS = GEMSIDNormalizer.normalize(gemsID)
+        guard !normalizedGEMS.isEmpty else { return }
+        let database = databaseProvider()
+        let now = Date()
+        let recordID = CKRecord.ID(recordName: Self.verifiedUserRecordName(for: normalizedGEMS))
+        let record = (try? await database.record(for: recordID))
+            ?? CKRecord(recordType: RecordType.verifiedUser, recordID: recordID)
+        record[Field.gemsID] = normalizedGEMS as CKRecordValue
+        // Keep the first successful verification date; updatedAt tracks later refreshes.
+        if record[Field.verifiedAt] == nil {
+            record[Field.verifiedAt] = now as CKRecordValue
+        }
+        record[Field.schemaVersion] = Int64(1) as CKRecordValue
+        record[Field.updatedAt] = now as CKRecordValue
+        _ = try await database.save(record)
+    }
+
+    func fetchVerifiedUsers() async throws -> [VerifiedAppUser] {
+        let query = CKQuery(recordType: RecordType.verifiedUser, predicate: NSPredicate(value: true))
+        query.sortDescriptors = [NSSortDescriptor(key: Field.updatedAt, ascending: false)]
+        let records = try await databaseProvider().records(matching: query)
+        return records.compactMap { record in
+            guard let gemsID = record[Field.gemsID] as? String else { return nil }
+            return VerifiedAppUser(
+                gemsID: GEMSIDNormalizer.normalize(gemsID),
+                verifiedAt: record[Field.verifiedAt] as? Date ?? record.modificationDate ?? Date.distantPast
+            )
+        }
+        .sorted {
+            if $0.verifiedAt == $1.verifiedAt { return $0.gemsID < $1.gemsID }
+            return $0.verifiedAt > $1.verifiedAt
+        }
+    }
+
     static func recordName(for gemsID: String) -> String {
         "tdh_verify_\(GEMSIDNormalizer.normalize(gemsID))"
+    }
+
+    static func verifiedUserRecordName(for gemsID: String) -> String {
+        "tdh_verified_user_\(GEMSIDNormalizer.normalize(gemsID))"
     }
 
     static func normalizedDOB(_ value: String) -> String? {
