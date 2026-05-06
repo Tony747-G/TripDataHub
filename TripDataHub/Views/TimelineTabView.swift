@@ -74,21 +74,31 @@ struct TimelineTabView: View {
         return formatter
     }()
 
-    private static let localTimeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "HH:mm"
-        return formatter
-    }()
+    // Formatters cached per timezone identifier — avoids mutating shared static state.
+    private static var localTimeFormatters: [String: DateFormatter] = [:]
+    private static var localDayKeyFormatters: [String: DateFormatter] = [:]
 
-    private static let localDayKeyFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
+    private static func localTimeFormatter(for tzID: String) -> DateFormatter {
+        if let cached = localTimeFormatters[tzID] { return cached }
+        let fmt = DateFormatter()
+        fmt.calendar = Calendar(identifier: .gregorian)
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "HH:mm"
+        fmt.timeZone = TimeZone(identifier: tzID)
+        localTimeFormatters[tzID] = fmt
+        return fmt
+    }
+
+    private static func localDayKeyFormatter(for tzID: String) -> DateFormatter {
+        if let cached = localDayKeyFormatters[tzID] { return cached }
+        let fmt = DateFormatter()
+        fmt.calendar = Calendar(identifier: .gregorian)
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd"
+        fmt.timeZone = TimeZone(identifier: tzID)
+        localDayKeyFormatters[tzID] = fmt
+        return fmt
+    }
 
     private var selectedClockDisplay: TimelineClockDisplay {
         TimelineClockDisplay(rawValue: timelineClockDisplayRawValue) ?? .lcl
@@ -305,12 +315,12 @@ struct TimelineTabView: View {
 
     /// レイオーバーカードを表示するか: 同トリップの次レグが 3h 超先の場合
     private func shouldShowLayover(leg: TripLeg, connectionMap: [UUID: TripLeg]) -> Bool {
-        guard let next = connectionMap[leg.id],
-              next.pairing == leg.pairing else { return false }
-        guard let arrDate  = utcArrivalDate(for: leg),
-              let depDate  = utcDepartureDate(for: next) else { return false }
-        let gapMinutes = Int(depDate.timeIntervalSince(arrDate) / 60)
-        return gapMinutes >= 180   // 3 時間以上 = レイオーバー
+        let next = connectionMap[leg.id]
+        return TimelineLayoverSupport.shouldShow(
+            arrDate: utcArrivalDate(for: leg),
+            nextDepDate: next.flatMap { utcDepartureDate(for: $0) },
+            samePairing: next?.pairing == leg.pairing
+        )
     }
 
     @ViewBuilder
@@ -329,15 +339,12 @@ struct TimelineTabView: View {
         let arrLocalDate: String = arrivalLocalDateLabel(for: leg)
 
         // 滞在時間を UTC 差分から計算
-        let durationText: String = {
-            if let next    = connectionMap[leg.id],
-               let arrDate = utcArrivalDate(for: leg),
-               let depDate = utcDepartureDate(for: next) {
-                let mins = max(0, Int(depDate.timeIntervalSince(arrDate) / 60))
-                return "\(mins / 60):\(String(format: "%02d", mins % 60))"
-            }
-            return leg.layoverDuration ?? ""
-        }()
+        let next = connectionMap[leg.id]
+        let durationText = TimelineLayoverSupport.durationText(
+            arrDate: utcArrivalDate(for: leg),
+            nextDepDate: next.flatMap { utcDepartureDate(for: $0) },
+            fallbackDuration: leg.layoverDuration
+        )
 
         VStack(spacing: 0) {
             // ── 到着日ヘッダー ────────────────────────────────────
@@ -390,10 +397,10 @@ struct TimelineTabView: View {
         color: Color
     ) -> some View {
         let icon = MaterialIconView(
-            codePoint: iconCodePointForLegStatus(leg.status),
+            codePoint: TimelineLegIconSupport.codePoint(for: leg.status),
             size: 20 * fontScale,
             color: color,
-            fallbackSystemName: iconFallbackSystemNameForLegStatus(leg.status)
+            fallbackSystemName: TimelineLegIconSupport.fallbackSystemName(for: leg.status)
         )
         .frame(width: 28 * fontScale, alignment: .center)
 
@@ -695,7 +702,7 @@ struct TimelineTabView: View {
         HStack(spacing: 0) {
             Text(timeRangeText(for: leg))
                 .foregroundStyle(baseColor)
-            Text(diffLabel(diff))
+            Text(timelineDiffLabel(diff))
                 .foregroundStyle(diffColor)
         }
         .appScaledFont(.subheadline, scale: fontScale)
@@ -728,12 +735,6 @@ struct TimelineTabView: View {
             return 0
         }
         return Calendar(identifier: .gregorian).dateComponents([.day], from: depDay, to: arrDay).day ?? 0
-    }
-
-    private func diffLabel(_ diff: Int) -> String {
-        guard diff != 0 else { return "" }
-        let sign = diff > 0 ? "+" : ""
-        return " (\(sign)\(diff)d)"
     }
 
     private func countdownText(to target: Date) -> String {
@@ -772,22 +773,6 @@ struct TimelineTabView: View {
             return .yellow
         }
         return dateHeaderTextColor
-    }
-
-    private func iconCodePointForLegStatus(_ status: String) -> Int {
-        let normalized = status.uppercased()
-        if normalized == "DH" || normalized == "CML" {
-            return 58729
-        }
-        return 58681
-    }
-
-    private func iconFallbackSystemNameForLegStatus(_ status: String) -> String {
-        let normalized = status.uppercased()
-        if normalized == "DH" || normalized == "CML" {
-            return "paperplane.fill"
-        }
-        return "airplane"
     }
 
     private func isPastLeg(_ leg: TripLeg) -> Bool {
@@ -889,24 +874,16 @@ struct TimelineTabView: View {
 
     private func localTimeText(fromUTC utcDate: Date?, airport: String) -> String? {
         guard let utcDate,
-              let tzID = tzResolver.resolve(airport),
-              let tz = TimeZone(identifier: tzID)
-        else {
-            return nil
-        }
-        Self.localTimeFormatter.timeZone = tz
-        return Self.localTimeFormatter.string(from: utcDate)
+              let tzID = tzResolver.resolve(airport)
+        else { return nil }
+        return Self.localTimeFormatter(for: tzID).string(from: utcDate)
     }
 
     private func localDayKey(fromUTC utcDate: Date?, airport: String) -> String? {
         guard let utcDate,
-              let tzID = tzResolver.resolve(airport),
-              let tz = TimeZone(identifier: tzID)
-        else {
-            return nil
-        }
-        Self.localDayKeyFormatter.timeZone = tz
-        return Self.localDayKeyFormatter.string(from: utcDate)
+              let tzID = tzResolver.resolve(airport)
+        else { return nil }
+        return Self.localDayKeyFormatter(for: tzID).string(from: utcDate)
     }
 
     private func dayDate(from key: String) -> Date? {

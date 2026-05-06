@@ -130,3 +130,45 @@ struct TimelineLegData {
         return year * 100 + period
     }
 }
+
+// MARK: - Shared rendering helpers
+
+/// Icon rendering helpers shared by TimelineTabView and ScheduleTimelineRendererView.
+enum TimelineLegIconSupport {
+    static func codePoint(for status: String) -> Int {
+        let normalized = status.uppercased()
+        if normalized == "DH" || normalized == "CML" { return 58729 }
+        return 58681
+    }
+
+    static func fallbackSystemName(for status: String) -> String {
+        let normalized = status.uppercased()
+        if normalized == "DH" || normalized == "CML" { return "paperplane.fill" }
+        return "airplane"
+    }
+}
+
+/// Layover card logic shared by TimelineTabView and ScheduleTimelineRendererView.
+enum TimelineLayoverSupport {
+    /// Returns true when the gap between arrival and next departure is ≥ 3 h (same pairing).
+    static func shouldShow(arrDate: Date?, nextDepDate: Date?, samePairing: Bool) -> Bool {
+        guard samePairing, let arr = arrDate, let dep = nextDepDate else { return false }
+        return Int(dep.timeIntervalSince(arr) / 60) >= 180
+    }
+
+    /// "H:MM" duration string from UTC dates, falling back to the stored field.
+    static func durationText(arrDate: Date?, nextDepDate: Date?, fallbackDuration: String?) -> String {
+        if let arr = arrDate, let dep = nextDepDate {
+            let mins = max(0, Int(dep.timeIntervalSince(arr) / 60))
+            return "\(mins / 60):\(String(format: "%02d", mins % 60))"
+        }
+        return fallbackDuration ?? ""
+    }
+}
+
+/// "+Nd" / "−Nd" day-shift label suffix, or empty string for zero shift.
+func timelineDiffLabel(_ diff: Int) -> String {
+    guard diff != 0 else { return "" }
+    let sign = diff > 0 ? "+" : ""
+    return " (\(sign)\(diff)d)"
+}

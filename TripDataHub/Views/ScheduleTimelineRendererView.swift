@@ -71,10 +71,10 @@ struct ScheduleTimelineRendererView: View {
         let isPast = isPastLeg(leg)
         HStack(alignment: .center, spacing: 12) {
             MaterialIconView(
-                codePoint: iconCodePointForLegStatus(leg.status),
+                codePoint: TimelineLegIconSupport.codePoint(for: leg.status),
                 size: 20 * fontScale,
                 color: isPast ? .gray : .primary,
-                fallbackSystemName: iconFallbackSystemNameForLegStatus(leg.status)
+                fallbackSystemName: TimelineLegIconSupport.fallbackSystemName(for: leg.status)
             )
             .frame(width: 28 * fontScale, alignment: .center)
 
@@ -110,7 +110,7 @@ struct ScheduleTimelineRendererView: View {
         HStack(spacing: 0) {
             Text(timeRangeText(for: leg))
                 .foregroundStyle(baseColor)
-            Text(diffLabel(diff))
+            Text(timelineDiffLabel(diff))
                 .foregroundStyle(diffColor)
         }
         .appScaledFont(.subheadline, scale: fontScale)
@@ -170,21 +170,21 @@ struct ScheduleTimelineRendererView: View {
     // MARK: - Computations
 
     private func shouldShowLayover(leg: TripLeg, connectionMap: [UUID: TripLeg]) -> Bool {
-        guard let next = connectionMap[leg.id], next.pairing == leg.pairing else { return false }
-        guard let arrDate = utcArrivalDate(for: leg),
-              let depDate = utcDepartureDate(for: next) else { return false }
-        let gapMinutes = Int(depDate.timeIntervalSince(arrDate) / 60)
-        return gapMinutes >= 180
+        let next = connectionMap[leg.id]
+        return TimelineLayoverSupport.shouldShow(
+            arrDate: utcArrivalDate(for: leg),
+            nextDepDate: next.flatMap { utcDepartureDate(for: $0) },
+            samePairing: next?.pairing == leg.pairing
+        )
     }
 
     private func layoverDurationText(for leg: TripLeg, connectionMap: [UUID: TripLeg]) -> String {
-        if let next = connectionMap[leg.id],
-           let arrDate = utcArrivalDate(for: leg),
-           let depDate = utcDepartureDate(for: next) {
-            let mins = max(0, Int(depDate.timeIntervalSince(arrDate) / 60))
-            return "\(mins / 60):\(String(format: "%02d", mins % 60))"
-        }
-        return leg.layoverDuration ?? ""
+        let next = connectionMap[leg.id]
+        return TimelineLayoverSupport.durationText(
+            arrDate: utcArrivalDate(for: leg),
+            nextDepDate: next.flatMap { utcDepartureDate(for: $0) },
+            fallbackDuration: leg.layoverDuration
+        )
     }
 
     private func arrivalLocalDateLabel(for leg: TripLeg) -> String {
@@ -211,12 +211,6 @@ struct ScheduleTimelineRendererView: View {
             return 0
         }
         return Calendar(identifier: .gregorian).dateComponents([.day], from: depDay, to: arrDay).day ?? 0
-    }
-
-    private func diffLabel(_ diff: Int) -> String {
-        guard diff != 0 else { return "" }
-        let sign = diff > 0 ? "+" : ""
-        return " (\(sign)\(diff)d)"
     }
 
     private func blockText(for leg: TripLeg, nextLegByID: [UUID: TripLeg]) -> String {
@@ -262,18 +256,6 @@ struct ScheduleTimelineRendererView: View {
 
     private func parseLocalDateTime(_ text: String) -> Date? {
         Self.localDateTimeFormatter.date(from: text)
-    }
-
-    private func iconCodePointForLegStatus(_ status: String) -> Int {
-        let normalized = status.uppercased()
-        if normalized == "DH" || normalized == "CML" { return 58729 }
-        return 58681
-    }
-
-    private func iconFallbackSystemNameForLegStatus(_ status: String) -> String {
-        let normalized = status.uppercased()
-        if normalized == "DH" || normalized == "CML" { return "paperplane.fill" }
-        return "airplane"
     }
 
     // MARK: - Formatters
