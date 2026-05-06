@@ -405,7 +405,7 @@ final class AppViewModel: ObservableObject {
     }
 
     var canSubmitFriendRequest: Bool {
-        isIdentityVerified && isScheduleSharingEnabled
+        isIdentityVerified
     }
 
     var isIdentityVerified: Bool {
@@ -485,10 +485,6 @@ final class AppViewModel: ObservableObject {
             friendActionMessage = "Verify your identity first (GEMS ID + DOB)."
             return
         }
-        guard isScheduleSharingEnabled else {
-            friendActionMessage = "Turn on Share My Schedule in Settings first."
-            return
-        }
         guard let myGEMSID = verifiedIdentity?.gemsID else {
             friendActionMessage = "GEMS verification is required."
             return
@@ -505,13 +501,14 @@ final class AppViewModel: ObservableObject {
             }
         }
 
-        await uploadSharedScheduleIfNeeded(reason: "friend request")
         do {
             let link = try await friendScheduleCloudKitService.requestFriend(
                 myGEMSID: myGEMSID,
                 friendGEMSID: employeeID
             )
+            enableScheduleSharingForFriends()
             upsertFriendConnection(from: link)
+            await uploadSharedScheduleIfNeeded(reason: "friend request")
             await refreshFriendSchedulesFromCloud()
             friendActionMessage = link.isAccepted
                 ? "Friend linked: \(employeeID)"
@@ -525,6 +522,7 @@ final class AppViewModel: ObservableObject {
     private func upsertFriendConnection(from link: FriendScheduleCloudKitLink) {
         if let index = friendConnections.firstIndex(where: { $0.employeeID == link.friendGEMSID }) {
             friendConnections[index].status = link.isAccepted ? .accepted : .pending
+            friendConnections[index].requestedAt = link.requestedAt ?? Date()
             if link.isAccepted {
                 friendConnections[index].linkedAt = link.linkedAt ?? friendConnections[index].linkedAt ?? Date()
             }
@@ -556,6 +554,7 @@ final class AppViewModel: ObservableObject {
             )
             friendConnections.removeAll { $0.id == id }
             saveFriendConnections()
+            updateScheduleSharingAfterFriendListChange()
             friendActionMessage = "Request canceled: \(connection.employeeID)"
         } catch {
             friendActionMessage = friendRequestErrorMessage(error)
@@ -590,6 +589,24 @@ final class AppViewModel: ObservableObject {
             }
         } else {
             friendCloudKitSyncMessage = "Schedule sharing is off."
+        }
+    }
+
+    private func enableScheduleSharingForFriends() {
+        guard !isScheduleSharingEnabled else { return }
+        isScheduleSharingEnabled = true
+        UserDefaults.standard.set(true, forKey: scheduleSharingEnabledKey)
+    }
+
+    private func updateScheduleSharingAfterFriendListChange() {
+        let hasAcceptedConnection = friendConnections.contains { $0.status == .accepted }
+        let hasPendingConnection = friendConnections.contains { $0.status == .pending }
+        let shouldShare = hasAcceptedConnection || (isScheduleSharingEnabled && hasPendingConnection)
+        guard isScheduleSharingEnabled != shouldShare else { return }
+        isScheduleSharingEnabled = shouldShare
+        UserDefaults.standard.set(shouldShare, forKey: scheduleSharingEnabledKey)
+        if !shouldShare {
+            friendCloudKitSyncMessage = nil
         }
     }
 
@@ -644,12 +661,18 @@ final class AppViewModel: ObservableObject {
             friendCloudKitSyncMessage = "Verify GEMS and iCloud before sharing schedules."
             return
         }
+        let shareableSchedules = crewAccessSchedules
+        guard !shareableSchedules.isEmpty else {
+            friendCloudKitSyncMessage = "No CrewAccess schedule to share yet."
+            logNonFatal("Friend CloudKit schedule upload skipped: no CrewAccess schedules (\(reason))")
+            return
+        }
         let crewAccessTrips = await Self.loadCrewAccessTripJSONPayloadsFromImportFiles()
 
         async let sharedScheduleUpload: Void = friendScheduleCloudKitService.uploadSchedule(
             gemsID: verifiedIdentity.gemsID,
             cloudKitRecordName: currentCloudKitRecordName,
-            schedules: schedules
+            schedules: shareableSchedules
         )
         async let webSnapshotUpload: Void = friendScheduleCloudKitService.uploadScheduleSnapshot(
             gemsID: verifiedIdentity.gemsID,
@@ -686,6 +709,7 @@ final class AppViewModel: ObservableObject {
                 connections: friendConnections
             )
             saveFriendConnections()
+            updateScheduleSharingAfterFriendListChange()
             friendCloudKitSyncMessage = "Friend schedules updated."
         } catch {
             friendCloudKitSyncMessage = "Failed to update friend schedules: \(error.localizedDescription)"

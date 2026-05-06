@@ -260,19 +260,26 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         } catch {
             throw error
         }
-        if let record {
-            do {
-                try await backfillAcceptedStatusIfNeeded(record, database: database)
-            } catch {
-                NSLog("[TDHFriendLink] accepted-status backfill failed: \(error.localizedDescription)")
-            }
+        // If the record was not found in CloudKit (.unknownItem → record = nil),
+        // preserve the existing connection status rather than forcibly downgrading to
+        // .pending. This prevents a previously accepted connection from flipping to
+        // pending when the direct record-ID lookup misses due to GEMS ID normalisation
+        // differences between app versions (e.g. "554744" vs "0554744").
+        guard let record else {
+            return connection
         }
-        let link = record.map { self.link(from: $0, myGEMSID: myGEMSID, friendGEMSID: friend) }
 
+        do {
+            try await backfillAcceptedStatusIfNeeded(record, database: database)
+        } catch {
+            NSLog("[TDHFriendLink] accepted-status backfill failed: \(error.localizedDescription)")
+        }
+
+        let link = self.link(from: record, myGEMSID: myGEMSID, friendGEMSID: friend)
         var updated = connection
-        if link?.isAccepted == true {
+        if link.isAccepted {
             updated.status = .accepted
-            updated.linkedAt = link?.linkedAt ?? updated.linkedAt ?? Date()
+            updated.linkedAt = link.linkedAt ?? updated.linkedAt ?? Date()
             // Friends Timeline は本人と同じ TripLeg ベース表示エンジンを使用するため、
             // TDHSharedSchedule のみを取得する。TripScheduleSnapshot (WebTimelineCard) は
             // ブラウザ用ビューア専用となり、アプリ内では fetch しない。
@@ -327,7 +334,7 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
             friendGEMSID: friendGEMSID,
             isAccepted: isAccepted(record),
             linkedAt: record[Field.linkedAt] as? Date,
-            requestedAt: record.creationDate
+            requestedAt: (record[Field.updatedAt] as? Date) ?? record.creationDate
         )
     }
 
@@ -390,7 +397,7 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
             id: lhs.id,
             employeeID: lhs.employeeID,
             status: accepted ? .accepted : .pending,
-            requestedAt: min(lhs.requestedAt, rhs.requestedAt),
+            requestedAt: max(lhs.requestedAt, rhs.requestedAt),
             linkedAt: lhs.linkedAt ?? rhs.linkedAt,
             sharedSchedules: lhs.sharedSchedules.isEmpty ? rhs.sharedSchedules : lhs.sharedSchedules,
             sharedTimelineCards: lhs.sharedTimelineCards.isEmpty ? rhs.sharedTimelineCards : lhs.sharedTimelineCards

@@ -10,6 +10,23 @@ struct FriendsTabView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(sharingStatus.color)
+                            .frame(width: 9, height: 9)
+                        Text(sharingStatus.text)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        if viewModel.isSyncingFriendCloudKit {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+
                 Section("Friends") {
                     if viewModel.acceptedFriendConnections.isEmpty {
                         Text("No friends yet.")
@@ -52,19 +69,6 @@ struct FriendsTabView: View {
                         Text("Verify your GEMS ID in Settings before adding friends.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    }
-                }
-
-                if viewModel.isSyncingFriendCloudKit || viewModel.friendCloudKitSyncMessage != nil {
-                    Section("CloudKit") {
-                        if viewModel.isSyncingFriendCloudKit {
-                            ProgressView()
-                        }
-                        if let message = viewModel.friendCloudKitSyncMessage {
-                            Text(message)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
                     }
                 }
 
@@ -142,6 +146,29 @@ struct FriendsTabView: View {
                 }
             }
         )
+    }
+
+    private var sharingStatus: (color: Color, text: String) {
+        if !viewModel.isIdentityVerified {
+            return (.gray, "Schedule sharing off")
+        }
+        if let message = viewModel.friendCloudKitSyncMessage,
+           message.hasPrefix("Failed") {
+            return (.red, "Schedule sharing needs attention")
+        }
+        if viewModel.isSyncingFriendCloudKit {
+            return (.orange, "Updating schedule sharing")
+        }
+        if !viewModel.acceptedFriendConnections.isEmpty {
+            return (.green, "Schedule sharing active")
+        }
+        if viewModel.isScheduleSharingEnabled {
+            return (.orange, "Waiting for mutual approval")
+        }
+        if !viewModel.pendingFriendConnections.isEmpty {
+            return (.gray, "Mutual approval needed")
+        }
+        return (.gray, "Schedule sharing off")
     }
 
     private func sendFriendRequest() {

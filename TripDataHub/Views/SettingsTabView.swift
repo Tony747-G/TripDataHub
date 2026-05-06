@@ -176,8 +176,6 @@ struct SettingsTabView: View {
                 formatDOB: { Self.dobFormatter.string(from: $0) }
             )
 
-            SettingsScheduleSharingSection()
-
             SettingsTripBoardFetchSection(autoFetchOnOpen: $autoFetchOnOpen)
             crewAccessRetentionSection
             crewAccessFilesSection

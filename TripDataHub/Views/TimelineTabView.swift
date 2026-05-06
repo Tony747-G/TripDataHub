@@ -235,18 +235,28 @@ struct TimelineTabView: View {
                             Text("NEXT REPORT")
                                 .appScaledFont(.caption, weight: .bold, scale: fontScale)
                                 .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                             Text("Trip \(info.pairing)")
                                 .appScaledFont(.caption, scale: fontScale)
                                 .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                         }
                         HStack {
                             Text(nextReportTimestampText(for: info.reportTime))
                                 .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
                                 .foregroundStyle(dateHeaderTextColor)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
+                                .layoutPriority(1)
                             Spacer()
                             Text(countdownText(to: info.reportTime))
                                 .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
                                 .foregroundStyle(countdownColor(to: info.reportTime))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
+                                .layoutPriority(1)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

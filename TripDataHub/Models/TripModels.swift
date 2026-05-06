@@ -127,7 +127,7 @@ struct FriendConnection: Identifiable, Codable, Hashable {
     let id: UUID
     let employeeID: String
     var status: FriendConnectionStatus
-    let requestedAt: Date
+    var requestedAt: Date
     var linkedAt: Date?
     var sharedSchedules: [PayPeriodSchedule]
     // TODO: Phase B 以降で削除予定。iOS アプリ内では未使用（Web ビューア専用）。

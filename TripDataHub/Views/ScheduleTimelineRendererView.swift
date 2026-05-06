@@ -142,10 +142,10 @@ struct ScheduleTimelineRendererView: View {
 
     private func blockText(for leg: TripLeg, nextLegByID: [UUID: TripLeg]) -> String {
         let text = LegConnectionTextBuilder.blockAndConnectionText(for: leg, nextLegByID: nextLegByID)
-        // Layover cards are shown separately; trim " / LO at ..." suffix to avoid duplication.
+        // Layover cards are shown separately; trim the connection suffix to avoid duplication.
         if shouldShowLayover(leg: leg, connectionMap: nextLegByID),
-           let range = text.range(of: " / LO at") {
-            return String(text[..<range.lowerBound])
+           let slashRange = text.range(of: " / ") {
+            return String(text[..<slashRange.lowerBound])
         }
         return text
     }

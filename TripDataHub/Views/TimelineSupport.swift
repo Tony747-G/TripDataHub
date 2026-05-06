@@ -13,8 +13,12 @@ struct TimelineLegData {
     let daySections: [TimelineDaySection]
 
     init(schedules: [PayPeriodSchedule], now: Date = Date()) {
+        // Deduplicate by UUID before sorting — the same TripLeg can appear in multiple
+        // PayPeriodSchedule objects when a trip carries over a pay-period boundary.
+        var seenIDs = Set<UUID>()
         let legs = schedules
             .flatMap(\.legs)
+            .filter { seenIDs.insert($0.id).inserted }
             .sorted { lhs, rhs in
                 if lhs.depLocal == rhs.depLocal {
                     return lhs.flight < rhs.flight
