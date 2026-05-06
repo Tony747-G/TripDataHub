@@ -285,6 +285,18 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
             // ブラウザ用ビューア専用となり、アプリ内では fetch しない。
             updated.sharedSchedules = (try? await fetchSchedule(gemsID: friend, database: database))
                 ?? updated.sharedSchedules
+        } else if connection.status == .accepted {
+            // Record exists but isAccepted = false while the local connection is accepted.
+            // Only downgrade to pending if the record is explicitly marked as canceled.
+            // A CloudKit record inconsistency (e.g. missing approvals from an older build)
+            // must not silently flip a mutually-accepted connection back to pending.
+            let isExplicitlyCanceled = (record[Field.status] as? String) == LinkStatus.canceled
+            if isExplicitlyCanceled {
+                updated.status = .pending
+            }
+            // In either case, try to refresh the shared schedule.
+            updated.sharedSchedules = (try? await fetchSchedule(gemsID: friend, database: database))
+                ?? updated.sharedSchedules
         } else {
             updated.status = .pending
         }
