@@ -130,6 +130,7 @@ struct FriendConnection: Identifiable, Codable, Hashable {
     let requestedAt: Date
     var linkedAt: Date?
     var sharedSchedules: [PayPeriodSchedule]
+    // TODO: Phase B 以降で削除予定。iOS アプリ内では未使用（Web ビューア専用）。
     var sharedTimelineCards: [WebTimelineCard]
 
     init(

@@ -370,11 +370,38 @@ enum TripScheduleSnapshotEncoder {
                 .replacingOccurrences(of: "Hotel details", with: "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let rest = String(detail[colonRange.upperBound...])
-            let hotel = rest
-                .components(separatedBy: " / ")
-                .first?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return (station, hotel)
+
+            // Old format: "New World Millennium / +1-852-2739-1111"
+            if rest.contains(" / ") {
+                let hotel = rest
+                    .components(separatedBy: " / ")
+                    .first?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return (station, hotel)
+            }
+
+            // Newer embedded format: "BOOKED Hotel: Name Phone Hotel Transport: ..."
+            // Reuse the Hotel:/Hotel Transport: extraction path on the rest substring.
+            if let hotelRange = rest.range(of: "Hotel: ") {
+                let afterHotel = String(rest[hotelRange.upperBound...])
+                let hotelOnly = afterHotel.range(of: " Hotel Transport:").map {
+                    String(afterHotel[..<$0.lowerBound])
+                } ?? afterHotel
+                let words = hotelOnly
+                    .replacingOccurrences(of: " UPS Only", with: "")
+                    .replacingOccurrences(of: "UPS Only ", with: "")
+                    .trimmingCharacters(in: .whitespaces)
+                    .split(separator: " ").map(String.init)
+                var hotelWords: [String] = []
+                for word in words {
+                    let dashCount = word.filter { $0 == "-" }.count
+                    if word.hasPrefix("+") || word.filter(\.isNumber).count >= 3 || dashCount >= 2 { break }
+                    hotelWords.append(word)
+                }
+                return (station, hotelWords.joined(separator: " ").trimmingCharacters(in: .whitespaces))
+            }
+
+            return (station, rest.trimmingCharacters(in: .whitespacesAndNewlines))
         }
 
         guard let hotelRange = detail.range(of: "Hotel: ") else { return ("", "") }

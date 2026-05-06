@@ -273,10 +273,11 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         if link?.isAccepted == true {
             updated.status = .accepted
             updated.linkedAt = link?.linkedAt ?? updated.linkedAt ?? Date()
-            async let schedules = fetchSchedule(gemsID: friend, database: database)
-            async let timelineCards = fetchScheduleSnapshot(gemsID: friend, database: database)
-            updated.sharedSchedules = (try? await schedules) ?? updated.sharedSchedules
-            updated.sharedTimelineCards = (try? await timelineCards) ?? updated.sharedTimelineCards
+            // Friends Timeline は本人と同じ TripLeg ベース表示エンジンを使用するため、
+            // TDHSharedSchedule のみを取得する。TripScheduleSnapshot (WebTimelineCard) は
+            // ブラウザ用ビューア専用となり、アプリ内では fetch しない。
+            updated.sharedSchedules = (try? await fetchSchedule(gemsID: friend, database: database))
+                ?? updated.sharedSchedules
         } else {
             updated.status = .pending
         }
@@ -288,14 +289,6 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         let record = try await database.record(for: recordID)
         guard let data = record[Field.schedulesData] as? Data else { return [] }
         return try JSONDecoder().decode([PayPeriodSchedule].self, from: data)
-    }
-
-    private func fetchScheduleSnapshot(gemsID: String, database: FriendScheduleCloudKitDatabase) async throws -> [WebTimelineCard] {
-        let recordID = CKRecord.ID(recordName: Self.snapshotRecordName(for: gemsID))
-        let record = try await database.record(for: recordID)
-        guard let json = record[SnapshotField.scheduleJSON] as? String,
-              let data = json.data(using: .utf8) else { return [] }
-        return try JSONDecoder().decode(WebSchedulePayload.self, from: data).timelineCards
     }
 
     private func friendLinkRecord(

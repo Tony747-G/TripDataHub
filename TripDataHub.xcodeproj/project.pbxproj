@@ -42,6 +42,7 @@
 		8AE54C1B2D3E4F5061728392 /* LaunchBehaviorUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AE54C1B2D3E4F5061728391 /* LaunchBehaviorUITests.swift */; };
 		9599AC8B5334199EAAC4FC49 /* FlightCountdownTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58EB09BC72A13BE9062573CC /* FlightCountdownTests.swift */; };
 		95B113CB364AA3060CA5D213 /* TimelineSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A53834B9B503F29F362404 /* TimelineSupport.swift */; };
+		51A7C9D1E2F3456789ABE001 /* ScheduleTimelineRendererView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABE000 /* ScheduleTimelineRendererView.swift */; };
 		95CC4D2499E74AA4A2CACDDE /* RosterParsingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A05C7A4B4AE482294FEBB55 /* RosterParsingModels.swift */; };
 		A1B2C3D4E5F60001AABBCC01 /* BrowserViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60002AABBCC01 /* BrowserViewModel.swift */; };
 		A1B2C3D4E5F60001AABBCC02 /* BrowserWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60002AABBCC02 /* BrowserWebView.swift */; };
@@ -135,6 +136,7 @@
 		BD7C5B32EE84F84B8DB788FD /* CalendarSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSupport.swift; sourceTree = "<group>"; };
 		CD991C2C233AF5AEE5AB9A42 /* OpenTimeSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenTimeSupport.swift; sourceTree = "<group>"; };
 		D1A53834B9B503F29F362404 /* TimelineSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineSupport.swift; sourceTree = "<group>"; };
+		51A7C9D1E2F3456789ABE000 /* ScheduleTimelineRendererView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleTimelineRendererView.swift; sourceTree = "<group>"; };
 		D5F00128A17C7CA217977EA7 /* TimelineTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineTabView.swift; sourceTree = "<group>"; };
 		D8A9A31A957111B4F5C5479E /* SettingsSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSections.swift; sourceTree = "<group>"; };
 		DF695C0A628B417D70BF6664 /* ImportPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportPreviewView.swift; sourceTree = "<group>"; };
@@ -200,6 +202,7 @@
 				ABBFA59E2733EED76133B12E /* RootTabView.swift */,
 				D8A9A31A957111B4F5C5479E /* SettingsSections.swift */,
 				B75C57D0E8EA97E45C283A7B /* SettingsTabView.swift */,
+				51A7C9D1E2F3456789ABE000 /* ScheduleTimelineRendererView.swift */,
 				D1A53834B9B503F29F362404 /* TimelineSupport.swift */,
 				D5F00128A17C7CA217977EA7 /* TimelineTabView.swift */,
 				5B56C7C114EB63B94E2C3ED4 /* TripBoardLoginView.swift */,
@@ -476,6 +479,7 @@
 				0E0B9373BE80E5F6829F98D6 /* ScheduleCacheService.swift in Sources */,
 				4016A931F2EA6DCF07900791 /* SettingsSections.swift in Sources */,
 				C6DAD0A1BE825FB0BA256D13 /* SettingsTabView.swift in Sources */,
+				51A7C9D1E2F3456789ABE001 /* ScheduleTimelineRendererView.swift in Sources */,
 				95B113CB364AA3060CA5D213 /* TimelineSupport.swift in Sources */,
 				FCAF8CC3DA62D71F1FCBE6B8 /* TimelineTabView.swift in Sources */,
 				118967E43FF2203DAB98B97C /* TripBoardAuthService.swift in Sources */,
@@ -594,7 +598,7 @@
 				CODE_SIGN_ENTITLEMENTS = TripDataHub/TripDataHub.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 22;
+				CURRENT_PROJECT_VERSION = 23;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TripDataHub/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "TripData Hub";
@@ -705,7 +709,7 @@
 				CODE_SIGN_ENTITLEMENTS = TripDataHub/TripDataHub.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 22;
+				CURRENT_PROJECT_VERSION = 23;
 				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TripDataHub/Info.plist;

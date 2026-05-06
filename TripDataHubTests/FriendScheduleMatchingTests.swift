@@ -142,29 +142,10 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertNil(record["linkedAt"])
     }
 
-    func test_refreshConnections_loadsFriendTimelineCardsFromSnapshot() async throws {
-        let database = FriendCloudKitFakeDatabase()
-        let service = FriendScheduleCloudKitService(databaseProvider: { database })
-
-        _ = try await service.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
-        _ = try await service.requestFriend(myGEMSID: "222222", friendGEMSID: "111111")
-        try await service.uploadScheduleSnapshot(
-            gemsID: "222222",
-            ownerDisplayName: "222222",
-            crewAccessTrips: [makeCrewAccessTrip()]
-        )
-
-        let refreshed = try await service.refreshConnections(
-            myGEMSID: "111111",
-            connections: [
-                FriendConnection(employeeID: "222222", status: .pending)
-            ]
-        )
-
-        XCTAssertEqual(refreshed.first?.status, .accepted)
-        XCTAssertEqual(refreshed.first?.sharedTimelineCards.map(\.type), ["flight", "layover", "flight"])
-        XCTAssertEqual(refreshed.first?.sharedTimelineCards[1].hotelName, "Test Hotel")
-    }
+    // test_refreshConnections_loadsFriendTimelineCardsFromSnapshot was removed:
+    // refreshConnection no longer fetches TripScheduleSnapshot in the iOS app
+    // because Friends Timeline now uses TDHSharedSchedule (TripLeg) directly.
+    // TripScheduleSnapshot remains uploaded for the future web viewer only.
 
     func test_refreshConnections_restoresAcceptedFriendLinksFromCloudWhenLocalCacheIsEmpty() async throws {
         let database = FriendCloudKitFakeDatabase()
