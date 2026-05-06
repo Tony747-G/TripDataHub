@@ -51,27 +51,6 @@ struct FriendsTabView: View {
                     }
                 }
 
-                Section("Add Friend") {
-                    TextField("GEMS ID", text: $employeeIDInput)
-                        .keyboardType(.numberPad)
-                        .textContentType(.username)
-                        .submitLabel(.done)
-                        .onSubmit(sendFriendRequest)
-                    Button("Send Request") {
-                        sendFriendRequest()
-                    }
-                    .disabled(!viewModel.canSubmitFriendRequest)
-                    if let message = viewModel.cloudKitIdentityMessage {
-                        Text(message)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else if !viewModel.isIdentityVerified {
-                        Text("Verify your GEMS ID in Settings before adding friends.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
                 Section("Pending Requests") {
                     if viewModel.pendingFriendConnections.isEmpty {
                         Text("No pending requests.")
@@ -103,6 +82,27 @@ struct FriendsTabView: View {
                                 }
                             }
                         }
+                    }
+                }
+
+                Section("Add Friend") {
+                    TextField("GEMS ID", text: $employeeIDInput)
+                        .keyboardType(.numberPad)
+                        .textContentType(.username)
+                        .submitLabel(.done)
+                        .onSubmit(sendFriendRequest)
+                    Button("Send Request") {
+                        sendFriendRequest()
+                    }
+                    .disabled(!viewModel.canSubmitFriendRequest)
+                    if let message = viewModel.cloudKitIdentityMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if !viewModel.isIdentityVerified {
+                        Text("Verify your GEMS ID in Settings before adding friends.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }

@@ -668,11 +668,16 @@ final class AppViewModel: ObservableObject {
             return
         }
         let crewAccessTrips = await Self.loadCrewAccessTripJSONPayloadsFromImportFiles()
+        // Enrich schedules with hotel names from local JSON before uploading —
+        // friends see hotel names without needing to re-import PDFs.
+        let enrichedSchedules = await Task.detached(priority: .utility) {
+            Self.enrichSchedulesWithHotelNames(shareableSchedules)
+        }.value
 
         async let sharedScheduleUpload: Void = friendScheduleCloudKitService.uploadSchedule(
             gemsID: verifiedIdentity.gemsID,
             cloudKitRecordName: currentCloudKitRecordName,
-            schedules: shareableSchedules
+            schedules: enrichedSchedules
         )
         async let webSnapshotUpload: Void = friendScheduleCloudKitService.uploadScheduleSnapshot(
             gemsID: verifiedIdentity.gemsID,
@@ -2481,6 +2486,148 @@ final class AppViewModel: ObservableObject {
             }
             return lhsKey < rhsKey
         }
+    }
+
+    // MARK: - Hotel name enrichment for CloudKit upload
+
+    /// Enriches schedules with hotel names from local CrewAccess JSON files before
+    /// uploading to CloudKit. The local model is NOT mutated — only the upload payload
+    /// gets hotel names filled in, so friends see hotel names without requiring re-import.
+    private nonisolated static func enrichSchedulesWithHotelNames(
+        _ schedules: [PayPeriodSchedule]
+    ) -> [PayPeriodSchedule] {
+        let hotelMap = hotelMapFromCrewAccessImports()
+        guard !hotelMap.isEmpty else { return schedules }
+        return schedules.map { schedule in
+            let enrichedLegs = schedule.legs.map { leg -> TripLeg in
+                guard leg.layoverHotelName == nil else { return leg }
+                let station = leg.layoverStation ?? leg.arrAirport
+                guard let name = hotelMap[leg.pairing]?[station], !name.isEmpty else { return leg }
+                return leg.withHotelName(name)
+            }
+            guard enrichedLegs != schedule.legs else { return schedule }
+            return PayPeriodSchedule(
+                id: schedule.id,
+                label: schedule.label,
+                tripCount: schedule.tripCount,
+                legCount: schedule.legCount,
+                openTimeCount: schedule.openTimeCount,
+                updatedAt: schedule.updatedAt,
+                legs: enrichedLegs,
+                openTimeTrips: schedule.openTimeTrips
+            )
+        }
+    }
+
+    /// Builds a [tripID: [station: hotelName]] map from local CrewAccess JSON files.
+    /// Handles both modern ("AAA: Hotel Name ...") and legacy ("Hotel details ...") formats.
+    private nonisolated static func hotelMapFromCrewAccessImports() -> [String: [String: String]] {
+        let payloads = loadCrewAccessTripJSONPayloadsFromImportFilesSync()
+        var result: [String: [String: String]] = [:]
+        for (payload, _) in payloads {
+            // Normalize tripId the same way buildCrewAccessSchedule does,
+            // so it matches leg.pairing exactly.
+            let tripID = payload.tripId
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .uppercased()
+            guard !tripID.isEmpty else { continue }
+
+            var stationToHotel: [String: String] = [:]
+
+            // Modern format: "AAA: Hotel Name ..."
+            let modernDetails = payload.hotelDetails.filter { !$0.hasPrefix("Hotel details ") }
+            for detail in modernDetails {
+                let (station, hotelName) = parseHotelDetailForEnrichment(detail)
+                if !station.isEmpty && !hotelName.isEmpty {
+                    stationToHotel[station] = hotelName
+                }
+            }
+
+            // Legacy format: "Hotel details ... Hotel: Name Hotel Transport: ..."
+            // Station is unknown from the string itself; infer from sequence gaps >= 3h.
+            let legacyDetails = payload.hotelDetails.filter { $0.hasPrefix("Hotel details ") }
+            if !legacyDetails.isEmpty {
+                let sortedItems = payload.items.sorted { $0.sequence < $1.sequence }
+                var legacyIndex = 0
+                let isoParser = ISO8601DateFormatter()
+                for idx in sortedItems.indices.dropLast() {
+                    guard legacyIndex < legacyDetails.count else { break }
+                    let current = sortedItems[idx]
+                    let next = sortedItems[idx + 1]
+                    guard let endDate = isoParser.date(from: current.endUtc),
+                          let nextStart = isoParser.date(from: next.startUtc),
+                          nextStart.timeIntervalSince(endDate) >= 180 * 60 else { continue }
+                    let station = current.arrAirport.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !station.isEmpty, stationToHotel[station] == nil else {
+                        legacyIndex += 1
+                        continue
+                    }
+                    let (_, hotelName) = parseLegacyHotelDetailForEnrichment(legacyDetails[legacyIndex])
+                    if !hotelName.isEmpty { stationToHotel[station] = hotelName }
+                    legacyIndex += 1
+                }
+            }
+
+            if !stationToHotel.isEmpty {
+                result[tripID] = stationToHotel
+            }
+        }
+        return result
+    }
+
+    /// Parses a modern hotel detail string: "AAA: Hotel Name ..."
+    private nonisolated static func parseHotelDetailForEnrichment(
+        _ detail: String
+    ) -> (station: String, hotelName: String) {
+        guard !detail.hasPrefix("Hotel details ") else { return ("", "") }
+        guard let colonRange = detail.range(of: ": ") else { return ("", "") }
+        let station = String(detail[..<colonRange.lowerBound])
+            .trimmingCharacters(in: .whitespaces)
+            .uppercased()
+        // Station must be a 3-letter uppercase IATA code
+        guard station.count == 3, station.allSatisfy({ $0.isLetter }) else {
+            return ("", "")
+        }
+        var rest = String(detail[colonRange.upperBound...])
+        // Strip trailing "(HH:MM)" pickup time
+        if let parenRange = rest.range(of: " (", options: .backwards) {
+            rest = String(rest[..<parenRange.lowerBound])
+        }
+        // Stop at phone number (+... or three-or-more-dash pattern)
+        let words = rest.split(separator: " ").map(String.init)
+        var hotelWords: [String] = []
+        for word in words {
+            let dashCount = word.filter { $0 == "-" }.count
+            if word.hasPrefix("+") || dashCount >= 2 { break }
+            hotelWords.append(word)
+        }
+        let hotelName = hotelWords.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+        return (station, hotelName)
+    }
+
+    /// Parses a legacy hotel detail string: "Hotel details ... Hotel: Name Hotel Transport: ..."
+    /// Returns ("", hotelName) — station is unknown and must be inferred by the caller.
+    private nonisolated static func parseLegacyHotelDetailForEnrichment(
+        _ detail: String
+    ) -> (station: String, hotelName: String) {
+        guard let hotelRange = detail.range(of: "Hotel: ") else { return ("", "") }
+        var rest = String(detail[hotelRange.upperBound...])
+        if let transportRange = rest.range(of: " Hotel Transport:") {
+            rest = String(rest[..<transportRange.lowerBound])
+        }
+        let cleaned = rest
+            .replacingOccurrences(of: " UPS Only", with: "")
+            .replacingOccurrences(of: "UPS Only ", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let words = cleaned.split(separator: " ").map(String.init)
+        var hotelWords: [String] = []
+        for word in words {
+            let digitCount = word.filter(\.isNumber).count
+            let dashCount = word.filter { $0 == "-" }.count
+            if word.hasPrefix("+") || digitCount >= 3 || dashCount >= 2 { break }
+            hotelWords.append(word)
+        }
+        return ("", hotelWords.joined(separator: " ").trimmingCharacters(in: .whitespaces))
     }
 
     private nonisolated static func buildCrewAccessSchedule(from payload: CrewAccessTripJSON, modifiedAt: Date) -> PayPeriodSchedule? {

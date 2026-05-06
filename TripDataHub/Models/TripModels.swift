@@ -79,6 +79,20 @@ struct TripLeg: Identifiable, Codable, Hashable {
         self.atdUTC = atdUTC
         self.ataUTC = ataUTC
     }
+
+    /// Returns a copy of this leg with the layoverHotelName filled in.
+    /// Used to enrich CloudKit uploads without mutating the local model.
+    func withHotelName(_ name: String) -> TripLeg {
+        TripLeg(
+            id: id, payPeriod: payPeriod, pairing: pairing, leg: leg,
+            flight: flight, depAirport: depAirport, depLocal: depLocal,
+            arrAirport: arrAirport, arrLocal: arrLocal, depUTC: depUTC,
+            arrUTC: arrUTC, status: status, block: block,
+            layoverStation: layoverStation, layoverHotelName: name,
+            layoverDuration: layoverDuration, stdUTC: stdUTC, staUTC: staUTC,
+            atdUTC: atdUTC, ataUTC: ataUTC
+        )
+    }
 }
 
 struct OpenTimeTrip: Identifiable, Codable, Hashable {
