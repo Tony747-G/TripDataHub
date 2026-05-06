@@ -25,11 +25,13 @@
 		51A7C9D1E2F3456789ABC005 /* CrewAccessParserRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABC004 /* CrewAccessParserRegressionTests.swift */; };
 		51A7C9D1E2F3456789ABC007 /* ExternalOpenImportCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABC006 /* ExternalOpenImportCoordinatorTests.swift */; };
 		51A7C9D1E2F3456789ABC009 /* FriendScheduleCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABC008 /* FriendScheduleCloudKitService.swift */; };
+		51A7C9D1E2F3456789ABCF11 /* TripScheduleSnapshotEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABCF10 /* TripScheduleSnapshotEncoder.swift */; };
+		51A7C9D1E2F3456789ABCF13 /* TripScheduleSnapshotEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABCF12 /* TripScheduleSnapshotEncoderTests.swift */; };
 		51A7C9D1E2F3456789ABD001 /* GEMSVerificationCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABD000 /* GEMSVerificationCloudKitService.swift */; };
 		51A7C9D1E2F3456789ABD003 /* GEMSVerificationCloudKitServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABD002 /* GEMSVerificationCloudKitServiceTests.swift */; };
 		51A7C9D1E2F3456789ABD005 /* GEMSIDNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABD004 /* GEMSIDNormalizer.swift */; };
-		51A7C9D1E2F3456789ABCF11 /* TripScheduleSnapshotEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABCF10 /* TripScheduleSnapshotEncoder.swift */; };
-		51A7C9D1E2F3456789ABCF13 /* TripScheduleSnapshotEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABCF12 /* TripScheduleSnapshotEncoderTests.swift */; };
+		51A7C9D1E2F3456789ABE001 /* ScheduleTimelineRendererView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABE000 /* ScheduleTimelineRendererView.swift */; };
+		51A7C9D1E2F3456789ABF001 /* TimelineRowViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABF000 /* TimelineRowViews.swift */; };
 		5BF750A9EB06E31DED48688D /* AdminTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F151A3C5326A78E7880243EB /* AdminTabView.swift */; };
 		5C839E2F9397C27B75B962A9 /* BidPeriodService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B6FCCCA54583B5E8D70721D /* BidPeriodService.swift */; };
 		67A567A25FC047F6B0E1810E /* PDFTripParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B958B23E0C844158F487B53 /* PDFTripParser.swift */; };
@@ -42,7 +44,6 @@
 		8AE54C1B2D3E4F5061728392 /* LaunchBehaviorUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AE54C1B2D3E4F5061728391 /* LaunchBehaviorUITests.swift */; };
 		9599AC8B5334199EAAC4FC49 /* FlightCountdownTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58EB09BC72A13BE9062573CC /* FlightCountdownTests.swift */; };
 		95B113CB364AA3060CA5D213 /* TimelineSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A53834B9B503F29F362404 /* TimelineSupport.swift */; };
-		51A7C9D1E2F3456789ABE001 /* ScheduleTimelineRendererView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABE000 /* ScheduleTimelineRendererView.swift */; };
 		95CC4D2499E74AA4A2CACDDE /* RosterParsingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A05C7A4B4AE482294FEBB55 /* RosterParsingModels.swift */; };
 		A1B2C3D4E5F60001AABBCC01 /* BrowserViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60002AABBCC01 /* BrowserViewModel.swift */; };
 		A1B2C3D4E5F60001AABBCC02 /* BrowserWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60002AABBCC02 /* BrowserWebView.swift */; };
@@ -83,6 +84,7 @@
 		0280B0ED64CBF38F6C06B873 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		0A05C7A4B4AE482294FEBB55 /* RosterParsingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RosterParsingModels.swift; sourceTree = "<group>"; };
 		0AF942899EBB7E90814E4995 /* CrewAccessPDFImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessPDFImportService.swift; sourceTree = "<group>"; };
+		104E08AA2FAACD1200A732BF /* TripDataHubRelease.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TripDataHubRelease.entitlements; sourceTree = "<group>"; };
 		13F6EFC17A823450FE7E3210 /* TripDataHubTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TripDataHubTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1BC23D4E5F60718293A4B5C6 /* TripDataHubUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TripDataHubUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1FDA7EA4639BB0121DD6B803 /* ViewShared.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewShared.swift; sourceTree = "<group>"; };
@@ -103,11 +105,13 @@
 		51A7C9D1E2F3456789ABC004 /* CrewAccessParserRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessParserRegressionTests.swift; sourceTree = "<group>"; };
 		51A7C9D1E2F3456789ABC006 /* ExternalOpenImportCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalOpenImportCoordinatorTests.swift; sourceTree = "<group>"; };
 		51A7C9D1E2F3456789ABC008 /* FriendScheduleCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendScheduleCloudKitService.swift; sourceTree = "<group>"; };
+		51A7C9D1E2F3456789ABCF10 /* TripScheduleSnapshotEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripScheduleSnapshotEncoder.swift; sourceTree = "<group>"; };
+		51A7C9D1E2F3456789ABCF12 /* TripScheduleSnapshotEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripScheduleSnapshotEncoderTests.swift; sourceTree = "<group>"; };
 		51A7C9D1E2F3456789ABD000 /* GEMSVerificationCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GEMSVerificationCloudKitService.swift; sourceTree = "<group>"; };
 		51A7C9D1E2F3456789ABD002 /* GEMSVerificationCloudKitServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GEMSVerificationCloudKitServiceTests.swift; sourceTree = "<group>"; };
 		51A7C9D1E2F3456789ABD004 /* GEMSIDNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GEMSIDNormalizer.swift; sourceTree = "<group>"; };
-		51A7C9D1E2F3456789ABCF10 /* TripScheduleSnapshotEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripScheduleSnapshotEncoder.swift; sourceTree = "<group>"; };
-		51A7C9D1E2F3456789ABCF12 /* TripScheduleSnapshotEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripScheduleSnapshotEncoderTests.swift; sourceTree = "<group>"; };
+		51A7C9D1E2F3456789ABE000 /* ScheduleTimelineRendererView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleTimelineRendererView.swift; sourceTree = "<group>"; };
+		51A7C9D1E2F3456789ABF000 /* TimelineRowViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineRowViews.swift; sourceTree = "<group>"; };
 		537DE7E0A39D9117D8B2DE33 /* AppViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModel.swift; sourceTree = "<group>"; };
 		55E5301B208661C3E2632FC7 /* ScheduleCacheService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleCacheService.swift; sourceTree = "<group>"; };
 		58C18FF3A67E7E968B09F58E /* FlightCountdownSharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightCountdownSharedModels.swift; sourceTree = "<group>"; };
@@ -136,7 +140,6 @@
 		BD7C5B32EE84F84B8DB788FD /* CalendarSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSupport.swift; sourceTree = "<group>"; };
 		CD991C2C233AF5AEE5AB9A42 /* OpenTimeSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenTimeSupport.swift; sourceTree = "<group>"; };
 		D1A53834B9B503F29F362404 /* TimelineSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineSupport.swift; sourceTree = "<group>"; };
-		51A7C9D1E2F3456789ABE000 /* ScheduleTimelineRendererView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleTimelineRendererView.swift; sourceTree = "<group>"; };
 		D5F00128A17C7CA217977EA7 /* TimelineTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineTabView.swift; sourceTree = "<group>"; };
 		D8A9A31A957111B4F5C5479E /* SettingsSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSections.swift; sourceTree = "<group>"; };
 		DF695C0A628B417D70BF6664 /* ImportPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportPreviewView.swift; sourceTree = "<group>"; };
@@ -169,6 +172,7 @@
 		61C9603609A3BE24BCF74010 /* TripDataHub */ = {
 			isa = PBXGroup;
 			children = (
+				104E08AA2FAACD1200A732BF /* TripDataHubRelease.entitlements */,
 				906799561E65DB1AF44B2DE4 /* Assets.xcassets */,
 				0280B0ED64CBF38F6C06B873 /* Info.plist */,
 				3E72BFB505AAA65912E222FA /* LaunchScreen.storyboard */,
@@ -203,6 +207,7 @@
 				D8A9A31A957111B4F5C5479E /* SettingsSections.swift */,
 				B75C57D0E8EA97E45C283A7B /* SettingsTabView.swift */,
 				51A7C9D1E2F3456789ABE000 /* ScheduleTimelineRendererView.swift */,
+				51A7C9D1E2F3456789ABF000 /* TimelineRowViews.swift */,
 				D1A53834B9B503F29F362404 /* TimelineSupport.swift */,
 				D5F00128A17C7CA217977EA7 /* TimelineTabView.swift */,
 				5B56C7C114EB63B94E2C3ED4 /* TripBoardLoginView.swift */,
@@ -372,7 +377,6 @@
 						ProvisioningStyle = Automatic;
 					};
 					9CDD311DB999C310E3ADCC73 = {
-						ProvisioningStyle = Automatic;
 						SystemCapabilities = {
 							com.apple.ApplicationGroups.iOS = {
 								enabled = 1;
@@ -480,6 +484,7 @@
 				4016A931F2EA6DCF07900791 /* SettingsSections.swift in Sources */,
 				C6DAD0A1BE825FB0BA256D13 /* SettingsTabView.swift in Sources */,
 				51A7C9D1E2F3456789ABE001 /* ScheduleTimelineRendererView.swift in Sources */,
+				51A7C9D1E2F3456789ABF001 /* TimelineRowViews.swift in Sources */,
 				95B113CB364AA3060CA5D213 /* TimelineSupport.swift in Sources */,
 				FCAF8CC3DA62D71F1FCBE6B8 /* TimelineTabView.swift in Sources */,
 				118967E43FF2203DAB98B97C /* TripBoardAuthService.swift in Sources */,
@@ -598,7 +603,7 @@
 				CODE_SIGN_ENTITLEMENTS = TripDataHub/TripDataHub.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 23;
+				CURRENT_PROJECT_VERSION = 24;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TripDataHub/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "TripData Hub";
@@ -706,10 +711,10 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
-				CODE_SIGN_ENTITLEMENTS = TripDataHub/TripDataHub.entitlements;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_ENTITLEMENTS = TripDataHub/TripDataHubRelease.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 23;
+				CURRENT_PROJECT_VERSION = 24;
 				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TripDataHub/Info.plist;
@@ -730,6 +735,7 @@
 				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule;
 				PRODUCT_NAME = "TripData Hub";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};

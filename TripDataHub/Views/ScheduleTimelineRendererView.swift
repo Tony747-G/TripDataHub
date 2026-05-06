@@ -68,103 +68,30 @@ struct ScheduleTimelineRendererView: View {
 
     @ViewBuilder
     private func legRow(leg: TripLeg, nextLegByID: [UUID: TripLeg]) -> some View {
-        let isPast = isPastLeg(leg)
-        HStack(alignment: .center, spacing: 12) {
-            MaterialIconView(
-                codePoint: TimelineLegIconSupport.codePoint(for: leg.status),
-                size: 20 * fontScale,
-                color: isPast ? .gray : .primary,
-                fallbackSystemName: TimelineLegIconSupport.fallbackSystemName(for: leg.status)
-            )
-            .frame(width: 28 * fontScale, alignment: .center)
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text("\(leg.depAirport) - \(leg.arrAirport)")
-                        .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
-                        .foregroundStyle(isPast ? .gray : .primary)
-                    Spacer()
-                    timeRangeView(for: leg, isPast: isPast)
-                }
-
-                HStack {
-                    Text(leg.displayFlightNumberText)
-                        .appScaledFont(.footnote, scale: fontScale)
-                        .foregroundStyle(isPast ? .gray : .primary)
-                    Spacer()
-                    Text(blockText(for: leg, nextLegByID: nextLegByID))
-                        .appScaledFont(.caption, scale: fontScale)
-                        .foregroundStyle(isPast ? .gray : .primary)
-                }
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 7)
-    }
-
-    @ViewBuilder
-    private func timeRangeView(for leg: TripLeg, isPast: Bool) -> some View {
-        let baseColor: Color = isPast ? .gray : .primary
-        let diff = dayShift(for: leg)
-        let diffColor: Color = isPast ? .gray : (diff == 0 ? baseColor : .red)
-        HStack(spacing: 0) {
-            Text(timeRangeText(for: leg))
-                .foregroundStyle(baseColor)
-            Text(timelineDiffLabel(diff))
-                .foregroundStyle(diffColor)
-        }
-        .appScaledFont(.subheadline, scale: fontScale)
+        TimelineFlightRow(
+            leg: leg,
+            isPast: isPastLeg(leg),
+            fontScale: fontScale,
+            timeRangeText: timeRangeText(for: leg),
+            dayDiff: dayShift(for: leg),
+            blockText: blockText(for: leg, nextLegByID: nextLegByID)
+            // iconColor and onIconTap omitted: Friends Timeline uses defaults (no highlights)
+        )
     }
 
     // MARK: - Layover card
 
     @ViewBuilder
     private func layoverCard(for leg: TripLeg, connectionMap: [UUID: TripLeg]) -> some View {
-        let isPast = isPastLeg(leg)
-        let station = leg.layoverStation ?? leg.arrAirport
-        let hotel = leg.layoverHotelName ?? ""
-        let arrLocalDate = arrivalLocalDateLabel(for: leg)
-        let durationText = layoverDurationText(for: leg, connectionMap: connectionMap)
-
-        VStack(spacing: 0) {
-            if !arrLocalDate.isEmpty {
-                Text(arrLocalDate)
-                    .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
-                    .foregroundStyle(isPast ? .gray : dateHeaderTextColor)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 5)
-                    .background(dateCardBackground)
-            }
-
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "bed.double.fill")
-                    .font(.system(size: 16 * fontScale))
-                    .foregroundStyle(isPast ? .gray : .primary)
-                    .frame(width: 28 * fontScale, alignment: .center)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Layover at \(station)")
-                        .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
-                        .foregroundStyle(isPast ? .gray : .primary)
-                    HStack {
-                        if !hotel.isEmpty {
-                            Text(hotel)
-                                .appScaledFont(.footnote, scale: fontScale)
-                                .foregroundStyle(isPast ? .gray : .secondary)
-                        }
-                        Spacer()
-                        if !durationText.isEmpty {
-                            Text("Rest: \(durationText)")
-                                .appScaledFont(.caption, scale: fontScale)
-                                .foregroundStyle(isPast ? .gray : .primary)
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 7)
-        }
+        TimelineLayoverCard(
+            station: leg.layoverStation ?? leg.arrAirport,
+            hotel: leg.layoverHotelName ?? "",
+            durationText: layoverDurationText(for: leg, connectionMap: connectionMap),
+            arrLocalDateLabel: arrivalLocalDateLabel(for: leg),
+            isPast: isPastLeg(leg),
+            fontScale: fontScale
+            // iconColor and onIconTap omitted: Friends Timeline uses defaults (no highlights)
+        )
     }
 
     // MARK: - Computations

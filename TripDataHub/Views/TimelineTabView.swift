@@ -262,40 +262,20 @@ struct TimelineTabView: View {
     }
 
     private func timelineRow(leg: TripLeg, nextLegByID: [UUID: TripLeg]) -> some View {
-        let isPast = isPastLeg(leg)
         let flightMatches = friendScheduleMatches.flightMatchesByLegID[leg.id] ?? []
         let hasFlightMatch = !flightMatches.isEmpty
-        let iconColor: Color = hasFlightMatch ? friendMatchAmber : (isPast ? .gray : .primary)
-
-        return HStack(alignment: .center, spacing: 12) {
-            matchableFlightIcon(
-                leg: leg,
-                matches: flightMatches,
-                color: iconColor
-            )
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text("\(leg.depAirport) - \(leg.arrAirport)")
-                        .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
-                        .foregroundStyle(isPast ? .gray : .primary)
-                    Spacer()
-                    timeRangeView(for: leg, isPast: isPast)
-                }
-
-                HStack {
-                    Text(leg.displayFlightNumberText)
-                        .appScaledFont(.footnote, scale: fontScale)
-                        .foregroundStyle(isPast ? .gray : .primary)
-                    Spacer()
-                    Text(blockAndLayoverText(for: leg, nextLegByID: nextLegByID))
-                        .appScaledFont(.caption, scale: fontScale)
-                        .foregroundStyle(isPast ? .gray : .primary)
-                }
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 7)
+        return TimelineFlightRow(
+            leg: leg,
+            isPast: isPastLeg(leg),
+            fontScale: fontScale,
+            timeRangeText: timeRangeText(for: leg),
+            dayDiff: dayShift(for: leg),
+            blockText: blockAndLayoverText(for: leg, nextLegByID: nextLegByID),
+            iconColor: hasFlightMatch ? friendMatchAmber : .primary,
+            onIconTap: hasFlightMatch
+                ? { friendMatchAlert = flightMatchAlert(for: leg, matches: flightMatches) }
+                : nil
+        )
     }
 
     /// 到着日付ラベルを生成（"Tue, Apr 28 2026"）- UTC/LCL トグルに連動
@@ -325,120 +305,30 @@ struct TimelineTabView: View {
 
     @ViewBuilder
     private func layoverCard(for leg: TripLeg, connectionMap: [UUID: TripLeg]) -> some View {
-        let isPast   = isPastLeg(leg)
-        let station  = leg.layoverStation ?? leg.arrAirport
+        let station = leg.layoverStation ?? leg.arrAirport
         // TripLeg フィールド → JSON hotelDetails の順でフォールバック
-        let hotel    = leg.layoverHotelName
+        let hotel = leg.layoverHotelName
             ?? tripDataByTripID[leg.pairing]?.hotelByStation[station]
             ?? ""
         let restOverlaps = friendScheduleMatches.restOverlapsByArrivalLegID[leg.id] ?? []
         let hasRestOverlap = !restOverlaps.isEmpty
-        let iconColor: Color = hasRestOverlap ? friendMatchAmber : (isPast ? .gray : .primary)
-
-        // 到着ローカル日付テキスト（例: "Tue, Apr 28 2026"）
-        let arrLocalDate: String = arrivalLocalDateLabel(for: leg)
-
-        // 滞在時間を UTC 差分から計算
         let next = connectionMap[leg.id]
-        let durationText = TimelineLayoverSupport.durationText(
-            arrDate: utcArrivalDate(for: leg),
-            nextDepDate: next.flatMap { utcDepartureDate(for: $0) },
-            fallbackDuration: leg.layoverDuration
+        TimelineLayoverCard(
+            station: station,
+            hotel: hotel,
+            durationText: TimelineLayoverSupport.durationText(
+                arrDate: utcArrivalDate(for: leg),
+                nextDepDate: next.flatMap { utcDepartureDate(for: $0) },
+                fallbackDuration: leg.layoverDuration
+            ),
+            arrLocalDateLabel: arrivalLocalDateLabel(for: leg),
+            isPast: isPastLeg(leg),
+            fontScale: fontScale,
+            iconColor: hasRestOverlap ? friendMatchAmber : .primary,
+            onIconTap: hasRestOverlap
+                ? { friendMatchAlert = restOverlapAlert(station: station, overlaps: restOverlaps) }
+                : nil
         )
-
-        VStack(spacing: 0) {
-            // ── 到着日ヘッダー ────────────────────────────────────
-            if !arrLocalDate.isEmpty {
-                Text(arrLocalDate)
-                    .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
-                    .foregroundStyle(isPast ? .gray : dateHeaderTextColor)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 5)
-                    .background(dateCardBackground)
-            }
-
-            // ── レイオーバー行 ────────────────────────────────────
-            HStack(alignment: .top, spacing: 12) {
-                matchableLayoverIcon(
-                    station: station,
-                    overlaps: restOverlaps,
-                    color: iconColor
-                )
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Layover at \(station)")
-                        .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
-                        .foregroundStyle(isPast ? .gray : .primary)
-                    HStack {
-                        if !hotel.isEmpty {
-                            Text(hotel)
-                                .appScaledFont(.footnote, scale: fontScale)
-                                .foregroundStyle(isPast ? .gray : .secondary)
-                        }
-                        Spacer()
-                        if !durationText.isEmpty {
-                            Text("Rest: \(durationText)")
-                                .appScaledFont(.caption, scale: fontScale)
-                                .foregroundStyle(isPast ? .gray : .primary)
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 7)
-        }
-    }
-
-    @ViewBuilder
-    private func matchableFlightIcon(
-        leg: TripLeg,
-        matches: [FriendFlightMatch],
-        color: Color
-    ) -> some View {
-        let icon = MaterialIconView(
-            codePoint: TimelineLegIconSupport.codePoint(for: leg.status),
-            size: 20 * fontScale,
-            color: color,
-            fallbackSystemName: TimelineLegIconSupport.fallbackSystemName(for: leg.status)
-        )
-        .frame(width: 28 * fontScale, alignment: .center)
-
-        if matches.isEmpty {
-            icon
-        } else {
-            Button {
-                friendMatchAlert = flightMatchAlert(for: leg, matches: matches)
-            } label: {
-                icon
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Friend on same flight")
-        }
-    }
-
-    @ViewBuilder
-    private func matchableLayoverIcon(
-        station: String,
-        overlaps: [FriendRestOverlap],
-        color: Color
-    ) -> some View {
-        let icon = Image(systemName: "bed.double.fill")
-            .font(.system(size: 16 * fontScale))
-            .foregroundStyle(color)
-            .frame(width: 28 * fontScale, alignment: .center)
-
-        if overlaps.isEmpty {
-            icon
-        } else {
-            Button {
-                friendMatchAlert = restOverlapAlert(station: station, overlaps: overlaps)
-            } label: {
-                icon
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Friend layover overlap")
-        }
     }
 
     private var timelineTopBar: some View {
@@ -692,20 +582,6 @@ struct TimelineTabView: View {
             return "LCL MISSING"
         }
         return "\(depLocalText) - \(arrLocalText)"
-    }
-
-    @ViewBuilder
-    private func timeRangeView(for leg: TripLeg, isPast: Bool) -> some View {
-        let baseColor: Color = isPast ? .gray : .primary
-        let diff = dayShift(for: leg)
-        let diffColor: Color = isPast ? .gray : (diff == 0 ? baseColor : .red)
-        HStack(spacing: 0) {
-            Text(timeRangeText(for: leg))
-                .foregroundStyle(baseColor)
-            Text(timelineDiffLabel(diff))
-                .foregroundStyle(diffColor)
-        }
-        .appScaledFont(.subheadline, scale: fontScale)
     }
 
     private func dayShift(from depText: String, to arrText: String) -> Int {
