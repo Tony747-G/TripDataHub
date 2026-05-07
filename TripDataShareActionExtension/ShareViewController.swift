@@ -41,7 +41,7 @@ final class ShareViewController: UIViewController {
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         statusLabel.numberOfLines = 0
         statusLabel.textAlignment = .center
-        statusLabel.text = "Importing PDF to TripData Hub..."
+        statusLabel.text = "Importing PDF to TripDataHub..."
         view.addSubview(statusLabel)
         NSLayoutConstraint.activate([
             statusLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
@@ -81,11 +81,11 @@ final class ShareViewController: UIViewController {
             let deepLink = URL(string: "tripdatahub://import-crewaccess")!
             let didOpen = await openMainApp(url: deepLink)
             guard didOpen else {
-                await setStatus("Shared successfully. Please open TripData Hub to continue.")
+                await setStatus("Shared successfully. Please open TripDataHub to continue.")
                 await complete(after: 1.2)
                 return
             }
-            await setStatus("Opening TripData Hub...")
+            await setStatus("Opening TripDataHub...")
             await complete(after: 1.5)
         } catch {
             if !didWritePendingHandoff, let savedDestinationURL {
