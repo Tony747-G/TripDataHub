@@ -29,6 +29,10 @@
 		51A7C9D1E2F3456789ABCF13 /* TripScheduleSnapshotEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABCF12 /* TripScheduleSnapshotEncoderTests.swift */; };
 		51A7C9D1E2F3456789ABD001 /* GEMSVerificationCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABD000 /* GEMSVerificationCloudKitService.swift */; };
 		51A7C9D1E2F3456789ABD003 /* GEMSVerificationCloudKitServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABD002 /* GEMSVerificationCloudKitServiceTests.swift */; };
+		BB01CC01DD01EE01FF010001 /* DeviceScheduleModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC01DD01EE01FF010000 /* DeviceScheduleModels.swift */; };
+		BB01CC01DD01EE01FF010003 /* DeviceScheduleCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC01DD01EE01FF010002 /* DeviceScheduleCloudKitService.swift */; };
+		BB01CC01DD01EE01FF010005 /* DeviceScheduleCloudKitServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC01DD01EE01FF010004 /* DeviceScheduleCloudKitServiceTests.swift */; };
+		BB01CC01DD01EE01FF010007 /* AppViewModelDeviceSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC01DD01EE01FF010006 /* AppViewModelDeviceSyncTests.swift */; };
 		51A7C9D1E2F3456789ABD005 /* GEMSIDNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABD004 /* GEMSIDNormalizer.swift */; };
 		51A7C9D1E2F3456789ABE001 /* ScheduleTimelineRendererView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABE000 /* ScheduleTimelineRendererView.swift */; };
 		51A7C9D1E2F3456789ABF001 /* TimelineRowViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABF000 /* TimelineRowViews.swift */; };
@@ -114,6 +118,10 @@
 		51A7C9D1E2F3456789ABCF12 /* TripScheduleSnapshotEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripScheduleSnapshotEncoderTests.swift; sourceTree = "<group>"; };
 		51A7C9D1E2F3456789ABD000 /* GEMSVerificationCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GEMSVerificationCloudKitService.swift; sourceTree = "<group>"; };
 		51A7C9D1E2F3456789ABD002 /* GEMSVerificationCloudKitServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GEMSVerificationCloudKitServiceTests.swift; sourceTree = "<group>"; };
+		BB01CC01DD01EE01FF010000 /* DeviceScheduleModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScheduleModels.swift; sourceTree = "<group>"; };
+		BB01CC01DD01EE01FF010002 /* DeviceScheduleCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScheduleCloudKitService.swift; sourceTree = "<group>"; };
+		BB01CC01DD01EE01FF010004 /* DeviceScheduleCloudKitServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScheduleCloudKitServiceTests.swift; sourceTree = "<group>"; };
+		BB01CC01DD01EE01FF010006 /* AppViewModelDeviceSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModelDeviceSyncTests.swift; sourceTree = "<group>"; };
 		51A7C9D1E2F3456789ABD004 /* GEMSIDNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GEMSIDNormalizer.swift; sourceTree = "<group>"; };
 		51A7C9D1E2F3456789ABE000 /* ScheduleTimelineRendererView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleTimelineRendererView.swift; sourceTree = "<group>"; };
 		51A7C9D1E2F3456789ABF000 /* TimelineRowViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineRowViews.swift; sourceTree = "<group>"; };
@@ -258,6 +266,7 @@
 				4F6C86491D2E927C2CEC60D5 /* FlightCountdownCoordinator.swift */,
 				51A7C9D1E2F3456789ABC008 /* FriendScheduleCloudKitService.swift */,
 				51A7C9D1E2F3456789ABD000 /* GEMSVerificationCloudKitService.swift */,
+				BB01CC01DD01EE01FF010002 /* DeviceScheduleCloudKitService.swift */,
 				51A7C9D1E2F3456789ABD004 /* GEMSIDNormalizer.swift */,
 				51A7C9D1E2F3456789ABCF10 /* TripScheduleSnapshotEncoder.swift */,
 				4FC85F3B696ED2DB2C56FC18 /* IATATimeZoneResolver.swift */,
@@ -289,6 +298,8 @@
 				51A7C9D1E2F3456789ABC006 /* ExternalOpenImportCoordinatorTests.swift */,
 				51A7C9D1E2F3456789ABC002 /* FriendScheduleMatchingTests.swift */,
 				51A7C9D1E2F3456789ABD002 /* GEMSVerificationCloudKitServiceTests.swift */,
+				BB01CC01DD01EE01FF010004 /* DeviceScheduleCloudKitServiceTests.swift */,
+				BB01CC01DD01EE01FF010006 /* AppViewModelDeviceSyncTests.swift */,
 				58EB09BC72A13BE9062573CC /* FlightCountdownTests.swift */,
 				51A7C9D1E2F3456789ABCF12 /* TripScheduleSnapshotEncoderTests.swift */,
 			);
@@ -317,6 +328,7 @@
 			isa = PBXGroup;
 			children = (
 				2C935139ABDF9C6B5FE71310 /* CalendarModels.swift */,
+				BB01CC01DD01EE01FF010000 /* DeviceScheduleModels.swift */,
 				58C18FF3A67E7E968B09F58E /* FlightCountdownSharedModels.swift */,
 				725719445A236E76E849AF2F /* FlightCountdownSupport.swift */,
 				51A7C9D1E2F3456789ABC000 /* FriendScheduleMatching.swift */,
@@ -456,6 +468,8 @@
 				51A7C9D1E2F3456789ABC007 /* ExternalOpenImportCoordinatorTests.swift in Sources */,
 				51A7C9D1E2F3456789ABC003 /* FriendScheduleMatchingTests.swift in Sources */,
 				51A7C9D1E2F3456789ABD003 /* GEMSVerificationCloudKitServiceTests.swift in Sources */,
+				BB01CC01DD01EE01FF010005 /* DeviceScheduleCloudKitServiceTests.swift in Sources */,
+				BB01CC01DD01EE01FF010007 /* AppViewModelDeviceSyncTests.swift in Sources */,
 				9599AC8B5334199EAAC4FC49 /* FlightCountdownTests.swift in Sources */,
 				51A7C9D1E2F3456789ABCF13 /* TripScheduleSnapshotEncoderTests.swift in Sources */,
 			);
@@ -488,6 +502,8 @@
 				51A7C9D1E2F3456789ABC009 /* FriendScheduleCloudKitService.swift in Sources */,
 				51A7C9D1E2F3456789ABC001 /* FriendScheduleMatching.swift in Sources */,
 				51A7C9D1E2F3456789ABD001 /* GEMSVerificationCloudKitService.swift in Sources */,
+				BB01CC01DD01EE01FF010001 /* DeviceScheduleModels.swift in Sources */,
+				BB01CC01DD01EE01FF010003 /* DeviceScheduleCloudKitService.swift in Sources */,
 				51A7C9D1E2F3456789ABD005 /* GEMSIDNormalizer.swift in Sources */,
 				51A7C9D1E2F3456789ABCF11 /* TripScheduleSnapshotEncoder.swift in Sources */,
 				770DDB243CCA709322ED76E2 /* FriendsSupport.swift in Sources */,

@@ -19,6 +19,7 @@ struct IPadOperationalWorkspaceView: View {
             )
         }
         .navigationSplitViewStyle(.balanced)
+        .task { await viewModel.fetchDeviceScheduleIfNeeded(reason: "ipad workspace") }
     }
 }
 

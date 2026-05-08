@@ -1,5 +1,6 @@
 import Foundation
 import CloudKit
+import UIKit
 import UserNotifications
 import CryptoKit
 
@@ -179,6 +180,8 @@ final class AppViewModel: ObservableObject {
     @Published var hasLoadedSeniorityRecords = false
     @Published private(set) var isRefreshingCloudKitIdentity = false
     @Published private(set) var hasSeniorityDataOnDisk = false
+    @Published private(set) var isDeviceSyncing = false
+    @Published private(set) var deviceSyncStatusMessage: String?
 
     private let syncService: TripBoardSyncServiceProtocol
     private let authService: TripBoardAuthServiceProtocol
@@ -187,6 +190,7 @@ final class AppViewModel: ObservableObject {
     private let crewAccessImportService: CrewAccessPDFImportServiceProtocol
     private let friendScheduleCloudKitService: FriendScheduleCloudKitServicing
     private let gemsVerificationCloudKitService: GEMSVerificationCloudKitServicing
+    private let deviceScheduleCloudKitService: DeviceScheduleCloudKitServicing
     private let tzResolver: IATATimeZoneResolving
     private let externalOpenCoordinator: ExternalOpenImportCoordinator
     private let flightCountdownCoordinator = FlightCountdownCoordinator()
@@ -199,6 +203,10 @@ final class AppViewModel: ObservableObject {
     private var isUploadingSharedSchedule = false
     private var needsSharedScheduleUpload = false
     private var pendingSharedScheduleUploadReason: String?
+    private var isUploadingDeviceSchedule = false
+    private var lastDeviceScheduleUploadFingerprint: String?
+    private var lastDeviceScheduleFetchAt: Date?
+    private var cachedDeviceID: String?
 
     private let notification48hKey = "notification_48h_enabled"
     private let notification24hKey = "notification_24h_enabled"
@@ -213,6 +221,9 @@ final class AppViewModel: ObservableObject {
     private let seniorityFileName = "pilot_seniority_records_v1.json"
     private let legacySeniorityFileName = "pilot_roster_records_v1.json"
     private let localIdentityRecordNameKey = "local_identity_record_name_v1"
+    private let deviceScheduleUploadFingerprintKey = "device_schedule_last_upload_fingerprint_v1"
+    private let deviceScheduleFetchAtKey = "device_schedule_last_fetch_at_v1"
+    private let deviceIDKey = "device_id_v1"
     private let cloudKitContainerIdentifier = "iCloud.com.sfune.TimelineSchedule"
     private let cloudKitIdentityTimeoutNanoseconds: UInt64 = 5_000_000_000
     private let useCloudKitIdentity = true
@@ -238,6 +249,9 @@ final class AppViewModel: ObservableObject {
         gemsVerificationCloudKitService: GEMSVerificationCloudKitServicing = GEMSVerificationCloudKitService(
             containerIdentifier: "iCloud.com.sfune.TimelineSchedule"
         ),
+        deviceScheduleCloudKitService: DeviceScheduleCloudKitServicing = DeviceScheduleCloudKitService(
+            containerIdentifier: "iCloud.com.sfune.TimelineSchedule"
+        ),
         tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared
     ) {
         self.syncService = syncService
@@ -247,6 +261,7 @@ final class AppViewModel: ObservableObject {
         self.crewAccessImportService = crewAccessImportService
         self.friendScheduleCloudKitService = friendScheduleCloudKitService
         self.gemsVerificationCloudKitService = gemsVerificationCloudKitService
+        self.deviceScheduleCloudKitService = deviceScheduleCloudKitService
         self.tzResolver = tzResolver
         self.externalOpenCoordinator = ExternalOpenImportCoordinator.shared
         let loadedAdminPolicy = Self.loadAdminPolicy()
@@ -285,6 +300,9 @@ final class AppViewModel: ObservableObject {
         }
         backfillCrewAccessLegImportReferenceTimesIfNeeded()
         pruneCrewAccessLegImportReferenceTimes()
+        self.lastDeviceScheduleUploadFingerprint = UserDefaults.standard.string(forKey: deviceScheduleUploadFingerprintKey)
+        self.lastDeviceScheduleFetchAt = UserDefaults.standard.object(forKey: deviceScheduleFetchAtKey) as? Date
+        self.cachedDeviceID = UserDefaults.standard.string(forKey: deviceIDKey)
         if !useCloudKitIdentity {
             self.currentCloudKitRecordName = localIdentityRecordName()
         }
@@ -722,6 +740,103 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Device Schedule Sync
+
+    func uploadDeviceScheduleIfNeeded(reason: String) async {
+        guard isIdentityVerified,
+              let verifiedIdentity,
+              let currentCloudKitRecordName else { return }
+        guard !isUploadingDeviceSchedule else { return }
+        let schedules = crewAccessSchedules
+        guard !schedules.isEmpty else { return }
+
+        guard let data = try? JSONEncoder().encode(schedules) else { return }
+        let fingerprint = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        guard fingerprint != lastDeviceScheduleUploadFingerprint else { return }
+
+        isUploadingDeviceSchedule = true
+        isDeviceSyncing = true
+        defer {
+            isUploadingDeviceSchedule = false
+            isDeviceSyncing = false
+        }
+
+        let myDeviceID = getOrCreateDeviceID()
+        let source: DeviceScheduleSyncSource = UIDevice.current.userInterfaceIdiom == .pad ? .ipad : .iphone
+
+        do {
+            try await deviceScheduleCloudKitService.uploadDeviceSchedule(
+                gemsID: verifiedIdentity.gemsID,
+                cloudKitRecordName: currentCloudKitRecordName,
+                schedules: schedules,
+                deviceID: myDeviceID,
+                source: source
+            )
+            lastDeviceScheduleUploadFingerprint = fingerprint
+            UserDefaults.standard.set(fingerprint, forKey: deviceScheduleUploadFingerprintKey)
+            deviceSyncStatusMessage = "Device schedule synced."
+            logNonFatal("Device schedule uploaded: \(reason)")
+        } catch {
+            deviceSyncStatusMessage = "Device sync upload failed."
+            logNonFatal("Device schedule upload failed: \(error.localizedDescription) reason=\(reason)")
+        }
+    }
+
+    func fetchDeviceScheduleIfNeeded(reason: String) async {
+        guard isIdentityVerified,
+              let verifiedIdentity else { return }
+        isDeviceSyncing = true
+        defer { isDeviceSyncing = false }
+
+        do {
+            guard let snapshot = try await deviceScheduleCloudKitService.fetchDeviceSchedule(
+                gemsID: verifiedIdentity.gemsID
+            ) else { return }
+
+            if let lastFetch = lastDeviceScheduleFetchAt, snapshot.updatedAt <= lastFetch { return }
+
+            // Skip snapshots uploaded by this device — they mirror what we already have locally.
+            let myDeviceID = getOrCreateDeviceID()
+            if snapshot.deviceID == myDeviceID { return }
+
+            // LogTen backlog protection: preserve import reference times across schedule replacement.
+            // We intentionally do not prune so past-leg entries survive for any future export needs.
+            let preservedReferenceTimes = crewAccessLegImportReferenceTimes
+
+            let remoteSchedules = snapshot.schedules
+            try cacheService.save(ScheduleCacheSnapshotV2(
+                crewAccessSchedules: remoteSchedules,
+                bidproSchedules: bidproSchedules,
+                lastSyncAt: lastSyncAt ?? Date(),
+                migratedAt: nil
+            ))
+            crewAccessSchedules = remoteSchedules
+            crewAccessLegImportReferenceTimes = preservedReferenceTimes
+            schedules = mergeAndSortSchedules(crew: remoteSchedules, bidpro: bidproSchedules)
+            lastDeviceScheduleFetchAt = snapshot.updatedAt
+            UserDefaults.standard.set(snapshot.updatedAt, forKey: deviceScheduleFetchAtKey)
+
+            await rescheduleNotificationsIfAuthorized()
+            deviceSyncStatusMessage = "Schedule updated from device sync."
+            logNonFatal("Device schedule fetched: \(reason) source=\(snapshot.source.rawValue)")
+        } catch {
+            logNonFatal("Device schedule fetch failed: \(error.localizedDescription) reason=\(reason)")
+        }
+    }
+
+    private func getOrCreateDeviceID() -> String {
+        if let existing = cachedDeviceID { return existing }
+        let stored = UserDefaults.standard.string(forKey: deviceIDKey)
+        if let stored {
+            cachedDeviceID = stored
+            return stored
+        }
+        let newID = UUID().uuidString
+        UserDefaults.standard.set(newID, forKey: deviceIDKey)
+        cachedDeviceID = newID
+        return newID
+    }
+
     func refreshCloudKitIdentity() {
         guard !isRefreshingCloudKitIdentity else { return }
         isRefreshingCloudKitIdentity = true
@@ -1098,6 +1213,7 @@ final class AppViewModel: ObservableObject {
             startExternalConsumerIfNeeded()
             crewAccessImportMessage = "CrewAccess import complete: \(json.tripId) (\(schedule.legCount) legs)."
             errorMessage = nil
+            Task { [weak self] in await self?.uploadDeviceScheduleIfNeeded(reason: "import confirmed") }
         } catch {
             crewAccessImportMessage = "Import failed: unable to write CrewAccess JSON. No changes were applied."
             logNonFatal("CrewAccess confirm transaction failed: \(error.localizedDescription)")
@@ -1400,6 +1516,7 @@ final class AppViewModel: ObservableObject {
         } else {
             crewAccessDeleteMessage = "Deleted \(toDelete.count) trip(s). Some JSON files could not be removed."
         }
+        Task { [weak self] in await self?.uploadDeviceScheduleIfNeeded(reason: "trip deleted") }
     }
 
     func displaySchedules(filter: TimelineSourceFilter) -> [PayPeriodSchedule] {
