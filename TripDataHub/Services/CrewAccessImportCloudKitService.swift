@@ -99,7 +99,6 @@ final class CrewAccessImportCloudKitService: CrewAccessImportCloudKitServicing, 
             record[Field.firstDepartureUTC] = dep as CKRecordValue
         }
         record[Field.updatedAt] = Date() as CKRecordValue
-        record[Field.deletedAt] = nil
         record[Field.schemaVersion] = Int64(Self.schemaVersion) as CKRecordValue
 
         _ = try await database.save(record)

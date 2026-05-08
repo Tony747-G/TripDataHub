@@ -944,10 +944,22 @@ final class AppViewModel: ObservableObject {
     }
 
     private func uploadCrewAccessImportFile(at url: URL, json: CrewAccessTripJSON) async {
-        guard isIdentityVerified, let verifiedIdentity else { return }
-        guard let jsonData = try? Data(contentsOf: url) else { return }
         let fileName = url.lastPathComponent
+        guard isIdentityVerified, let verifiedIdentity else {
+            NSLog("[CrewAccessImportUpload] skipped (identity not verified) file=%@", fileName)
+            return
+        }
+        guard let jsonData = try? Data(contentsOf: url) else {
+            NSLog("[CrewAccessImportUpload] skipped (cannot read file) path=%@", url.path)
+            return
+        }
         let firstDep = json.items.first?.startUtc
+        NSLog(
+            "[CrewAccessImportUpload] start file=%@ bytes=%d gems=%@",
+            fileName,
+            jsonData.count,
+            verifiedIdentity.gemsID
+        )
         do {
             try await crewAccessImportCloudKitService.uploadImportFile(
                 gemsID: verifiedIdentity.gemsID,
@@ -956,8 +968,14 @@ final class AppViewModel: ObservableObject {
                 tripInformationDate: json.tripInformationDate,
                 firstDepartureUTC: firstDep
             )
+            NSLog("[CrewAccessImportUpload] success file=%@", fileName)
             logNonFatal("CrewAccess import file uploaded: \(fileName)")
         } catch {
+            NSLog(
+                "[CrewAccessImportUpload] FAILED file=%@ error=%@",
+                fileName,
+                error.localizedDescription
+            )
             logNonFatal("CrewAccess import file upload failed: \(error.localizedDescription) file=\(fileName)")
         }
     }
