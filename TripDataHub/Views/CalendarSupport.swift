@@ -77,13 +77,8 @@ private func localDayStartUTC(
     guard let firstCalendarDay = calendarDays.first else {
         return nil
     }
-
-    let localCalendar = calendarInTimeZone(timeZone)
-    let firstLocalComponents = localCalendar.dateComponents([.year, .month, .day], from: firstCalendarDay.dayStartUTC)
-    guard let firstLocalMidnight = localCalendar.date(from: firstLocalComponents) else {
-        return nil
-    }
-    return localCalendar.date(byAdding: .day, value: index, to: firstLocalMidnight)
+    // Calendar days are UTC-indexed; the segment start is simply UTC midnight of day `index`.
+    return calendarEngineUTCCalendar.date(byAdding: .day, value: index, to: firstCalendarDay.dayStartUTC)
 }
 
 private func widestRange(
@@ -161,11 +156,16 @@ func resolveDayIndex(for utcDate: Date, timeZone: TimeZone, calendarDays: [Calen
     guard let firstCalendarDay = calendarDays.first else {
         return nil
     }
-
-    let localCalendar = calendarInTimeZone(timeZone)
-    let firstLocalDayStart = localCalendar.startOfDay(for: firstCalendarDay.dayStartUTC)
-    let targetLocalDayStart = localCalendar.startOfDay(for: utcDate)
-    let dayOffset = localCalendar.dateComponents([.day], from: firstLocalDayStart, to: targetLocalDayStart).day
+    // Calendar days are UTC-indexed (day 0 = bid-period UTC start, day 1 = +1 day, etc.).
+    // We resolve the day purely from the UTC position of the timestamp — the timezone
+    // parameter is retained for API consistency but not used for day indexing.
+    // This ensures a given UTC timestamp maps to the same calendar day regardless of
+    // which display timezone is applied, which is required for segment start/end consistency.
+    let dayOffset = calendarEngineUTCCalendar.dateComponents(
+        [.day],
+        from: firstCalendarDay.dayStartUTC,
+        to: calendarEngineUTCCalendar.startOfDay(for: utcDate)
+    ).day
 
     guard let dayOffset, (0..<calendarDays.count).contains(dayOffset) else {
         return nil
@@ -205,13 +205,17 @@ func localRegressionMetadata(for trip: CalendarTrip, days: [CalendarDay]) -> [In
             continue
         }
 
+        // Regressions only occur when the dep and arr are in different timezones.
+        // A same-timezone overnight flight naturally crosses local midnight and is not
+        // a regression — it would create a false positive if checked by fraction alone.
+        guard departureTimeZone.identifier != arrivalTimeZone.identifier else {
+            continue
+        }
+
         let localDeparture = localDateComponents(for: departureUTC, in: departureTimeZone)
         let localArrival = localDateComponents(for: arrivalUTC, in: arrivalTimeZone)
 
-        guard let localDepartureTuple = localDateTuple(from: localDeparture),
-              let localArrivalTuple = localDateTuple(from: localArrival),
-              localArrivalTuple < localDepartureTuple,
-              let dayIndex = resolveDayIndex(for: arrivalUTC, timeZone: arrivalTimeZone, calendarDays: days)
+        guard let dayIndex = resolveDayIndex(for: arrivalUTC, timeZone: arrivalTimeZone, calendarDays: days)
         else {
             continue
         }

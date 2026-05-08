@@ -25,6 +25,7 @@
 		51A7C9D1E2F3456789ABC005 /* CrewAccessParserRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABC004 /* CrewAccessParserRegressionTests.swift */; };
 		51A7C9D1E2F3456789ABC007 /* ExternalOpenImportCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABC006 /* ExternalOpenImportCoordinatorTests.swift */; };
 		51A7C9D1E2F3456789ABC009 /* FriendScheduleCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABC008 /* FriendScheduleCloudKitService.swift */; };
+		51A7C9D1E2F3456789ABC011 /* AppViewModelLogTenExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABC010 /* AppViewModelLogTenExportTests.swift */; };
 		51A7C9D1E2F3456789ABCF11 /* TripScheduleSnapshotEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABCF10 /* TripScheduleSnapshotEncoder.swift */; };
 		51A7C9D1E2F3456789ABCF13 /* TripScheduleSnapshotEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABCF12 /* TripScheduleSnapshotEncoderTests.swift */; };
 		51A7C9D1E2F3456789ABD001 /* GEMSVerificationCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABD000 /* GEMSVerificationCloudKitService.swift */; };
@@ -105,6 +106,7 @@
 		51A7C9D1E2F3456789ABC004 /* CrewAccessParserRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessParserRegressionTests.swift; sourceTree = "<group>"; };
 		51A7C9D1E2F3456789ABC006 /* ExternalOpenImportCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalOpenImportCoordinatorTests.swift; sourceTree = "<group>"; };
 		51A7C9D1E2F3456789ABC008 /* FriendScheduleCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendScheduleCloudKitService.swift; sourceTree = "<group>"; };
+		51A7C9D1E2F3456789ABC010 /* AppViewModelLogTenExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModelLogTenExportTests.swift; sourceTree = "<group>"; };
 		51A7C9D1E2F3456789ABCF10 /* TripScheduleSnapshotEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripScheduleSnapshotEncoder.swift; sourceTree = "<group>"; };
 		51A7C9D1E2F3456789ABCF12 /* TripScheduleSnapshotEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripScheduleSnapshotEncoderTests.swift; sourceTree = "<group>"; };
 		51A7C9D1E2F3456789ABD000 /* GEMSVerificationCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GEMSVerificationCloudKitService.swift; sourceTree = "<group>"; };
@@ -145,7 +147,7 @@
 		DF695C0A628B417D70BF6664 /* ImportPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportPreviewView.swift; sourceTree = "<group>"; };
 		EABE1DFB8EE6CCCF77FB5717 /* ImportFileSniffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportFileSniffer.swift; sourceTree = "<group>"; };
 		F151A3C5326A78E7880243EB /* AdminTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminTabView.swift; sourceTree = "<group>"; };
-		F518C211127FA260E6247ED8 /* TripData Hub.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TripDataHub.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F518C211127FA260E6247ED8 /* TripDataHub.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TripDataHub.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FC24A3084F1CB77216493907 /* NextReportWindowBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextReportWindowBuilder.swift; sourceTree = "<group>"; };
 		FE4BC208606CA451400CC1BE /* AppViewModel+PreviewData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppViewModel+PreviewData.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -154,7 +156,7 @@
 		35A97BDAAEA706418C6B65F2 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				F518C211127FA260E6247ED8 /* TripData Hub.app */,
+				F518C211127FA260E6247ED8 /* TripDataHub.app */,
 				13F6EFC17A823450FE7E3210 /* TripDataHubTests.xctest */,
 				1BC23D4E5F60718293A4B5C6 /* TripDataHubUITests.xctest */,
 			);
@@ -262,6 +264,7 @@
 			isa = PBXGroup;
 			children = (
 				30EA7A40210086623915E4DE /* CalendarSupportTests.swift */,
+				51A7C9D1E2F3456789ABC010 /* AppViewModelLogTenExportTests.swift */,
 				51A7C9D1E2F3456789ABC004 /* CrewAccessParserRegressionTests.swift */,
 				51A7C9D1E2F3456789ABC006 /* ExternalOpenImportCoordinatorTests.swift */,
 				51A7C9D1E2F3456789ABC002 /* FriendScheduleMatchingTests.swift */,
@@ -358,7 +361,7 @@
 			packageProductDependencies = (
 			);
 			productName = TripDataHub;
-			productReference = F518C211127FA260E6247ED8 /* TripData Hub.app */;
+			productReference = F518C211127FA260E6247ED8 /* TripDataHub.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -429,6 +432,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				BCA4AE729D06B2ACB035CB39 /* CalendarSupportTests.swift in Sources */,
+				51A7C9D1E2F3456789ABC011 /* AppViewModelLogTenExportTests.swift in Sources */,
 				51A7C9D1E2F3456789ABC005 /* CrewAccessParserRegressionTests.swift in Sources */,
 				51A7C9D1E2F3456789ABC007 /* ExternalOpenImportCoordinatorTests.swift in Sources */,
 				51A7C9D1E2F3456789ABC003 /* FriendScheduleMatchingTests.swift in Sources */,
@@ -608,6 +612,7 @@
 				INFOPLIST_FILE = TripDataHub/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = TripDataHub;
 				INFOPLIST_KEY_CFBundleIconName = AppIcon;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_UIAppFonts = Resources/Fonts/MaterialIcons.ttf;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
@@ -720,6 +725,7 @@
 				INFOPLIST_FILE = TripDataHub/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = TripDataHub;
 				INFOPLIST_KEY_CFBundleIconName = AppIcon;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_UIAppFonts = Resources/Fonts/MaterialIcons.ttf;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = NO;

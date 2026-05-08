@@ -29,7 +29,7 @@ struct TripLeg: Identifiable, Codable, Hashable {
     let layoverStation: String?
     let layoverHotelName: String?
     let layoverDuration: String?
-    // Scheduled / Actual times for logbook CSV export
+    // Scheduled / Actual times for LogTen CSV export
     // PDF import time: stdUTC/staUTC are set from parsed times; atdUTC/ataUTC are nil until actual data is available
     let stdUTC: String?   // Scheduled Time of Departure (UTC)
     let staUTC: String?   // Scheduled Time of Arrival (UTC)

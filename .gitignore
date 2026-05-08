@@ -3,6 +3,15 @@
 node_modules/
 output/
 storageState.json
+web/config.local.js
+build/
+
+# Local seniority source files contain DOB and must not be committed or bundled.
+*_seniority.csv
+
+# CloudKit server-to-server private keys are developer secrets.
+*.pem
+.cloudkit-keys/
 
 # Xcode user-specific files
 xcuserdata/

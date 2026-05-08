@@ -1,6 +1,6 @@
 import CoreGraphics
 import XCTest
-@testable import TripData_Hub
+@testable import TripDataHub
 
 final class CalendarBidPeriodGenerationTests: XCTestCase {
     private static let iso = ISO8601DateFormatter()
@@ -296,11 +296,14 @@ final class CalendarSegmentationTests: XCTestCase {
     }
 
     func test_buildSegments_overnightTrip() {
+        // Calendar days are UTC-indexed. A flight crosses a calendar day boundary when it
+        // spans a UTC midnight. dep at 23:00Z = UTC day 0, arr at 06:00Z next UTC day = UTC day 1.
+        // SDF = EDT (UTC-4): dep = 19:00 local, arr = 02:00 local next day.
         let trip = makeTrip(
             payPeriod: "PP26-04",
             pairing: "1234",
             legs: [
-                leg(payPeriod: "PP26-04", pairing: "1234", flight: "5X1", depAirport: "SDF", arrAirport: "SDF", depUTC: "2026-03-22T03:00:00Z", arrUTC: "2026-03-22T10:00:00Z")
+                leg(payPeriod: "PP26-04", pairing: "1234", flight: "5X1", depAirport: "SDF", arrAirport: "SDF", depUTC: "2026-03-22T23:00:00Z", arrUTC: "2026-03-23T06:00:00Z")
             ]
         )
 
@@ -339,11 +342,13 @@ final class CalendarSegmentationTests: XCTestCase {
     }
 
     func test_buildSegments_tinySegmentNearMidnight() {
+        // A 2-minute flight spanning a UTC midnight (23:59Z → 00:01Z) crosses a calendar day
+        // boundary, producing two tiny segments even though the local duration is negligible.
         let trip = makeTrip(
             payPeriod: "PP26-04",
             pairing: "1234",
             legs: [
-                leg(payPeriod: "PP26-04", pairing: "1234", flight: "5X1", depAirport: "SDF", arrAirport: "SDF", depUTC: "2026-03-22T04:59:00Z", arrUTC: "2026-03-22T05:01:00Z")
+                leg(payPeriod: "PP26-04", pairing: "1234", flight: "5X1", depAirport: "SDF", arrAirport: "SDF", depUTC: "2026-03-22T23:59:00Z", arrUTC: "2026-03-23T00:01:00Z")
             ]
         )
 

@@ -133,7 +133,7 @@ struct CrewAccessTripItemJSON: Codable {
     let timeDerivation: String
     let aircraft: String
     let block: String
-    // Scheduled / Actual times for logbook CSV export
+    // Scheduled / Actual times for LogTen CSV export
     let stdUtc: String?       // Scheduled Time of Departure (UTC)
     let staUtc: String?       // Scheduled Time of Arrival (UTC)
     let atdUtc: String?       // Actual Time of Departure (UTC) — nil until actual data available

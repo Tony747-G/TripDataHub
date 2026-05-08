@@ -1,5 +1,5 @@
 import XCTest
-@testable import TripData_Hub
+@testable import TripDataHub
 
 final class ExternalOpenImportCoordinatorTests: XCTestCase {
     func test_enqueueDeduplicatesQueuedKey() async {

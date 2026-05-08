@@ -109,6 +109,7 @@ extension AppViewModel {
                 verifiedAt: Date(timeIntervalSince1970: 1_767_494_400)
             )
             authStatus = .loggedOut
+            clearSessionCookiesForUITest()  // Ensure syncTapped() shows login sheet immediately
             errorMessage = nil
             isShowingLoginSheet = false
             didLastFetchFail = false

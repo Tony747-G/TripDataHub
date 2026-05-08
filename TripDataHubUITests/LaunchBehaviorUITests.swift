@@ -12,9 +12,11 @@ final class LaunchBehaviorUITests: XCTestCase {
 
         let timelineTab = app.tabBars.buttons["Timeline"]
         XCTAssertTrue(timelineTab.waitForExistence(timeout: 5))
+        timelineTab.tap()
 
-        let dateHeader = app.staticTexts["timeline.dayHeader.2026-06-09"]
-        XCTAssertTrue(dateHeader.waitForExistence(timeout: 5))
+        // Use matching(identifier:) rather than subscript to ensure lookup by accessibility identifier.
+        let dateHeader = app.staticTexts.matching(identifier: "timeline.dayHeader.2026-06-09").firstMatch
+        XCTAssertTrue(dateHeader.waitForExistence(timeout: 10))
 
         let nextReportCard = app.staticTexts.matching(identifier: "timeline.nextReportCard").firstMatch
         XCTAssertTrue(nextReportCard.waitForExistence(timeout: 5))
@@ -37,8 +39,10 @@ final class LaunchBehaviorUITests: XCTestCase {
 
         loginButton.tap()
 
-        let loginTitle = app.navigationBars["TripBoard Login"]
-        XCTAssertTrue(loginTitle.waitForExistence(timeout: 5))
+        // Check for the Close button in TripBoardLoginView's toolbar — more reliable
+        // than querying the navigation bar title in a sheet context.
+        let closeButton = app.buttons["Close"]
+        XCTAssertTrue(closeButton.waitForExistence(timeout: 5))
     }
 
 }

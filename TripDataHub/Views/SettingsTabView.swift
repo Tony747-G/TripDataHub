@@ -13,13 +13,11 @@ struct SettingsTabView: View {
     @AppStorage("notification_24h_enabled") private var notify24h = false
     @AppStorage("notification_12h_enabled") private var notify12h = false
     @State private var showNotificationDeniedAlert = false
-    @State private var isShowingLogTenExportShare = false
-    @State private var isShowingLogbookExportShare = false
+    @State private var showLogTenExportWarning = false
     @State private var verifyGemsIDInput = ""
     @State private var verifyDOBDate = Date()
     @State private var crewAccessImportFiles: [CrewAccessImportFile] = []
-    @State private var logTenExportURL: URL?
-    @State private var logbookExportURL: URL?
+    @State private var logTenExportOutput: LogTenExportOutput?
 
     private static let dobFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -73,35 +71,10 @@ struct SettingsTabView: View {
     }
 
     @ViewBuilder
-    private var logbookExportSection: some View {
-        Section {
-            Button("Export Logbook CSV") {
-                Task {
-                    let output = await viewModel.exportLogbookCSV()
-                    logbookExportURL = output
-                    isShowingLogbookExportShare = output != nil
-                }
-            }
-            if let message = viewModel.logbookExportMessage {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-        } header: {
-            Text("Logbook Export")
-        } footer: {
-            Text("Exports all imported trips as CSV with departure date, flight number, aircraft, airports, STD/STA/ATD/ATA (UTC), block time, and crew (PIC/FO/RO/FO2).")
-                .font(.footnote)
-        }
-    }
-
-    @ViewBuilder
     private var logTenExportSection: some View {
         Section {
-            Button("Export CrewAccess Flights (LogTen CSV)") {
-                let output = viewModel.exportCrewAccessFlightsLogTenCSV()
-                logTenExportURL = output
-                isShowingLogTenExportShare = output != nil
+            Button("Export LogTen Pro CSV") {
+                showLogTenExportWarning = true
             }
             if let message = viewModel.logTenExportMessage {
                 Text(message)
@@ -110,6 +83,9 @@ struct SettingsTabView: View {
             }
         } header: {
             Text("LogTen Pro Export")
+        } footer: {
+            Text("Exports CrewAccess flights as UTC CSV columns: DATE, Flight Number, FROM, TO, STD, STA, ATD, ATA.")
+                .font(.footnote)
         }
     }
 
@@ -197,9 +173,6 @@ struct SettingsTabView: View {
                 notify12h: $notify12h
             )
 
-            SettingsPayPeriodsSection()
-
-            logbookExportSection
             logTenExportSection
         }
         .scrollDismissesKeyboard(.interactively)
@@ -276,25 +249,27 @@ struct SettingsTabView: View {
             } message: {
                 Text("Enable notifications in iOS Settings to receive 48h/24h/12h reminders.")
             }
-#if canImport(UIKit)
-            .sheet(isPresented: $isShowingLogbookExportShare, onDismiss: {
-                if let url = logbookExportURL {
-                    try? FileManager.default.removeItem(at: url)
+            .alert("Export LogTen Pro CSV?", isPresented: $showLogTenExportWarning) {
+                Button("Cancel", role: .cancel) {}
+                Button("AGREE") {
+                    logTenExportOutput = viewModel.exportCrewAccessFlightsLogTenCSV()
                 }
-                logbookExportURL = nil
-            }) {
-                if let url = logbookExportURL {
-                    ActivityView(activityItems: [url])
-                }
+            } message: {
+                Text("Only past flights included in this export will be marked as exported. Past flights kept only for LogTen export will be removed from the pending export queue after the share completes. Future flights remain saved.")
             }
-            .sheet(isPresented: $isShowingLogTenExportShare, onDismiss: {
-                if let url = logTenExportURL {
+#if canImport(UIKit)
+            .sheet(item: $logTenExportOutput, onDismiss: {
+                if let url = logTenExportOutput?.url {
                     try? FileManager.default.removeItem(at: url)
                 }
-                logTenExportURL = nil
-            }) {
-                if let url = logTenExportURL {
-                    ActivityView(activityItems: [url])
+                logTenExportOutput = nil
+            }) { output in
+                ActivityView(activityItems: [output.url]) { completed in
+                    if completed {
+                        viewModel.markLogTenExportCompleted(output)
+                    }
+                    try? FileManager.default.removeItem(at: output.url)
+                    logTenExportOutput = nil
                 }
             }
 #endif
@@ -312,9 +287,14 @@ struct SettingsTabView: View {
 #if canImport(UIKit)
 private struct ActivityView: UIViewControllerRepresentable {
     let activityItems: [Any]
+    var completion: ((Bool) -> Void)?
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+        let controller = UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+        controller.completionWithItemsHandler = { _, completed, _, _ in
+            completion?(completed)
+        }
+        return controller
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
