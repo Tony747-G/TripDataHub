@@ -11,6 +11,17 @@ struct BrowserTabView: View {
 
     @EnvironmentObject private var appViewModel: AppViewModel
     @State private var browserViewModel = BrowserViewModel()
+    @State private var showingImportPreview = false
+
+    /// When true, this view presents ImportPreviewView itself when pendingImport
+    /// is set. iPad workspace uses this because BrowserTabView is presented as a
+    /// sheet there — a separate sheet on the workspace would conflict. iPhone
+    /// uses the tab-based RootTabView which presents the preview at the root.
+    let presentsImportPreview: Bool
+
+    init(presentsImportPreview: Bool = false) {
+        self.presentsImportPreview = presentsImportPreview
+    }
 
     private let portalURL = URL(string: "https://fltops-portal.ups.com/")!
 
@@ -54,6 +65,15 @@ struct BrowserTabView: View {
         .onAppear {
             // AppViewModel への参照を注入
             browserViewModel.appViewModel = appViewModel
+        }
+        .onChange(of: appViewModel.pendingImport?.id) { _, newValue in
+            if presentsImportPreview, newValue != nil {
+                showingImportPreview = true
+            }
+        }
+        .sheet(isPresented: $showingImportPreview) {
+            NavigationStack { ImportPreviewView() }
+                .environmentObject(appViewModel)
         }
     }
 
