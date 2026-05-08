@@ -1,6 +1,6 @@
 import CloudKit
 import XCTest
-@testable import TripData_Hub
+@testable import TripDataHub
 
 final class FriendScheduleMatchingTests: XCTestCase {
     func test_restWindow_usesArrivalPlus60AndDepartureMinus120() {

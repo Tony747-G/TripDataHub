@@ -1,5 +1,5 @@
 import XCTest
-@testable import TripData_Hub
+@testable import TripDataHub
 
 final class CrewAccessParserRegressionTests: XCTestCase {
     private let cases: [(pdf: String, golden: String)] = [

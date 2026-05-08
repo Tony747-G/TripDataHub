@@ -1,6 +1,6 @@
 import CoreGraphics
 import XCTest
-@testable import TripData_Hub
+@testable import TripDataHub
 
 final class CalendarBidPeriodGenerationTests: XCTestCase {
     private static let iso = ISO8601DateFormatter()
@@ -296,11 +296,13 @@ final class CalendarSegmentationTests: XCTestCase {
     }
 
     func test_buildSegments_overnightTrip() {
+        // Trip spans UTC midnight (March 22 → March 23) to verify that overnight crossings
+        // in the UTC-indexed BP grid produce two segments with full-width middle continuation.
         let trip = makeTrip(
             payPeriod: "PP26-04",
             pairing: "1234",
             legs: [
-                leg(payPeriod: "PP26-04", pairing: "1234", flight: "5X1", depAirport: "SDF", arrAirport: "SDF", depUTC: "2026-03-22T03:00:00Z", arrUTC: "2026-03-22T10:00:00Z")
+                leg(payPeriod: "PP26-04", pairing: "1234", flight: "5X1", depAirport: "SDF", arrAirport: "SDF", depUTC: "2026-03-22T22:00:00Z", arrUTC: "2026-03-23T05:00:00Z")
             ]
         )
 
@@ -339,11 +341,14 @@ final class CalendarSegmentationTests: XCTestCase {
     }
 
     func test_buildSegments_tinySegmentNearMidnight() {
+        // 2-minute trip straddling UTC midnight — produces a tiny segment at the end of day 0
+        // and the start of day 1. Validates that buildSegments emits a segment per UTC cell
+        // even when the duration within each cell is sub-minute.
         let trip = makeTrip(
             payPeriod: "PP26-04",
             pairing: "1234",
             legs: [
-                leg(payPeriod: "PP26-04", pairing: "1234", flight: "5X1", depAirport: "SDF", arrAirport: "SDF", depUTC: "2026-03-22T04:59:00Z", arrUTC: "2026-03-22T05:01:00Z")
+                leg(payPeriod: "PP26-04", pairing: "1234", flight: "5X1", depAirport: "SDF", arrAirport: "SDF", depUTC: "2026-03-22T23:59:00Z", arrUTC: "2026-03-23T00:01:00Z")
             ]
         )
 

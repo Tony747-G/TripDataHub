@@ -68,6 +68,11 @@
 		F7B3BF9F00B694A47A128868 /* ImportFileSniffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EABE1DFB8EE6CCCF77FB5717 /* ImportFileSniffer.swift */; };
 		FCAF8CC3DA62D71F1FCBE6B8 /* TimelineTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5F00128A17C7CA217977EA7 /* TimelineTabView.swift */; };
 		FD43BBA08568699E1F1D5C5D /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B4DAB3D177949F363100BE8 /* KeychainService.swift */; };
+		AA010101BB010101CC010102 /* iPadWorkspaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA010101BB010101CC010101 /* iPadWorkspaceModels.swift */; };
+		AA020202BB020202CC020202B /* iPadOperationalWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA020202BB020202CC020202 /* iPadOperationalWorkspaceView.swift */; };
+		AA030303BB030303CC030303B /* iPadBidPeriodCalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA030303BB030303CC030303 /* iPadBidPeriodCalendarView.swift */; };
+		AA040404BB040404CC040404B /* iPadTripBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA040404BB040404CC040404 /* iPadTripBarView.swift */; };
+		AA050505BB050505CC050505B /* iPadTimelineSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA050505BB050505CC050505 /* iPadTimelineSidebarView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -148,6 +153,11 @@
 		F518C211127FA260E6247ED8 /* TripData Hub.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TripDataHub.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FC24A3084F1CB77216493907 /* NextReportWindowBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextReportWindowBuilder.swift; sourceTree = "<group>"; };
 		FE4BC208606CA451400CC1BE /* AppViewModel+PreviewData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppViewModel+PreviewData.swift"; sourceTree = "<group>"; };
+		AA010101BB010101CC010101 /* iPadWorkspaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadWorkspaceModels.swift; sourceTree = "<group>"; };
+		AA020202BB020202CC020202 /* iPadOperationalWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadOperationalWorkspaceView.swift; sourceTree = "<group>"; };
+		AA030303BB030303CC030303 /* iPadBidPeriodCalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadBidPeriodCalendarView.swift; sourceTree = "<group>"; };
+		AA040404BB040404CC040404 /* iPadTripBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadTripBarView.swift; sourceTree = "<group>"; };
+		AA050505BB050505CC050505 /* iPadTimelineSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadTimelineSidebarView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -187,9 +197,22 @@
 			path = TripDataHub;
 			sourceTree = "<group>";
 		};
+		AA060606BB060606CC060606 /* iPad */ = {
+			isa = PBXGroup;
+			children = (
+				AA010101BB010101CC010101 /* iPadWorkspaceModels.swift */,
+				AA020202BB020202CC020202 /* iPadOperationalWorkspaceView.swift */,
+				AA030303BB030303CC030303 /* iPadBidPeriodCalendarView.swift */,
+				AA040404BB040404CC040404 /* iPadTripBarView.swift */,
+				AA050505BB050505CC050505 /* iPadTimelineSidebarView.swift */,
+			);
+			path = iPad;
+			sourceTree = "<group>";
+		};
 		8E1D8F615703F82B2B79E175 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				AA060606BB060606CC060606 /* iPad */,
 				A1B2C3D4E5F60002AABBCC03 /* BrowserTabView.swift */,
 				A1B2C3D4E5F60002AABBCC02 /* BrowserWebView.swift */,
 				24F3AE1A0D7CD7D7B5816484 /* AdminSections.swift */,
@@ -496,6 +519,11 @@
 				A1B2C3D4E5F60001AABBCC01 /* BrowserViewModel.swift in Sources */,
 				A1B2C3D4E5F60001AABBCC02 /* BrowserWebView.swift in Sources */,
 				A1B2C3D4E5F60001AABBCC03 /* BrowserTabView.swift in Sources */,
+				AA010101BB010101CC010102 /* iPadWorkspaceModels.swift in Sources */,
+				AA020202BB020202CC020202B /* iPadOperationalWorkspaceView.swift in Sources */,
+				AA030303BB030303CC030303B /* iPadBidPeriodCalendarView.swift in Sources */,
+				AA040404BB040404CC040404B /* iPadTripBarView.swift in Sources */,
+				AA050505BB050505CC050505B /* iPadTimelineSidebarView.swift in Sources */,
 				67A567A25FC047F6B0E1810E /* PDFTripParser.swift in Sources */,
 				95CC4D2499E74AA4A2CACDDE /* RosterParsingModels.swift in Sources */,
 				060126BA99293293402CEC00 /* ViewShared.swift in Sources */,

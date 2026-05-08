@@ -78,12 +78,11 @@ private func localDayStartUTC(
         return nil
     }
 
-    let localCalendar = calendarInTimeZone(timeZone)
-    let firstLocalComponents = localCalendar.dateComponents([.year, .month, .day], from: firstCalendarDay.dayStartUTC)
-    guard let firstLocalMidnight = localCalendar.date(from: firstLocalComponents) else {
-        return nil
-    }
-    return localCalendar.date(byAdding: .day, value: index, to: firstLocalMidnight)
+    // The BP grid is indexed by UTC calendar dates, so day `index` always begins at UTC midnight
+    // of (firstCalendarDay.dayStartUTC + index days). Using a local-timezone shift here would
+    // contradict `resolveDayIndex`, which maps events to their UTC-date cell.
+    _ = timeZone
+    return calendarEngineUTCCalendar.date(byAdding: .day, value: index, to: firstCalendarDay.dayStartUTC)
 }
 
 private func widestRange(
@@ -162,14 +161,26 @@ func resolveDayIndex(for utcDate: Date, timeZone: TimeZone, calendarDays: [Calen
         return nil
     }
 
-    let localCalendar = calendarInTimeZone(timeZone)
-    let firstLocalDayStart = localCalendar.startOfDay(for: firstCalendarDay.dayStartUTC)
-    let targetLocalDayStart = localCalendar.startOfDay(for: utcDate)
-    let dayOffset = localCalendar.dateComponents([.day], from: firstLocalDayStart, to: targetLocalDayStart).day
+    // The Bid Period grid is indexed by UTC calendar dates: calendarDays[0] = March 22 UTC,
+    // calendarDays[1] = March 23 UTC, etc. We resolve a UTC timestamp to its grid cell by
+    // computing the floor of (utcDate - bpStartUTC) / 1 day.
+    //
+    // Naively using `startOfDay(for: utcDate)` in the local timezone causes a 1-day shift for
+    // UTC- timezones (e.g. ANC at March 22 00:00 UTC = March 21 16:00 AKDT, whose startOfDay is
+    // March 21 00:00 AKDT). That implementation produced dayIndex 7 instead of 6 for events
+    // like an ANC departure at 18:00 UTC March 28, breaking week-crossing trip rendering.
+    //
+    // The `timeZone` parameter is retained for API compatibility — the BP grid itself is fixed
+    // to UTC dates, and per-cell time-of-day positioning is handled by `startFraction` /
+    // `endFraction` which already accept the explicit timezone for the trip leg.
+    let secondsPerDay: TimeInterval = 86_400
+    let elapsed = utcDate.timeIntervalSince(firstCalendarDay.dayStartUTC)
+    let dayOffset = Int((elapsed / secondsPerDay).rounded(.down))
 
-    guard let dayOffset, (0..<calendarDays.count).contains(dayOffset) else {
+    guard (0..<calendarDays.count).contains(dayOffset) else {
         return nil
     }
+    _ = timeZone
     return dayOffset
 }
 
@@ -208,9 +219,14 @@ func localRegressionMetadata(for trip: CalendarTrip, days: [CalendarDay]) -> [In
         let localDeparture = localDateComponents(for: departureUTC, in: departureTimeZone)
         let localArrival = localDateComponents(for: arrivalUTC, in: arrivalTimeZone)
 
-        guard let localDepartureTuple = localDateTuple(from: localDeparture),
-              let localArrivalTuple = localDateTuple(from: localArrival),
-              localArrivalTuple < localDepartureTuple,
+        // Regression is the visible "watch winding back" caused by crossing into a different
+        // UTC offset (or DST transition) during a leg. Same-offset overnight trips (dep 23:00,
+        // arr 06:00 next morning in the same zone) progress forward in absolute time and must
+        // not be flagged. We compare the actual offsets at dep/arr UTC times so that DST
+        // transitions register as a different offset on the same airport.
+        let departureOffset = departureTimeZone.secondsFromGMT(for: departureUTC)
+        let arrivalOffset = arrivalTimeZone.secondsFromGMT(for: arrivalUTC)
+        guard departureOffset != arrivalOffset,
               let dayIndex = resolveDayIndex(for: arrivalUTC, timeZone: arrivalTimeZone, calendarDays: days)
         else {
             continue

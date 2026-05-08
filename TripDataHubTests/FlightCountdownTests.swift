@@ -1,5 +1,5 @@
 import XCTest
-@testable import TripData_Hub
+@testable import TripDataHub
 
 // MARK: - Phase boundary tests
 
