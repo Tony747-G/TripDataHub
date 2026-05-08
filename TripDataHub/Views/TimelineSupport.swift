@@ -13,12 +13,19 @@ struct TimelineLegData {
     let daySections: [TimelineDaySection]
 
     init(schedules: [PayPeriodSchedule], now: Date = Date()) {
-        // Deduplicate by UUID before sorting — the same TripLeg can appear in multiple
-        // PayPeriodSchedule objects when a trip carries over a pay-period boundary.
+        // Primary dedup: UUID — catches the same TripLeg object appearing in multiple
+        // PayPeriodSchedule objects (pay-period boundary carry-over).
         var seenIDs = Set<UUID>()
+        // Secondary dedup: flight-identity key — catches legs that were imported more than
+        // once (each import generates a fresh UUID, so UUID dedup alone misses them).
+        var seenKeys = Set<String>()
         let legs = schedules
             .flatMap(\.legs)
-            .filter { seenIDs.insert($0.id).inserted }
+            .filter { leg in
+                guard seenIDs.insert(leg.id).inserted else { return false }
+                let key = "\(leg.depUTC ?? "")|\(leg.flight)|\(leg.depAirport)|\(leg.arrAirport)"
+                return seenKeys.insert(key).inserted
+            }
             .sorted { lhs, rhs in
                 if lhs.depLocal == rhs.depLocal {
                     return lhs.flight < rhs.flight

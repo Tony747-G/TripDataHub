@@ -29,6 +29,7 @@
 		51A7C9D1E2F3456789ABCF13 /* TripScheduleSnapshotEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABCF12 /* TripScheduleSnapshotEncoderTests.swift */; };
 		51A7C9D1E2F3456789ABD001 /* GEMSVerificationCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABD000 /* GEMSVerificationCloudKitService.swift */; };
 		51A7C9D1E2F3456789ABD003 /* GEMSVerificationCloudKitServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABD002 /* GEMSVerificationCloudKitServiceTests.swift */; };
+		51A7C9D1E2F3456789ABD007 /* DomicileSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABD006 /* DomicileSupport.swift */; };
 		BB01CC01DD01EE01FF010001 /* DeviceScheduleModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC01DD01EE01FF010000 /* DeviceScheduleModels.swift */; };
 		BB01CC01DD01EE01FF010003 /* DeviceScheduleCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC01DD01EE01FF010002 /* DeviceScheduleCloudKitService.swift */; };
 		BB01CC01DD01EE01FF010005 /* DeviceScheduleCloudKitServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC01DD01EE01FF010004 /* DeviceScheduleCloudKitServiceTests.swift */; };
@@ -118,6 +119,7 @@
 		51A7C9D1E2F3456789ABCF12 /* TripScheduleSnapshotEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripScheduleSnapshotEncoderTests.swift; sourceTree = "<group>"; };
 		51A7C9D1E2F3456789ABD000 /* GEMSVerificationCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GEMSVerificationCloudKitService.swift; sourceTree = "<group>"; };
 		51A7C9D1E2F3456789ABD002 /* GEMSVerificationCloudKitServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GEMSVerificationCloudKitServiceTests.swift; sourceTree = "<group>"; };
+		51A7C9D1E2F3456789ABD006 /* DomicileSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomicileSupport.swift; sourceTree = "<group>"; };
 		BB01CC01DD01EE01FF010000 /* DeviceScheduleModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScheduleModels.swift; sourceTree = "<group>"; };
 		BB01CC01DD01EE01FF010002 /* DeviceScheduleCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScheduleCloudKitService.swift; sourceTree = "<group>"; };
 		BB01CC01DD01EE01FF010004 /* DeviceScheduleCloudKitServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScheduleCloudKitServiceTests.swift; sourceTree = "<group>"; };
@@ -262,6 +264,7 @@
 			children = (
 				9B6FCCCA54583B5E8D70721D /* BidPeriodService.swift */,
 				0AF942899EBB7E90814E4995 /* CrewAccessPDFImportService.swift */,
+				51A7C9D1E2F3456789ABD006 /* DomicileSupport.swift */,
 				9B958B23E0C844158F487B53 /* PDFTripParser.swift */,
 				4F6C86491D2E927C2CEC60D5 /* FlightCountdownCoordinator.swift */,
 				51A7C9D1E2F3456789ABC008 /* FriendScheduleCloudKitService.swift */,
@@ -492,6 +495,7 @@
 				F4130D36B01FE4896582FC2F /* AppViewModel+PreviewData.swift in Sources */,
 				DEA186B6F8256B4A0B01C291 /* AppViewModel.swift in Sources */,
 				5C839E2F9397C27B75B962A9 /* BidPeriodService.swift in Sources */,
+				51A7C9D1E2F3456789ABD007 /* DomicileSupport.swift in Sources */,
 				D7CF5354C3F636A38CCA3C27 /* CalendarModels.swift in Sources */,
 				6EC416FDFC26261153D10DD5 /* CalendarSupport.swift in Sources */,
 				E1BDA32E3801BEDCB3C9A9E3 /* CrewAccessImportHelpView.swift in Sources */,

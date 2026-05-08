@@ -55,8 +55,79 @@ final class CalendarBidPeriodGenerationTests: XCTestCase {
         let period = bidPeriod(for: Self.iso.date(from: "2026-11-15T12:00:00Z")!)
         XCTAssertEqual(period?.id, "BP26-07")
         XCTAssertEqual(period?.days.count, 28)
-        XCTAssertEqual(period?.endDateUTC, Self.iso.date(from: "2026-11-29T00:00:00Z"))
+        XCTAssertEqual(period?.endDateUTC, Self.iso.date(from: "2026-11-29T12:00:00Z"))
         XCTAssertEqual(bidPeriod(for: period!.endDateUTC)?.id, "BP27-01")
+    }
+
+    func test_bidPeriod_matchesPayPeriodPairs() {
+        let bp2604 = bidPeriod(for: Self.iso.date(from: "2026-05-17T12:00:00Z")!)
+        XCTAssertEqual(bp2604?.id, "BP26-04")
+        XCTAssertEqual(bp2604?.startDateUTC, Self.iso.date(from: "2026-05-17T11:00:00Z"))
+        XCTAssertEqual(bp2604?.endDateUTC, Self.iso.date(from: "2026-07-12T11:00:00Z"))
+
+        let bp2701 = bidPeriod(for: Self.iso.date(from: "2026-11-29T12:00:00Z")!)
+        XCTAssertEqual(bp2701?.id, "BP27-01")
+        XCTAssertEqual(bp2701?.startDateUTC, Self.iso.date(from: "2026-11-29T12:00:00Z"))
+        XCTAssertEqual(bp2701?.endDateUTC, Self.iso.date(from: "2027-01-24T12:00:00Z"))
+
+        let bp2707 = bidPeriod(for: Self.iso.date(from: "2027-11-28T12:00:00Z")!)
+        XCTAssertEqual(bp2707?.id, "BP27-07")
+        XCTAssertEqual(bp2707?.startDateUTC, Self.iso.date(from: "2027-10-31T11:00:00Z"))
+        XCTAssertEqual(bp2707?.endDateUTC, Self.iso.date(from: "2027-12-26T12:00:00Z"))
+    }
+
+    func test_bidPeriod_usesAnchorage0300Boundary() {
+        XCTAssertEqual(
+            bidPeriod(for: Self.iso.date(from: "2026-05-17T10:59:59Z")!)?.id,
+            "BP26-03"
+        )
+        XCTAssertEqual(
+            bidPeriod(for: Self.iso.date(from: "2026-05-17T11:00:00Z")!)?.id,
+            "BP26-04"
+        )
+        XCTAssertEqual(
+            bidPeriod(for: Self.iso.date(from: "2026-07-12T10:59:59Z")!)?.id,
+            "BP26-04"
+        )
+        XCTAssertEqual(
+            bidPeriod(for: Self.iso.date(from: "2026-07-12T11:00:00Z")!)?.id,
+            "BP26-05"
+        )
+    }
+
+    func test_bidPeriod_usesDomicile0300Boundary() {
+        XCTAssertEqual(
+            bidPeriod(for: Self.iso.date(from: "2026-05-17T06:59:59Z")!, domicile: "SDF")?.id,
+            "BP26-03"
+        )
+        XCTAssertEqual(
+            bidPeriod(for: Self.iso.date(from: "2026-05-17T07:00:00Z")!, domicile: "SDF")?.id,
+            "BP26-04"
+        )
+        XCTAssertEqual(
+            bidPeriod(for: Self.iso.date(from: "2026-05-17T06:59:59Z")!, domicile: "SDFZ")?.id,
+            "BP26-03"
+        )
+        XCTAssertEqual(
+            bidPeriod(for: Self.iso.date(from: "2026-05-17T07:00:00Z")!, domicile: "SDFZ")?.id,
+            "BP26-04"
+        )
+        XCTAssertEqual(
+            bidPeriod(for: Self.iso.date(from: "2026-05-17T06:59:59Z")!, domicile: "MIA")?.id,
+            "BP26-03"
+        )
+        XCTAssertEqual(
+            bidPeriod(for: Self.iso.date(from: "2026-05-17T07:00:00Z")!, domicile: "MIA")?.id,
+            "BP26-04"
+        )
+        XCTAssertEqual(
+            bidPeriod(for: Self.iso.date(from: "2026-05-17T09:59:59Z")!, domicile: "ONT")?.id,
+            "BP26-03"
+        )
+        XCTAssertEqual(
+            bidPeriod(for: Self.iso.date(from: "2026-05-17T10:00:00Z")!, domicile: "ONT")?.id,
+            "BP26-04"
+        )
     }
 }
 

@@ -3,6 +3,7 @@ import SwiftUI
 struct IPadTimelineSidebarView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @Binding var selectedTripID: String?
+    @Environment(\.colorScheme) private var colorScheme
 
     @AppStorage("app_font_size_option") private var appFontSizeOptionRawValue = AppFontSizeOption.medium.rawValue
 
@@ -22,15 +23,21 @@ struct IPadTimelineSidebarView: View {
         (AppFontSizeOption(rawValue: appFontSizeOptionRawValue) ?? .medium).scaleFactor
     }
 
+    private var timelineFontScale: CGFloat {
+        fontScale * 0.78
+    }
+
     private var sidebarSchedules: [PayPeriodSchedule] {
-        // crewAccess is primary; supplement with CloudKit for any schedules not yet PDF-imported.
+        // crewAccess is primary. Add bidpro schedules whose pairings have no overlap with
+        // crewAccess so we never show the same trip twice (viewModel.schedules is the merged
+        // union of both sources and would cause duplicates if used directly here).
         let crewAccessPairings = Set(
             viewModel.crewAccessSchedules.flatMap(\.legs).map { "\($0.payPeriod)|\($0.pairing)" }
         )
-        let cloudKitOnly = viewModel.schedules.filter { schedule in
-            schedule.legs.contains { !crewAccessPairings.contains("\($0.payPeriod)|\($0.pairing)") }
+        let bidproOnly = viewModel.bidproSchedules.filter { schedule in
+            !schedule.legs.contains { crewAccessPairings.contains("\($0.payPeriod)|\($0.pairing)") }
         }
-        return viewModel.crewAccessSchedules + cloudKitOnly
+        return viewModel.crewAccessSchedules + bidproOnly
     }
 
     private var legData: TimelineLegData {
@@ -68,6 +75,7 @@ struct IPadTimelineSidebarView: View {
                             Section {
                                 ForEach(section.legs) { leg in
                                     let tripID = "\(leg.payPeriod)|\(leg.pairing)"
+                                    let rowID = "\(tripID)|\(leg.leg)|\(leg.id.uuidString)"
                                     let isSelected = selectedTripID == tripID
 
                                     Group {
@@ -77,7 +85,7 @@ struct IPadTimelineSidebarView: View {
                                             TimelineFlightRow(
                                                 leg: leg,
                                                 isPast: section.isPast,
-                                                fontScale: fontScale,
+                                                fontScale: timelineFontScale,
                                                 timeRangeText: timeRangeText(for: leg),
                                                 dayDiff: ScheduleDateText.dayShift(
                                                     from: leg.depLocal,
@@ -112,27 +120,28 @@ struct IPadTimelineSidebarView: View {
                                                 ),
                                                 arrLocalDateLabel: "",
                                                 isPast: section.isPast,
-                                                fontScale: fontScale
+                                                fontScale: timelineFontScale
                                             )
                                         }
                                     }
-                                    .id(tripID)
+                                    .id(rowID)
                                 }
                             } header: {
                                 Text(section.label)
-                                    .appScaledFont(.footnote, weight: .semibold, scale: fontScale)
-                                    .foregroundStyle(ScheduleColors.timelineDateHeaderText(for: .dark))
+                                    .appScaledFont(.caption2, weight: .semibold, scale: timelineFontScale)
+                                    .foregroundStyle(ScheduleColors.timelineDateHeaderText(for: colorScheme))
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 16)
+                                    .padding(.horizontal, 12)
                                     .padding(.vertical, 5)
-                                    .background(ScheduleColors.dayHeaderBackground(for: .light))
+                                    .background(ScheduleColors.dayHeaderBackground(for: colorScheme))
                             }
                         }
                     }
                 }
                 .onChange(of: selectedTripID) { _, newID in
-                    if let id = newID {
-                        withAnimation { proxy.scrollTo(id, anchor: .center) }
+                    if let id = newID,
+                       let firstRowID = firstRowID(for: id) {
+                        withAnimation { proxy.scrollTo(firstRowID, anchor: .center) }
                     }
                 }
             }
@@ -147,7 +156,7 @@ struct IPadTimelineSidebarView: View {
             .font(.system(size: 13, weight: .semibold))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .frame(height: 44)
             .background(Color(.secondarySystemBackground))
             .overlay(alignment: .bottom) { Divider() }
     }
@@ -193,6 +202,15 @@ struct IPadTimelineSidebarView: View {
             nextDepDate: nextLeg.flatMap { LegConnectionTextBuilder.parseUTC($0.depUTC) },
             samePairing: nextLeg?.pairing == leg.pairing
         )
+    }
+
+    private func firstRowID(for tripID: String) -> String? {
+        for section in legData.daySections {
+            if let leg = section.legs.first(where: { "\($0.payPeriod)|\($0.pairing)" == tripID }) {
+                return "\(tripID)|\(leg.leg)|\(leg.id.uuidString)"
+            }
+        }
+        return nil
     }
 }
 

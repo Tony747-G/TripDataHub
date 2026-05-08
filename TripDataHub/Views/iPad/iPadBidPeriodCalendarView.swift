@@ -36,9 +36,13 @@ struct IPadBidPeriodCalendarView: View {
         mergedCalendarTrips(crewAccess: viewModel.crewAccessSchedules, supplemental: viewModel.schedules)
     }
 
+    private var domicile: String {
+        viewModel.verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
+    }
+
     private var gridDays: [IPadCalendarGridDay] {
         guard let bp = currentBidPeriod else { return [] }
-        return iPadCalendarGrid(for: bp)
+        return iPadCalendarGrid(for: bp, domicile: domicile)
     }
 
     private var calendarDays: [CalendarDay] {
@@ -70,8 +74,9 @@ struct IPadBidPeriodCalendarView: View {
             GeometryReader { geo in
                 gridView(totalHeight: geo.size.height)
             }
+            .background(Color(.systemBackground))
         }
-        .background(Color(.systemBackground))
+        .background(Color(.secondarySystemBackground).ignoresSafeArea(edges: .top))
         .onAppear { loadBidPeriod(for: Date()) }
         .onChange(of: viewModel.crewAccessSchedules) { _, _ in /* segments recomputed */ }
         .onChange(of: viewModel.schedules) { _, _ in /* segments recomputed */ }
@@ -84,13 +89,15 @@ struct IPadBidPeriodCalendarView: View {
 
     private var headerView: some View {
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(currentBidPeriod?.id ?? "—")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 18, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.primary)
                 Text(bidPeriodRangeLabel)
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
             }
+            .lineLimit(1)
 
             Spacer()
 
@@ -143,7 +150,7 @@ struct IPadBidPeriodCalendarView: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .frame(height: 44)
         .background(Color(.secondarySystemBackground))
         .overlay(alignment: .bottom) {
             Divider()
@@ -211,15 +218,20 @@ struct IPadBidPeriodCalendarView: View {
 
     private var bidPeriodRangeLabel: String {
         guard let bp = currentBidPeriod else { return "" }
-        let start = Self.dateRangeFormatter.string(from: bp.startDateUTC)
-        let end = Self.dateRangeFormatter.string(from: bp.endDateUTC)
-        let year = Self.yearFormatter.string(from: bp.endDateUTC)
+        // `startDateUTC` / `endDateUTC` are operational 03:00 ANC boundaries. The
+        // header describes the visible 4/8-week calendar grid, so use the first
+        // and last rendered UTC date cells instead of the exclusive boundary.
+        let startDateUTC = bp.days.first?.dayStartUTC ?? bp.startDateUTC
+        let endDateUTC = bp.days.last?.dayStartUTC ?? bp.endDateUTC
+        let start = Self.dateRangeFormatter.string(from: startDateUTC)
+        let end = Self.dateRangeFormatter.string(from: endDateUTC)
+        let year = Self.yearFormatter.string(from: endDateUTC)
         return "\(start) – \(end), \(year)"
     }
 
     private var previousBPLabel: String {
         guard let bp = currentBidPeriod,
-              let prev = bidPeriod(for: bp.startDateUTC.addingTimeInterval(-1)) else {
+              let prev = bidPeriod(for: bp.startDateUTC.addingTimeInterval(-1), domicile: domicile) else {
             return "Prev"
         }
         return prev.id
@@ -227,7 +239,7 @@ struct IPadBidPeriodCalendarView: View {
 
     private var nextBPLabel: String {
         guard let bp = currentBidPeriod,
-              let next = bidPeriod(for: bp.endDateUTC) else {
+              let next = bidPeriod(for: bp.endDateUTC, domicile: domicile) else {
             return "Next"
         }
         return next.id
@@ -238,18 +250,18 @@ struct IPadBidPeriodCalendarView: View {
     }
 
     private func loadBidPeriod(for date: Date) {
-        currentBidPeriod = bidPeriod(for: date)
+        currentBidPeriod = bidPeriod(for: date, domicile: domicile)
     }
 
     private func navigateToPreviousBP() {
         guard let bp = currentBidPeriod,
-              let prev = bidPeriod(for: bp.startDateUTC.addingTimeInterval(-1)) else { return }
+              let prev = bidPeriod(for: bp.startDateUTC.addingTimeInterval(-1), domicile: domicile) else { return }
         currentBidPeriod = prev
     }
 
     private func navigateToNextBP() {
         guard let bp = currentBidPeriod,
-              let next = bidPeriod(for: bp.endDateUTC) else { return }
+              let next = bidPeriod(for: bp.endDateUTC, domicile: domicile) else { return }
         currentBidPeriod = next
     }
 }
@@ -285,17 +297,15 @@ private struct CalendarDayCell: View {
         utc.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
         return utc.isDateInToday(dayDate)
     }
-    private var isWeekend: Bool {
-        let col = gridDay.calendarDay.weekdayIndex
-        return col == 0 || col == 6
-    }
+    private var isSunday: Bool { gridDay.calendarDay.weekdayIndex == 0 }
+    private var isSaturday: Bool { gridDay.calendarDay.weekdayIndex == 6 }
     private var isFirstOfMonth: Bool {
         var utc = Calendar(identifier: .gregorian)
         utc.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
         return utc.component(.day, from: dayDate) == 1
     }
 
-    private let dateHeaderHeight: CGFloat = 22
+    private let dateHeaderHeight: CGFloat = 28
     private let laneHeight: CGFloat = 14
     private let laneSpacing: CGFloat = 1
     private let barTopPadding: CGFloat = 2
@@ -311,25 +321,25 @@ private struct CalendarDayCell: View {
                     Group {
                         if isToday {
                             Text(Self.dayFormatter.string(from: dayDate))
-                                .font(.system(size: 11, weight: .bold))
+                                .font(.system(size: 16, weight: .bold))
                                 .foregroundStyle(.white)
-                                .frame(width: 20, height: 20)
+                                .frame(width: 26, height: 26)
                                 .background(Circle().fill(Color.accentColor))
                         } else {
                             Text(Self.dayFormatter.string(from: dayDate))
-                                .font(.system(size: 11, weight: gridDay.isOverflow ? .light : .regular))
+                                .font(.system(size: 16, weight: gridDay.isOverflow ? .light : .semibold))
                                 .foregroundStyle(gridDay.isOverflow ? .tertiary : .primary)
-                                .frame(width: 20, height: 20)
+                                .frame(width: 26, height: 26)
                         }
                     }
                     if isFirstOfMonth || gridDay.calendarDay.index == 0 {
                         Text(Self.monthFormatter.string(from: dayDate))
-                            .font(.system(size: 9, weight: .medium))
+                            .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.secondary)
                     }
                 }
-                .padding(.leading, 4)
-                .padding(.top, 2)
+                .padding(.leading, 5)
+                .padding(.top, 3)
 
                 // Trip bars
                 let cellFrame = CGRect(origin: .zero, size: geo.size)
@@ -366,8 +376,10 @@ private struct CalendarDayCell: View {
 
     @ViewBuilder
     private var cellBackground: some View {
-        if isWeekend {
-            Color(.systemFill)
+        if isSunday {
+            Color.red.opacity(0.10)
+        } else if isSaturday {
+            Color.blue.opacity(0.08)
         } else {
             Color.clear
         }

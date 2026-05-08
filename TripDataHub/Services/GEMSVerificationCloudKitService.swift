@@ -5,6 +5,18 @@ import Foundation
 struct GEMSVerificationImportRecord: Equatable, Sendable {
     let gemsID: String
     let dateOfBirth: String
+    let domicile: String
+
+    init(gemsID: String, dateOfBirth: String, domicile: String = DomicileSupport.defaultDomicile) {
+        self.gemsID = gemsID
+        self.dateOfBirth = dateOfBirth
+        self.domicile = DomicileSupport.normalize(domicile)
+    }
+}
+
+struct GEMSVerificationResult: Equatable, Sendable {
+    let gemsID: String
+    let domicile: String
 }
 
 struct VerifiedAppUser: Identifiable, Hashable, Sendable {
@@ -32,7 +44,7 @@ protocol GEMSVerificationCloudKitServicing: Sendable {
         _ records: [GEMSVerificationImportRecord],
         progress: (@MainActor @Sendable (_ uploaded: Int, _ total: Int) -> Void)?
     ) async throws -> Int
-    func verify(gemsID: String, dateOfBirth: String) async throws -> Bool
+    func verify(gemsID: String, dateOfBirth: String) async throws -> GEMSVerificationResult?
     func recordVerifiedUser(gemsID: String) async throws
     func fetchVerifiedUsers() async throws -> [VerifiedAppUser]
 }
@@ -128,6 +140,7 @@ final class GEMSVerificationCloudKitService: GEMSVerificationCloudKitServicing, 
     private enum Field {
         static let gemsID = "gemsID"
         static let dobHash = "dobHash"
+        static let domicile = "domicile"
         static let schemaVersion = "schemaVersion"
         static let updatedAt = "updatedAt"
         static let verifiedAt = "verifiedAt"
@@ -169,7 +182,8 @@ final class GEMSVerificationCloudKitService: GEMSVerificationCloudKitServicing, 
             let cloudRecord = CKRecord(recordType: RecordType.verification, recordID: recordID)
             cloudRecord[Field.gemsID] = normalizedGEMS as CKRecordValue
             cloudRecord[Field.dobHash] = Self.verificationHash(gemsID: normalizedGEMS, normalizedDOB: normalizedDOB) as CKRecordValue
-            cloudRecord[Field.schemaVersion] = Int64(1) as CKRecordValue
+            cloudRecord[Field.domicile] = DomicileSupport.normalize(record.domicile) as CKRecordValue
+            cloudRecord[Field.schemaVersion] = Int64(2) as CKRecordValue
             cloudRecord[Field.updatedAt] = Date() as CKRecordValue
             recordsToSave.append(cloudRecord)
         }
@@ -183,10 +197,10 @@ final class GEMSVerificationCloudKitService: GEMSVerificationCloudKitServicing, 
         return savedCount
     }
 
-    func verify(gemsID: String, dateOfBirth: String) async throws -> Bool {
+    func verify(gemsID: String, dateOfBirth: String) async throws -> GEMSVerificationResult? {
         let normalizedGEMS = GEMSIDNormalizer.normalize(gemsID)
         guard let normalizedDOB = Self.normalizedDOB(dateOfBirth), !normalizedGEMS.isEmpty else {
-            return false
+            return nil
         }
 
         do {
@@ -195,9 +209,15 @@ final class GEMSVerificationCloudKitService: GEMSVerificationCloudKitServicing, 
             guard let storedHash = record[Field.dobHash] as? String else {
                 throw GEMSVerificationCloudKitError.invalidRecord
             }
-            return storedHash == Self.verificationHash(gemsID: normalizedGEMS, normalizedDOB: normalizedDOB)
+            guard storedHash == Self.verificationHash(gemsID: normalizedGEMS, normalizedDOB: normalizedDOB) else {
+                return nil
+            }
+            return GEMSVerificationResult(
+                gemsID: normalizedGEMS,
+                domicile: DomicileSupport.normalize(record[Field.domicile] as? String)
+            )
         } catch let error as CKError where error.code == .unknownItem {
-            return false
+            return nil
         }
     }
 

@@ -1021,6 +1021,9 @@ final class AppViewModel: ObservableObject {
     }
 
     @discardableResult
+    // Developer-only compatibility hook for tests and pre-UI automation. The production
+    // Admin tab no longer exposes CSV upload because source seniority CSVs contain DOB.
+    // Use scripts/upload_gems_verification.js for monthly CloudKit verification updates.
     func importSeniorityCSVData(_ data: Data) async -> Bool {
         guard !isUploadingGEMSVerification else {
             seniorityImportMessage = "GEMS verification upload is already running."
@@ -1965,14 +1968,18 @@ final class AppViewModel: ObservableObject {
         let isReplacement = updatedCrewAccess.contains(where: { $0.id == imported.id })
         if let index = updatedCrewAccess.firstIndex(where: { $0.id == imported.id }) {
             let existing = updatedCrewAccess[index]
-            let mergedLegs = (existing.legs + imported.legs).sorted { lhs, rhs in
-                let lhsUTC = lhs.depUTC ?? ""
-                let rhsUTC = rhs.depUTC ?? ""
-                if lhsUTC == rhsUTC {
-                    return lhs.leg < rhs.leg
+            // Deduplicate by flight-identity key (depUTC|flight|depAirport|arrAirport) before
+            // merging so that re-importing the same PDF doesn't duplicate legs. Each import
+            // generates fresh UUIDs, so UUID equality cannot detect the duplicate.
+            var seenLegKeys = Set<String>()
+            let mergedLegs = (imported.legs + existing.legs)
+                .filter { seenLegKeys.insert(Self.logTenLegDedupKey(for: $0)).inserted }
+                .sorted { lhs, rhs in
+                    let lhsUTC = lhs.depUTC ?? ""
+                    let rhsUTC = rhs.depUTC ?? ""
+                    if lhsUTC == rhsUTC { return lhs.leg < rhs.leg }
+                    return lhsUTC < rhsUTC
                 }
-                return lhsUTC < rhsUTC
-            }
             let mergedTripCount = Set(mergedLegs.map(\.pairing)).count
             updatedCrewAccess[index] = PayPeriodSchedule(
                 id: existing.id,
@@ -2495,7 +2502,11 @@ final class AppViewModel: ObservableObject {
         guard let previousCount = crewAccessRetentionPreviousBidPeriods() else {
             return nil
         }
-        return retainedBidPeriodOrders(currentDateUTC: Date(), previousCount: previousCount)
+        return retainedBidPeriodOrders(
+            currentDateUTC: Date(),
+            previousCount: previousCount,
+            domicile: verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
+        )
     }
 
     private func crewAccessRetentionPreviousBidPeriods() -> Int? {
@@ -2512,7 +2523,10 @@ final class AppViewModel: ObservableObject {
             ?? parseCrewAccessBidPeriodOrder(schedule.label)
             ?? schedule.legs.compactMap { leg in
                 if let depUTC = LegConnectionTextBuilder.parseUTC(leg.depUTC),
-                   let period = bidPeriod(for: depUTC) {
+                   let period = bidPeriod(
+                    for: depUTC,
+                    domicile: verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
+                   ) {
                     return bidPeriodOrder(for: period.id)
                 }
                 let normalized = Self.normalizeTripInformationDateForDisplay(leg.depLocal, fallbackDate: nil).dateString
@@ -2521,7 +2535,10 @@ final class AppViewModel: ObservableObject {
                 formatter.timeZone = TimeZone(secondsFromGMT: 0)
                 formatter.dateFormat = "yyyy-MM-dd"
                 guard let date = formatter.date(from: normalized),
-                      let period = bidPeriod(for: date) else {
+                      let period = bidPeriod(
+                        for: date,
+                        domicile: verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
+                      ) else {
                     return nil
                 }
                 return bidPeriodOrder(for: period.id)
@@ -3206,9 +3223,9 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        let isVerified: Bool
+        let verificationResult: GEMSVerificationResult?
         do {
-            isVerified = try await gemsVerificationCloudKitService.verify(
+            verificationResult = try await gemsVerificationCloudKitService.verify(
                 gemsID: gemsID,
                 dateOfBirth: normalizedDOB
             )
@@ -3217,17 +3234,18 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        let isAdminBootstrap = !isVerified && isAdminEligible(gemsID: gemsID, dob: normalizedDOB)
-        guard isVerified || isAdminBootstrap || allowVerificationWithoutSeniorityDB else {
+        let isAdminBootstrap = verificationResult == nil && isAdminEligible(gemsID: gemsID, dob: normalizedDOB)
+        guard verificationResult != nil || isAdminBootstrap || allowVerificationWithoutSeniorityDB else {
             identityActionMessage = "Verification failed. Check GEMS ID / DOB."
             return
         }
+        let domicile = verificationResult?.domicile ?? DomicileSupport.defaultDomicile
 
         let verified = VerifiedIdentityProfile(
             cloudKitRecordName: currentCloudKitRecordName,
             name: "GEMS \(gemsID)",
             gemsID: gemsID,
-            domicile: "-",
+            domicile: domicile,
             equipment: "-",
             seat: "-",
             dateOfHire: "-",
@@ -3245,7 +3263,7 @@ final class AppViewModel: ObservableObject {
         updateAdminStatus()
         identityActionMessage = isAdminBootstrap
             ? "Verified as bootstrap admin. Upload GEMS verification records to CloudKit."
-            : "Verified as GEMS \(gemsID)."
+            : "Verified as GEMS \(gemsID) / \(domicile)."
         if isScheduleSharingEnabled {
             Task { [weak self] in
                 await self?.syncFriendCloudKit(reason: "identity verified")
@@ -3878,6 +3896,9 @@ final class AppViewModel: ObservableObject {
         else {
             return []
         }
+        let domicileIndex = headerMap["DOM"]
+            ?? headerMap["DOMICILE"]
+            ?? headerMap["BASE"]
 
         var records: [GEMSVerificationImportRecord] = []
         var seenGEMS: Set<String> = []
@@ -3889,10 +3910,15 @@ final class AppViewModel: ObservableObject {
             }
             let gems = GEMSIDNormalizer.normalize(fields[gemsIndex])
             let dob = fields[dobIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+            let domicile = domicileIndex.flatMap { index in
+                fields.indices.contains(index)
+                ? fields[index].trimmingCharacters(in: .whitespacesAndNewlines)
+                : nil
+            } ?? DomicileSupport.defaultDomicile
             guard !gems.isEmpty, !dob.isEmpty, normalizeDOB(dob) != nil, seenGEMS.insert(gems).inserted else {
                 continue
             }
-            records.append(GEMSVerificationImportRecord(gemsID: gems, dateOfBirth: dob))
+            records.append(GEMSVerificationImportRecord(gemsID: gems, dateOfBirth: dob, domicile: domicile))
         }
         return records
     }

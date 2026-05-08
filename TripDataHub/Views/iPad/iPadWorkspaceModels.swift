@@ -75,7 +75,10 @@ private func updatedAtByTripID(schedules: [PayPeriodSchedule]) -> [String: Date]
 /// and `currentBidPeriod` only ever requests trips for the active BP's range. If a future
 /// phase needs to draw trip bars on overflow rows, introduce a grid-local index (e.g.
 /// `gridPosition: 0..<56`) on `IPadCalendarGridDay` and key segment lookup on that instead.
-func iPadCalendarGrid(for bidPeriod: CalendarBidPeriod) -> [IPadCalendarGridDay] {
+func iPadCalendarGrid(
+    for bidPeriod: CalendarBidPeriod,
+    domicile: String = DomicileSupport.defaultDomicile
+) -> [IPadCalendarGridDay] {
     let activeDays = bidPeriod.days
     let targetCount = 56
 
@@ -87,7 +90,7 @@ func iPadCalendarGrid(for bidPeriod: CalendarBidPeriod) -> [IPadCalendarGridDay]
     var grid = activeDays.map { IPadCalendarGridDay(calendarDay: $0, isOverflow: false) }
     let needed = targetCount - activeDays.count
 
-    if let nextBP = nextBidPeriod(after: bidPeriod) {
+    if let nextBP = nextBidPeriod(after: bidPeriod, domicile: domicile) {
         let overflowDays = nextBP.days.prefix(needed)
         grid += overflowDays.map { IPadCalendarGridDay(calendarDay: $0, isOverflow: true) }
     } else {
@@ -118,8 +121,8 @@ func iPadCalendarGrid(for bidPeriod: CalendarBidPeriod) -> [IPadCalendarGridDay]
 
 // MARK: - Next Bid Period
 
-private func nextBidPeriod(after current: CalendarBidPeriod) -> CalendarBidPeriod? {
-    bidPeriod(for: current.endDateUTC)
+private func nextBidPeriod(after current: CalendarBidPeriod, domicile: String) -> CalendarBidPeriod? {
+    bidPeriod(for: current.endDateUTC, domicile: domicile)
 }
 
 // MARK: - Trip Bar Label

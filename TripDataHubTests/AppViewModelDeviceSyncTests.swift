@@ -358,7 +358,7 @@ private struct NoopGEMSVerificationService: GEMSVerificationCloudKitServicing {
         _ records: [GEMSVerificationImportRecord],
         progress: (@MainActor @Sendable (Int, Int) -> Void)?
     ) async throws -> Int { 0 }
-    func verify(gemsID: String, dateOfBirth: String) async throws -> Bool { false }
+    func verify(gemsID: String, dateOfBirth: String) async throws -> GEMSVerificationResult? { nil }
     func recordVerifiedUser(gemsID: String) async throws {}
     func fetchVerifiedUsers() async throws -> [VerifiedAppUser] { [] }
 }
