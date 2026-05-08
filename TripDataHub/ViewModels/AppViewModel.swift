@@ -198,6 +198,7 @@ final class AppViewModel: ObservableObject {
     private let friendScheduleCloudKitService: FriendScheduleCloudKitServicing
     private let gemsVerificationCloudKitService: GEMSVerificationCloudKitServicing
     private let deviceScheduleCloudKitService: DeviceScheduleCloudKitServicing
+    private let crewAccessImportCloudKitService: CrewAccessImportCloudKitServicing
     private let tzResolver: IATATimeZoneResolving
     private let externalOpenCoordinator: ExternalOpenImportCoordinator
     private let flightCountdownCoordinator = FlightCountdownCoordinator()
@@ -219,6 +220,8 @@ final class AppViewModel: ObservableObject {
     private var foregroundObserver: NSObjectProtocol?
     private var lastDeviceScheduleFetchAt: Date?
     private var cachedDeviceID: String?
+    private var isFetchingCrewAccessImports = false
+    private var lastCrewAccessImportFetchAt: Date?
 
     private let notification48hKey = "notification_48h_enabled"
     private let notification24hKey = "notification_24h_enabled"
@@ -238,6 +241,7 @@ final class AppViewModel: ObservableObject {
     private let deviceScheduleUploadFingerprintKey = "device_schedule_last_upload_fingerprint_v1"
     private let deviceScheduleFetchAtKey = "device_schedule_last_fetch_at_v1"
     private let deviceIDKey = "device_id_v1"
+    private let crewAccessImportFetchAtKey = "crewaccess_import_fetch_at_v1"
     private let cloudKitContainerIdentifier = "iCloud.com.sfune.TimelineSchedule"
     private let cloudKitIdentityTimeoutNanoseconds: UInt64 = 5_000_000_000
     private let useCloudKitIdentity = true
@@ -266,6 +270,9 @@ final class AppViewModel: ObservableObject {
         deviceScheduleCloudKitService: DeviceScheduleCloudKitServicing = DeviceScheduleCloudKitService(
             containerIdentifier: "iCloud.com.sfune.TimelineSchedule"
         ),
+        crewAccessImportCloudKitService: CrewAccessImportCloudKitServicing = CrewAccessImportCloudKitService(
+            containerIdentifier: "iCloud.com.sfune.TimelineSchedule"
+        ),
         tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared
     ) {
         self.syncService = syncService
@@ -276,6 +283,7 @@ final class AppViewModel: ObservableObject {
         self.friendScheduleCloudKitService = friendScheduleCloudKitService
         self.gemsVerificationCloudKitService = gemsVerificationCloudKitService
         self.deviceScheduleCloudKitService = deviceScheduleCloudKitService
+        self.crewAccessImportCloudKitService = crewAccessImportCloudKitService
         self.tzResolver = tzResolver
         self.externalOpenCoordinator = ExternalOpenImportCoordinator.shared
         let loadedAdminPolicy = Self.loadAdminPolicy()
@@ -350,6 +358,8 @@ final class AppViewModel: ObservableObject {
             }
             await self?.refreshNotificationAuthorizationStatus()
             await self?.rescheduleNotificationsIfAuthorized()
+            // Fetch remote import files before reconcile so iPad gets iOS-imported files.
+            await self?.fetchCrewAccessImportFilesIfNeeded(reason: "startup")
             await self?.applyCrewAccessRetentionPolicy()
         }
 
@@ -358,7 +368,10 @@ final class AppViewModel: ObservableObject {
             object: nil,
             queue: nil
         ) { [weak self] _ in
-            Task { await self?.fetchDeviceScheduleIfNeeded(reason: "foreground") }
+            Task {
+                await self?.fetchCrewAccessImportFilesIfNeeded(reason: "foreground")
+                await self?.fetchDeviceScheduleIfNeeded(reason: "foreground")
+            }
         }
 
 #if DEBUG
@@ -893,6 +906,76 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    // MARK: - CrewAccess Import CloudKit Sync
+
+    func fetchCrewAccessImportFilesIfNeeded(reason: String) async {
+        guard isIdentityVerified, let verifiedIdentity else { return }
+        guard !isFetchingCrewAccessImports else { return }
+        isFetchingCrewAccessImports = true
+        defer { isFetchingCrewAccessImports = false }
+
+        let fm = FileManager.default
+        guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let dir = documents.appendingPathComponent("CrewAccessImports", isDirectory: true)
+
+        do {
+            let records = try await crewAccessImportCloudKitService.fetchImportFiles(gemsID: verifiedIdentity.gemsID)
+            var writtenCount = 0
+            for record in records {
+                if record.deletedAt != nil {
+                    // Tombstoned: remove local file if present.
+                    let url = dir.appendingPathComponent(record.fileName)
+                    if fm.fileExists(atPath: url.path) { try? fm.removeItem(at: url) }
+                    continue
+                }
+                try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+                let fileURL = dir.appendingPathComponent(record.fileName)
+                let localModifiedAt = (try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                guard localModifiedAt == nil || record.updatedAt > localModifiedAt! else { continue }
+                try? record.jsonData.write(to: fileURL)
+                writtenCount += 1
+            }
+            lastCrewAccessImportFetchAt = Date()
+            UserDefaults.standard.set(lastCrewAccessImportFetchAt, forKey: crewAccessImportFetchAtKey)
+            logNonFatal("CrewAccess import files fetched: \(reason) total=\(records.count) written=\(writtenCount)")
+        } catch {
+            logNonFatal("CrewAccess import file fetch failed: \(error.localizedDescription) reason=\(reason)")
+        }
+    }
+
+    private func uploadCrewAccessImportFile(at url: URL, json: CrewAccessTripJSON) async {
+        guard isIdentityVerified, let verifiedIdentity else { return }
+        guard let jsonData = try? Data(contentsOf: url) else { return }
+        let fileName = url.lastPathComponent
+        let firstDep = json.items.first?.startUtc
+        do {
+            try await crewAccessImportCloudKitService.uploadImportFile(
+                gemsID: verifiedIdentity.gemsID,
+                fileName: fileName,
+                jsonData: jsonData,
+                tripInformationDate: json.tripInformationDate,
+                firstDepartureUTC: firstDep
+            )
+            logNonFatal("CrewAccess import file uploaded: \(fileName)")
+        } catch {
+            logNonFatal("CrewAccess import file upload failed: \(error.localizedDescription) file=\(fileName)")
+        }
+    }
+
+    private func tombstoneCrewAccessImportFiles(fileNames: [String]) async {
+        guard isIdentityVerified, let verifiedIdentity else { return }
+        for fileName in fileNames {
+            do {
+                try await crewAccessImportCloudKitService.tombstoneImportFile(
+                    gemsID: verifiedIdentity.gemsID,
+                    fileName: fileName
+                )
+            } catch {
+                logNonFatal("CrewAccess tombstone failed: \(error.localizedDescription) file=\(fileName)")
+            }
+        }
+    }
+
     private func getOrCreateDeviceID() -> String {
         if let existing = cachedDeviceID { return existing }
         let stored = UserDefaults.standard.string(forKey: deviceIDKey)
@@ -1288,7 +1371,11 @@ final class AppViewModel: ObservableObject {
             startExternalConsumerIfNeeded()
             crewAccessImportMessage = "CrewAccess import complete: \(json.tripId) (\(schedule.legCount) legs)."
             errorMessage = nil
-            Task { [weak self] in await self?.uploadDeviceScheduleIfNeeded(reason: "import confirmed") }
+            let uploadURL = jsonWriteContext.finalURL
+            Task { [weak self] in
+                await self?.uploadDeviceScheduleIfNeeded(reason: "import confirmed")
+                await self?.uploadCrewAccessImportFile(at: uploadURL, json: json)
+            }
         } catch {
             crewAccessImportMessage = "Import failed: unable to write CrewAccess JSON. No changes were applied."
             logNonFatal("CrewAccess confirm transaction failed: \(error.localizedDescription)")
@@ -1384,9 +1471,9 @@ final class AppViewModel: ObservableObject {
                     if lhs.fileName == rhs.fileName {
                         let lhsDate = lhs.modifiedAt ?? lhs.createdAt ?? .distantPast
                         let rhsDate = rhs.modifiedAt ?? rhs.createdAt ?? .distantPast
-                        return lhsDate > rhsDate
+                        return lhsDate < rhsDate
                     }
-                    return lhs.fileName > rhs.fileName
+                    return lhs.fileName < rhs.fileName
                 }
             } catch {
                 return [CrewAccessImportFile]()
@@ -1559,6 +1646,16 @@ final class AppViewModel: ObservableObject {
         }
         if !cacheSaved {
             crewAccessDeleteMessage = (crewAccessDeleteMessage ?? "") + " Cache save failed."
+        }
+
+        // Tombstone deleted files in CloudKit so other devices remove them.
+        let deletedFileNames = zip(urls, deletionResults)
+            .filter { $0.1.deleted }
+            .map { $0.0.lastPathComponent }
+        if !deletedFileNames.isEmpty {
+            Task { [weak self] in
+                await self?.tombstoneCrewAccessImportFiles(fileNames: deletedFileNames)
+            }
         }
     }
 

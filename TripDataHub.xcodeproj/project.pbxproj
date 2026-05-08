@@ -33,6 +33,7 @@
 		51A7C9D1E2F3456789ABD007 /* DomicileSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABD006 /* DomicileSupport.swift */; };
 		BB01CC01DD01EE01FF010001 /* DeviceScheduleModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC01DD01EE01FF010000 /* DeviceScheduleModels.swift */; };
 		BB01CC01DD01EE01FF010003 /* DeviceScheduleCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC01DD01EE01FF010002 /* DeviceScheduleCloudKitService.swift */; };
+		CC02DD02EE02FF02AA020003 /* CrewAccessImportCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC02DD02EE02FF02AA020002 /* CrewAccessImportCloudKitService.swift */; };
 		BB01CC01DD01EE01FF010005 /* DeviceScheduleCloudKitServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC01DD01EE01FF010004 /* DeviceScheduleCloudKitServiceTests.swift */; };
 		BB01CC01DD01EE01FF010007 /* AppViewModelDeviceSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC01DD01EE01FF010006 /* AppViewModelDeviceSyncTests.swift */; };
 		51A7C9D1E2F3456789ABD005 /* GEMSIDNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABD004 /* GEMSIDNormalizer.swift */; };
@@ -124,6 +125,7 @@
 		51A7C9D1E2F3456789ABD006 /* DomicileSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomicileSupport.swift; sourceTree = "<group>"; };
 		BB01CC01DD01EE01FF010000 /* DeviceScheduleModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScheduleModels.swift; sourceTree = "<group>"; };
 		BB01CC01DD01EE01FF010002 /* DeviceScheduleCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScheduleCloudKitService.swift; sourceTree = "<group>"; };
+		CC02DD02EE02FF02AA020002 /* CrewAccessImportCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessImportCloudKitService.swift; sourceTree = "<group>"; };
 		BB01CC01DD01EE01FF010004 /* DeviceScheduleCloudKitServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScheduleCloudKitServiceTests.swift; sourceTree = "<group>"; };
 		BB01CC01DD01EE01FF010006 /* AppViewModelDeviceSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModelDeviceSyncTests.swift; sourceTree = "<group>"; };
 		51A7C9D1E2F3456789ABD004 /* GEMSIDNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GEMSIDNormalizer.swift; sourceTree = "<group>"; };
@@ -272,6 +274,7 @@
 				51A7C9D1E2F3456789ABC008 /* FriendScheduleCloudKitService.swift */,
 				51A7C9D1E2F3456789ABD000 /* GEMSVerificationCloudKitService.swift */,
 				BB01CC01DD01EE01FF010002 /* DeviceScheduleCloudKitService.swift */,
+				CC02DD02EE02FF02AA020002 /* CrewAccessImportCloudKitService.swift */,
 				51A7C9D1E2F3456789ABD004 /* GEMSIDNormalizer.swift */,
 				51A7C9D1E2F3456789ABCF10 /* TripScheduleSnapshotEncoder.swift */,
 				4FC85F3B696ED2DB2C56FC18 /* IATATimeZoneResolver.swift */,
@@ -512,6 +515,7 @@
 				51A7C9D1E2F3456789ABD001 /* GEMSVerificationCloudKitService.swift in Sources */,
 				BB01CC01DD01EE01FF010001 /* DeviceScheduleModels.swift in Sources */,
 				BB01CC01DD01EE01FF010003 /* DeviceScheduleCloudKitService.swift in Sources */,
+				CC02DD02EE02FF02AA020003 /* CrewAccessImportCloudKitService.swift in Sources */,
 				51A7C9D1E2F3456789ABD005 /* GEMSIDNormalizer.swift in Sources */,
 				51A7C9D1E2F3456789ABCF11 /* TripScheduleSnapshotEncoder.swift in Sources */,
 				770DDB243CCA709322ED76E2 /* FriendsSupport.swift in Sources */,
