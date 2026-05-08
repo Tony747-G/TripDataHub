@@ -1,5 +1,6 @@
 import Foundation
 import CloudKit
+import UIKit
 import UserNotifications
 import CryptoKit
 
@@ -186,6 +187,8 @@ final class AppViewModel: ObservableObject {
     @Published var hasLoadedSeniorityRecords = false
     @Published private(set) var isRefreshingCloudKitIdentity = false
     @Published private(set) var hasSeniorityDataOnDisk = false
+    @Published private(set) var isDeviceSyncing = false
+    @Published private(set) var deviceSyncStatusMessage: String?
 
     private let syncService: TripBoardSyncServiceProtocol
     private let authService: TripBoardAuthServiceProtocol
@@ -194,6 +197,7 @@ final class AppViewModel: ObservableObject {
     private let crewAccessImportService: CrewAccessPDFImportServiceProtocol
     private let friendScheduleCloudKitService: FriendScheduleCloudKitServicing
     private let gemsVerificationCloudKitService: GEMSVerificationCloudKitServicing
+    private let deviceScheduleCloudKitService: DeviceScheduleCloudKitServicing
     private let tzResolver: IATATimeZoneResolving
     private let externalOpenCoordinator: ExternalOpenImportCoordinator
     private let flightCountdownCoordinator = FlightCountdownCoordinator()
@@ -208,6 +212,13 @@ final class AppViewModel: ObservableObject {
     private var isUploadingSharedSchedule = false
     private var needsSharedScheduleUpload = false
     private var pendingSharedScheduleUploadReason: String?
+    private var isUploadingDeviceSchedule = false
+    private var needsDeviceScheduleUpload = false
+    private var pendingDeviceScheduleUploadReason: String?
+    private var lastDeviceScheduleUploadFingerprint: String?
+    private var foregroundObserver: NSObjectProtocol?
+    private var lastDeviceScheduleFetchAt: Date?
+    private var cachedDeviceID: String?
 
     private let notification48hKey = "notification_48h_enabled"
     private let notification24hKey = "notification_24h_enabled"
@@ -224,6 +235,9 @@ final class AppViewModel: ObservableObject {
     private let seniorityFileName = "pilot_seniority_records_v1.json"
     private let legacySeniorityFileName = "pilot_roster_records_v1.json"
     private let localIdentityRecordNameKey = "local_identity_record_name_v1"
+    private let deviceScheduleUploadFingerprintKey = "device_schedule_last_upload_fingerprint_v1"
+    private let deviceScheduleFetchAtKey = "device_schedule_last_fetch_at_v1"
+    private let deviceIDKey = "device_id_v1"
     private let cloudKitContainerIdentifier = "iCloud.com.sfune.TimelineSchedule"
     private let cloudKitIdentityTimeoutNanoseconds: UInt64 = 5_000_000_000
     private let useCloudKitIdentity = true
@@ -249,6 +263,9 @@ final class AppViewModel: ObservableObject {
         gemsVerificationCloudKitService: GEMSVerificationCloudKitServicing = GEMSVerificationCloudKitService(
             containerIdentifier: "iCloud.com.sfune.TimelineSchedule"
         ),
+        deviceScheduleCloudKitService: DeviceScheduleCloudKitServicing = DeviceScheduleCloudKitService(
+            containerIdentifier: "iCloud.com.sfune.TimelineSchedule"
+        ),
         tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared
     ) {
         self.syncService = syncService
@@ -258,6 +275,7 @@ final class AppViewModel: ObservableObject {
         self.crewAccessImportService = crewAccessImportService
         self.friendScheduleCloudKitService = friendScheduleCloudKitService
         self.gemsVerificationCloudKitService = gemsVerificationCloudKitService
+        self.deviceScheduleCloudKitService = deviceScheduleCloudKitService
         self.tzResolver = tzResolver
         self.externalOpenCoordinator = ExternalOpenImportCoordinator.shared
         let loadedAdminPolicy = Self.loadAdminPolicy()
@@ -301,6 +319,9 @@ final class AppViewModel: ObservableObject {
         }
         backfillCrewAccessLegImportReferenceTimesIfNeeded()
         pruneCrewAccessLegImportReferenceTimes()
+        self.lastDeviceScheduleUploadFingerprint = UserDefaults.standard.string(forKey: deviceScheduleUploadFingerprintKey)
+        self.lastDeviceScheduleFetchAt = UserDefaults.standard.object(forKey: deviceScheduleFetchAtKey) as? Date
+        self.cachedDeviceID = UserDefaults.standard.string(forKey: deviceIDKey)
         if !useCloudKitIdentity {
             self.currentCloudKitRecordName = localIdentityRecordName()
         }
@@ -332,6 +353,14 @@ final class AppViewModel: ObservableObject {
             await self?.applyCrewAccessRetentionPolicy()
         }
 
+        foregroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            Task { await self?.fetchDeviceScheduleIfNeeded(reason: "foreground") }
+        }
+
 #if DEBUG
         logNonFatal("Cache restore (v2): crew=\(cachedCrewAccessSchedules.count) bidpro=\(cachedBidproSchedules.count)")
 #endif
@@ -339,6 +368,9 @@ final class AppViewModel: ObservableObject {
     }
 
     deinit {
+        if let foregroundObserver {
+            NotificationCenter.default.removeObserver(foregroundObserver)
+        }
         NSLog("[VM] deinit vm=%@", String(describing: ObjectIdentifier(self)))
     }
 
@@ -747,6 +779,133 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Device Schedule Sync
+
+    func uploadDeviceScheduleIfNeeded(reason: String) async {
+        // Coalescing: if an upload is already in flight, queue the request and return.
+        // The in-flight upload will loop until no more pending requests remain (same pattern
+        // as uploadSharedScheduleIfNeeded).
+        if isUploadingDeviceSchedule {
+            needsDeviceScheduleUpload = true
+            pendingDeviceScheduleUploadReason = reason
+            logNonFatal("Device schedule upload coalesced: \(reason)")
+            return
+        }
+
+        isUploadingDeviceSchedule = true
+        isDeviceSyncing = true
+        var nextReason: String? = reason
+        defer {
+            isUploadingDeviceSchedule = false
+            needsDeviceScheduleUpload = false
+            pendingDeviceScheduleUploadReason = nil
+            isDeviceSyncing = false
+        }
+
+        while let currentReason = nextReason {
+            nextReason = nil
+            needsDeviceScheduleUpload = false
+            pendingDeviceScheduleUploadReason = nil
+            await performDeviceScheduleUpload(reason: currentReason)
+            if needsDeviceScheduleUpload {
+                nextReason = pendingDeviceScheduleUploadReason ?? "coalesced"
+            }
+        }
+    }
+
+    private func performDeviceScheduleUpload(reason: String) async {
+        guard isIdentityVerified,
+              let verifiedIdentity,
+              let currentCloudKitRecordName else { return }
+
+        let schedules = crewAccessSchedules
+        // Upload even if empty: an empty snapshot signals "all trips deleted" to other devices.
+        guard let data = try? JSONEncoder().encode(schedules) else { return }
+        let fingerprint = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        guard fingerprint != lastDeviceScheduleUploadFingerprint else { return }
+
+        let myDeviceID = getOrCreateDeviceID()
+        let source: DeviceScheduleSyncSource = UIDevice.current.userInterfaceIdiom == .pad ? .ipad : .iphone
+
+        do {
+            try await deviceScheduleCloudKitService.uploadDeviceSchedule(
+                gemsID: verifiedIdentity.gemsID,
+                cloudKitRecordName: currentCloudKitRecordName,
+                schedules: schedules,
+                deviceID: myDeviceID,
+                source: source
+            )
+            lastDeviceScheduleUploadFingerprint = fingerprint
+            UserDefaults.standard.set(fingerprint, forKey: deviceScheduleUploadFingerprintKey)
+            deviceSyncStatusMessage = "Device schedule synced."
+            logNonFatal("Device schedule uploaded: \(reason) tripCount=\(schedules.count)")
+        } catch {
+            deviceSyncStatusMessage = "Device sync upload failed."
+            logNonFatal("Device schedule upload failed: \(error.localizedDescription) reason=\(reason)")
+        }
+    }
+
+    func fetchDeviceScheduleIfNeeded(reason: String) async {
+        guard isIdentityVerified,
+              let verifiedIdentity else { return }
+        isDeviceSyncing = true
+        defer { isDeviceSyncing = false }
+
+        do {
+            guard let snapshot = try await deviceScheduleCloudKitService.fetchDeviceSchedule(
+                gemsID: verifiedIdentity.gemsID
+            ) else { return }
+
+            // Gate 1: skip if we already accepted this exact snapshot.
+            if let lastFetch = lastDeviceScheduleFetchAt, snapshot.updatedAt <= lastFetch { return }
+
+            // Gate 2: skip snapshots uploaded by this device — they mirror local state.
+            let myDeviceID = getOrCreateDeviceID()
+            if snapshot.deviceID == myDeviceID { return }
+
+            // Gate 3 (local-wins): reject remote if any local schedule is newer than the snapshot.
+            // This prevents a stale remote from rolling back a local import that failed to upload.
+            let localMaxUpdatedAt = crewAccessSchedules.map(\.updatedAt).max()
+            if let localMax = localMaxUpdatedAt, snapshot.updatedAt <= localMax { return }
+
+            // LogTen backlog protection: preserve import reference times across schedule replacement.
+            // Intentionally not pruned so past-leg entries survive for any future LogTen export.
+            let preservedReferenceTimes = crewAccessLegImportReferenceTimes
+
+            let remoteSchedules = snapshot.schedules
+            try cacheService.save(ScheduleCacheSnapshotV2(
+                crewAccessSchedules: remoteSchedules,
+                bidproSchedules: bidproSchedules,
+                lastSyncAt: lastSyncAt ?? Date(),
+                migratedAt: nil
+            ))
+            crewAccessSchedules = remoteSchedules
+            crewAccessLegImportReferenceTimes = preservedReferenceTimes
+            schedules = mergeAndSortSchedules(crew: remoteSchedules, bidpro: bidproSchedules)
+            lastDeviceScheduleFetchAt = snapshot.updatedAt
+            UserDefaults.standard.set(snapshot.updatedAt, forKey: deviceScheduleFetchAtKey)
+
+            await rescheduleNotificationsIfAuthorized()
+            deviceSyncStatusMessage = "Schedule updated from device sync."
+            logNonFatal("Device schedule fetched: \(reason) source=\(snapshot.source.rawValue) tripCount=\(remoteSchedules.count)")
+        } catch {
+            logNonFatal("Device schedule fetch failed: \(error.localizedDescription) reason=\(reason)")
+        }
+    }
+
+    private func getOrCreateDeviceID() -> String {
+        if let existing = cachedDeviceID { return existing }
+        let stored = UserDefaults.standard.string(forKey: deviceIDKey)
+        if let stored {
+            cachedDeviceID = stored
+            return stored
+        }
+        let newID = UUID().uuidString
+        UserDefaults.standard.set(newID, forKey: deviceIDKey)
+        cachedDeviceID = newID
+        return newID
+    }
+
     func refreshCloudKitIdentity() {
         guard !isRefreshingCloudKitIdentity else { return }
         isRefreshingCloudKitIdentity = true
@@ -806,6 +965,9 @@ final class AppViewModel: ObservableObject {
                         self.clearVerifiedIdentity()
                     }
                     self.updateAdminStatus()
+                    if self.isIdentityVerified {
+                        Task { await self.fetchDeviceScheduleIfNeeded(reason: "identity verified") }
+                    }
                 case let .failure(error):
                     if case CloudKitIdentityFetchError.timeout = error {
                         self.logCloudKitIdentityDiagnostic("timeout after \(timeoutNanoseconds / 1_000_000_000)s")
@@ -884,6 +1046,9 @@ final class AppViewModel: ObservableObject {
     }
 
     @discardableResult
+    // Developer-only compatibility hook for tests and pre-UI automation. The production
+    // Admin tab no longer exposes CSV upload because source seniority CSVs contain DOB.
+    // Use scripts/upload_gems_verification.js for monthly CloudKit verification updates.
     func importSeniorityCSVData(_ data: Data) async -> Bool {
         guard !isUploadingGEMSVerification else {
             seniorityImportMessage = "GEMS verification upload is already running."
@@ -1123,6 +1288,7 @@ final class AppViewModel: ObservableObject {
             startExternalConsumerIfNeeded()
             crewAccessImportMessage = "CrewAccess import complete: \(json.tripId) (\(schedule.legCount) legs)."
             errorMessage = nil
+            Task { [weak self] in await self?.uploadDeviceScheduleIfNeeded(reason: "import confirmed") }
         } catch {
             crewAccessImportMessage = "Import failed: unable to write CrewAccess JSON. No changes were applied."
             logNonFatal("CrewAccess confirm transaction failed: \(error.localizedDescription)")
@@ -1459,6 +1625,7 @@ final class AppViewModel: ObservableObject {
         } else {
             crewAccessDeleteMessage = "Deleted \(toDelete.count) trip(s). Some JSON files could not be removed."
         }
+        Task { [weak self] in await self?.uploadDeviceScheduleIfNeeded(reason: "trip deleted") }
     }
 
     func displaySchedules(filter: TimelineSourceFilter) -> [PayPeriodSchedule] {
@@ -1659,14 +1826,18 @@ final class AppViewModel: ObservableObject {
         let isReplacement = updatedCrewAccess.contains(where: { $0.id == imported.id })
         if let index = updatedCrewAccess.firstIndex(where: { $0.id == imported.id }) {
             let existing = updatedCrewAccess[index]
-            let mergedLegs = (existing.legs + imported.legs).sorted { lhs, rhs in
-                let lhsUTC = lhs.depUTC ?? ""
-                let rhsUTC = rhs.depUTC ?? ""
-                if lhsUTC == rhsUTC {
-                    return lhs.leg < rhs.leg
+            // Deduplicate by flight-identity key (depUTC|flight|depAirport|arrAirport) before
+            // merging so that re-importing the same PDF doesn't duplicate legs. Each import
+            // generates fresh UUIDs, so UUID equality cannot detect the duplicate.
+            var seenLegKeys = Set<String>()
+            let mergedLegs = (imported.legs + existing.legs)
+                .filter { seenLegKeys.insert(Self.logTenLegDedupKey(for: $0)).inserted }
+                .sorted { lhs, rhs in
+                    let lhsUTC = lhs.depUTC ?? ""
+                    let rhsUTC = rhs.depUTC ?? ""
+                    if lhsUTC == rhsUTC { return lhs.leg < rhs.leg }
+                    return lhsUTC < rhsUTC
                 }
-                return lhsUTC < rhsUTC
-            }
             let mergedTripCount = Set(mergedLegs.map(\.pairing)).count
             updatedCrewAccess[index] = PayPeriodSchedule(
                 id: existing.id,
@@ -2336,7 +2507,11 @@ final class AppViewModel: ObservableObject {
         guard let previousCount = crewAccessRetentionPreviousBidPeriods() else {
             return nil
         }
-        return retainedBidPeriodOrders(currentDateUTC: Date(), previousCount: previousCount)
+        return retainedBidPeriodOrders(
+            currentDateUTC: Date(),
+            previousCount: previousCount,
+            domicile: verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
+        )
     }
 
     private func crewAccessRetentionPreviousBidPeriods() -> Int? {
@@ -2353,7 +2528,10 @@ final class AppViewModel: ObservableObject {
             ?? parseCrewAccessBidPeriodOrder(schedule.label)
             ?? schedule.legs.compactMap { leg in
                 if let depUTC = LegConnectionTextBuilder.parseUTC(leg.depUTC),
-                   let period = bidPeriod(for: depUTC) {
+                   let period = bidPeriod(
+                    for: depUTC,
+                    domicile: verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
+                   ) {
                     return bidPeriodOrder(for: period.id)
                 }
                 let normalized = Self.normalizeTripInformationDateForDisplay(leg.depLocal, fallbackDate: nil).dateString
@@ -2362,7 +2540,10 @@ final class AppViewModel: ObservableObject {
                 formatter.timeZone = TimeZone(secondsFromGMT: 0)
                 formatter.dateFormat = "yyyy-MM-dd"
                 guard let date = formatter.date(from: normalized),
-                      let period = bidPeriod(for: date) else {
+                      let period = bidPeriod(
+                        for: date,
+                        domicile: verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
+                      ) else {
                     return nil
                 }
                 return bidPeriodOrder(for: period.id)
@@ -3047,9 +3228,9 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        let isVerified: Bool
+        let verificationResult: GEMSVerificationResult?
         do {
-            isVerified = try await gemsVerificationCloudKitService.verify(
+            verificationResult = try await gemsVerificationCloudKitService.verify(
                 gemsID: gemsID,
                 dateOfBirth: normalizedDOB
             )
@@ -3058,17 +3239,18 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        let isAdminBootstrap = !isVerified && isAdminEligible(gemsID: gemsID, dob: normalizedDOB)
-        guard isVerified || isAdminBootstrap || allowVerificationWithoutSeniorityDB else {
+        let isAdminBootstrap = verificationResult == nil && isAdminEligible(gemsID: gemsID, dob: normalizedDOB)
+        guard verificationResult != nil || isAdminBootstrap || allowVerificationWithoutSeniorityDB else {
             identityActionMessage = "Verification failed. Check GEMS ID / DOB."
             return
         }
+        let domicile = verificationResult?.domicile ?? DomicileSupport.defaultDomicile
 
         let verified = VerifiedIdentityProfile(
             cloudKitRecordName: currentCloudKitRecordName,
             name: "GEMS \(gemsID)",
             gemsID: gemsID,
-            domicile: "-",
+            domicile: domicile,
             equipment: "-",
             seat: "-",
             dateOfHire: "-",
@@ -3086,7 +3268,7 @@ final class AppViewModel: ObservableObject {
         updateAdminStatus()
         identityActionMessage = isAdminBootstrap
             ? "Verified as bootstrap admin. Upload GEMS verification records to CloudKit."
-            : "Verified as GEMS \(gemsID)."
+            : "Verified as GEMS \(gemsID) / \(domicile)."
         if isScheduleSharingEnabled {
             Task { [weak self] in
                 await self?.syncFriendCloudKit(reason: "identity verified")
@@ -3727,6 +3909,9 @@ final class AppViewModel: ObservableObject {
         else {
             return []
         }
+        let domicileIndex = headerMap["DOM"]
+            ?? headerMap["DOMICILE"]
+            ?? headerMap["BASE"]
 
         var records: [GEMSVerificationImportRecord] = []
         var seenGEMS: Set<String> = []
@@ -3738,10 +3923,15 @@ final class AppViewModel: ObservableObject {
             }
             let gems = GEMSIDNormalizer.normalize(fields[gemsIndex])
             let dob = fields[dobIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+            let domicile = domicileIndex.flatMap { index in
+                fields.indices.contains(index)
+                ? fields[index].trimmingCharacters(in: .whitespacesAndNewlines)
+                : nil
+            } ?? DomicileSupport.defaultDomicile
             guard !gems.isEmpty, !dob.isEmpty, normalizeDOB(dob) != nil, seenGEMS.insert(gems).inserted else {
                 continue
             }
-            records.append(GEMSVerificationImportRecord(gemsID: gems, dateOfBirth: dob))
+            records.append(GEMSVerificationImportRecord(gemsID: gems, dateOfBirth: dob, domicile: domicile))
         }
         return records
     }

@@ -50,7 +50,7 @@ struct TripDataHubApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootTabView()
+            AppRootView()
                 .environmentObject(viewModel)
                 .onOpenURL { url in
                     NSLog("[Import] app.onOpenURL received url=%@", url.absoluteString)
@@ -64,6 +64,16 @@ struct TripDataHubApp: App {
                         viewModel.handleIncomingAppDeepLink(url)
                     }
                 }
+        }
+    }
+}
+
+private struct AppRootView: View {
+    var body: some View {
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            IPadOperationalWorkspaceView()
+        } else {
+            RootTabView()
         }
     }
 }

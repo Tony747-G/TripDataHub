@@ -21,7 +21,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.sfune.BidProSchedule
-        PRODUCT_NAME: "TripData Hub"
+        PRODUCT_NAME: TripDataHub
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "10"
         GENERATE_INFOPLIST_FILE: NO
@@ -43,8 +43,6 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad:
-          - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         CODE_SIGN_ENTITLEMENTS: TripDataHub/TripDataHub.entitlements
@@ -106,8 +104,8 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: ""
         GENERATE_INFOPLIST_FILE: YES
-        # Hardcoded to match PRODUCT_NAME "TripData Hub". If PRODUCT_NAME changes, update this path.
-        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/TripData Hub.app/TripData Hub"
+        # Hardcoded to match PRODUCT_NAME "TripDataHub". If PRODUCT_NAME changes, update this path.
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/TripDataHub.app/TripDataHub"
         BUNDLE_LOADER: $(TEST_HOST)
 
   TripDataHubUITests:

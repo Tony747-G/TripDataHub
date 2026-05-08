@@ -31,6 +31,7 @@ final class GEMSVerificationCloudKitServiceTests: XCTestCase {
         XCTAssertEqual(count, 1)
         let record = await database.recordSnapshot(named: "tdh_verify_7793942")
         XCTAssertEqual(record?["gemsID"] as? String, "7793942")
+        XCTAssertEqual(record?["domicile"] as? String, "ANC")
         XCTAssertNotNil(record?["dobHash"] as? String)
         XCTAssertNil(record?["DOB"])
         XCTAssertNil(record?["dateOfBirth"])
@@ -47,7 +48,8 @@ final class GEMSVerificationCloudKitServiceTests: XCTestCase {
 
         let verified = try await service.verify(gemsID: "7793942", dateOfBirth: "10-2-69")
 
-        XCTAssertTrue(verified)
+        XCTAssertEqual(verified?.gemsID, "7793942")
+        XCTAssertEqual(verified?.domicile, "ANC")
     }
 
     func test_verifyRejectsWrongDOB() async throws {
@@ -59,7 +61,7 @@ final class GEMSVerificationCloudKitServiceTests: XCTestCase {
 
         let verified = try await service.verify(gemsID: "7793942", dateOfBirth: "10/03/1969")
 
-        XCTAssertFalse(verified)
+        XCTAssertNil(verified)
     }
 
     func test_uploadAcceptsCSVRowsWithTrailingEmptyColumns() async throws {
@@ -90,8 +92,23 @@ final class GEMSVerificationCloudKitServiceTests: XCTestCase {
 
         XCTAssertNil(unpaddedRecord)
         XCTAssertNotNil(paddedRecord)
-        XCTAssertTrue(verifiesUnpaddedInput)
-        XCTAssertTrue(verifiesPaddedInput)
+        XCTAssertNotNil(verifiesUnpaddedInput)
+        XCTAssertNotNil(verifiesPaddedInput)
+    }
+
+    func test_uploadAndVerifyPreservesDomicile() async throws {
+        let database = GEMSVerificationFakeDatabase()
+        let service = GEMSVerificationCloudKitService(databaseProvider: { database })
+
+        _ = try await service.uploadVerificationRecords([
+            GEMSVerificationImportRecord(gemsID: "7845209", dateOfBirth: "9/28/69", domicile: "SDFZ")
+        ])
+
+        let record = await database.recordSnapshot(named: "tdh_verify_7845209")
+        let verified = try await service.verify(gemsID: "7845209", dateOfBirth: "09/28/1969")
+
+        XCTAssertEqual(record?["domicile"] as? String, "SDFZ")
+        XCTAssertEqual(verified?.domicile, "SDFZ")
     }
 
     func test_recordVerifiedUserStoresOnlyGEMSAndTimestamp() async throws {

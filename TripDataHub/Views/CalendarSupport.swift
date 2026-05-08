@@ -156,20 +156,21 @@ func resolveDayIndex(for utcDate: Date, timeZone: TimeZone, calendarDays: [Calen
     guard let firstCalendarDay = calendarDays.first else {
         return nil
     }
-    // Calendar days are UTC-indexed (day 0 = bid-period UTC start, day 1 = +1 day, etc.).
-    // We resolve the day purely from the UTC position of the timestamp — the timezone
-    // parameter is retained for API consistency but not used for day indexing.
-    // This ensures a given UTC timestamp maps to the same calendar day regardless of
-    // which display timezone is applied, which is required for segment start/end consistency.
-    let dayOffset = calendarEngineUTCCalendar.dateComponents(
-        [.day],
-        from: firstCalendarDay.dayStartUTC,
-        to: calendarEngineUTCCalendar.startOfDay(for: utcDate)
-    ).day
+    // The Bid Period grid is indexed by UTC calendar dates: calendarDays[0] = March 22 UTC,
+    // calendarDays[1] = March 23 UTC, etc. We resolve a UTC timestamp to its grid cell by
+    // computing the floor of (utcDate - bpStartUTC) / 1 day.
+    //
+    // Naively using `startOfDay(for: utcDate)` in the local timezone causes a 1-day shift for
+    // UTC- timezones (e.g. ANC at March 22 00:00 UTC = March 21 16:00 AKDT, whose startOfDay is
+    // March 21 00:00 AKDT). The `timeZone` parameter is retained for API compatibility.
+    let secondsPerDay: TimeInterval = 86_400
+    let elapsed = utcDate.timeIntervalSince(firstCalendarDay.dayStartUTC)
+    let dayOffset = Int((elapsed / secondsPerDay).rounded(.down))
 
-    guard let dayOffset, (0..<calendarDays.count).contains(dayOffset) else {
+    guard (0..<calendarDays.count).contains(dayOffset) else {
         return nil
     }
+    _ = timeZone
     return dayOffset
 }
 
@@ -215,7 +216,15 @@ func localRegressionMetadata(for trip: CalendarTrip, days: [CalendarDay]) -> [In
         let localDeparture = localDateComponents(for: departureUTC, in: departureTimeZone)
         let localArrival = localDateComponents(for: arrivalUTC, in: arrivalTimeZone)
 
-        guard let dayIndex = resolveDayIndex(for: arrivalUTC, timeZone: arrivalTimeZone, calendarDays: days)
+        // Regression is the visible "watch winding back" caused by crossing into a different
+        // UTC offset (or DST transition) during a leg. Same-offset overnight trips (dep 23:00,
+        // arr 06:00 next morning in the same zone) progress forward in absolute time and must
+        // not be flagged. We compare the actual offsets at dep/arr UTC times so that DST
+        // transitions register as a different offset on the same airport.
+        let departureOffset = departureTimeZone.secondsFromGMT(for: departureUTC)
+        let arrivalOffset = arrivalTimeZone.secondsFromGMT(for: arrivalUTC)
+        guard departureOffset != arrivalOffset,
+              let dayIndex = resolveDayIndex(for: arrivalUTC, timeZone: arrivalTimeZone, calendarDays: days)
         else {
             continue
         }
