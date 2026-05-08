@@ -26,6 +26,7 @@ struct IPadOperationalWorkspaceView: View {
     @State private var showingFriends = false
     @State private var showingBrowser = false
     @State private var showingSettings = false
+    @State private var showingImportPreview = false
     @State private var friendForSidebar: FriendConnection?
 
     var body: some View {
@@ -64,7 +65,13 @@ struct IPadOperationalWorkspaceView: View {
         }
         .background(Color(.secondarySystemBackground).ignoresSafeArea(edges: .top))
         .preferredColorScheme(selectedAppearanceMode.colorScheme)
-        .task { await viewModel.fetchDeviceScheduleIfNeeded(reason: "ipad workspace") }
+        .task {
+            await viewModel.fetchCrewAccessImportFilesIfNeeded(reason: "ipad workspace")
+            await viewModel.fetchDeviceScheduleIfNeeded(reason: "ipad workspace")
+        }
+        .onChange(of: viewModel.pendingImport?.id) { _, newValue in
+            if newValue != nil { showingImportPreview = true }
+        }
         .onChange(of: friendForSidebar?.id) { _, friendID in
             if let friendID,
                let friend = viewModel.acceptedFriendConnections.first(where: { $0.id == friendID }) {
@@ -82,6 +89,10 @@ struct IPadOperationalWorkspaceView: View {
         }
         .sheet(isPresented: $showingSettings) {
             NavigationStack { SettingsTabView() }
+                .environmentObject(viewModel)
+        }
+        .sheet(isPresented: $showingImportPreview) {
+            NavigationStack { ImportPreviewView() }
                 .environmentObject(viewModel)
         }
     }
