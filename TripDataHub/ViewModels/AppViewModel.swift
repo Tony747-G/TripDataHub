@@ -1644,8 +1644,8 @@ final class AppViewModel: ObservableObject {
 
     func refreshFlightCountdownPresentation(nowUTC: Date = Date()) {
         let output = nextFlightCountdownOutput(nowUTC: nowUTC)
-        Task {
-            await flightCountdownCoordinator.refresh(output: output, nowUTC: nowUTC)
+        Task { [weak self] in
+            await self?.flightCountdownCoordinator.refresh(output: output, nowUTC: nowUTC)
         }
     }
 

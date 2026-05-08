@@ -251,7 +251,7 @@ private struct FakeGEMSVerificationCloudKitService: GEMSVerificationCloudKitServ
     ) async throws -> Int {
         records.count
     }
-    func verify(gemsID: String, dateOfBirth: String) async throws -> Bool { false }
+    func verify(gemsID: String, dateOfBirth: String) async throws -> GEMSVerificationResult? { nil }
     func recordVerifiedUser(gemsID: String) async throws {}
     func fetchVerifiedUsers() async throws -> [VerifiedAppUser] { [] }
 }
