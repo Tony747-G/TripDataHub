@@ -204,6 +204,8 @@ final class AppViewModel: ObservableObject {
     private var needsSharedScheduleUpload = false
     private var pendingSharedScheduleUploadReason: String?
     private var isUploadingDeviceSchedule = false
+    private var needsDeviceScheduleUpload = false
+    private var pendingDeviceScheduleUploadReason: String?
     private var lastDeviceScheduleUploadFingerprint: String?
     private var lastDeviceScheduleFetchAt: Date?
     private var cachedDeviceID: String?
@@ -323,6 +325,14 @@ final class AppViewModel: ObservableObject {
             await self?.refreshNotificationAuthorizationStatus()
             await self?.rescheduleNotificationsIfAuthorized()
             await self?.applyCrewAccessRetentionPolicy()
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            Task { await self?.fetchDeviceScheduleIfNeeded(reason: "foreground") }
         }
 
 #if DEBUG
@@ -743,23 +753,47 @@ final class AppViewModel: ObservableObject {
     // MARK: - Device Schedule Sync
 
     func uploadDeviceScheduleIfNeeded(reason: String) async {
-        guard isIdentityVerified,
-              let verifiedIdentity,
-              let currentCloudKitRecordName else { return }
-        guard !isUploadingDeviceSchedule else { return }
-        let schedules = crewAccessSchedules
-        guard !schedules.isEmpty else { return }
-
-        guard let data = try? JSONEncoder().encode(schedules) else { return }
-        let fingerprint = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-        guard fingerprint != lastDeviceScheduleUploadFingerprint else { return }
+        // Coalescing: if an upload is already in flight, queue the request and return.
+        // The in-flight upload will loop until no more pending requests remain (same pattern
+        // as uploadSharedScheduleIfNeeded).
+        if isUploadingDeviceSchedule {
+            needsDeviceScheduleUpload = true
+            pendingDeviceScheduleUploadReason = reason
+            logNonFatal("Device schedule upload coalesced: \(reason)")
+            return
+        }
 
         isUploadingDeviceSchedule = true
         isDeviceSyncing = true
+        var nextReason: String? = reason
         defer {
             isUploadingDeviceSchedule = false
+            needsDeviceScheduleUpload = false
+            pendingDeviceScheduleUploadReason = nil
             isDeviceSyncing = false
         }
+
+        while let currentReason = nextReason {
+            nextReason = nil
+            needsDeviceScheduleUpload = false
+            pendingDeviceScheduleUploadReason = nil
+            await performDeviceScheduleUpload(reason: currentReason)
+            if needsDeviceScheduleUpload {
+                nextReason = pendingDeviceScheduleUploadReason ?? "coalesced"
+            }
+        }
+    }
+
+    private func performDeviceScheduleUpload(reason: String) async {
+        guard isIdentityVerified,
+              let verifiedIdentity,
+              let currentCloudKitRecordName else { return }
+
+        let schedules = crewAccessSchedules
+        // Upload even if empty: an empty snapshot signals "all trips deleted" to other devices.
+        guard let data = try? JSONEncoder().encode(schedules) else { return }
+        let fingerprint = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        guard fingerprint != lastDeviceScheduleUploadFingerprint else { return }
 
         let myDeviceID = getOrCreateDeviceID()
         let source: DeviceScheduleSyncSource = UIDevice.current.userInterfaceIdiom == .pad ? .ipad : .iphone
@@ -775,7 +809,7 @@ final class AppViewModel: ObservableObject {
             lastDeviceScheduleUploadFingerprint = fingerprint
             UserDefaults.standard.set(fingerprint, forKey: deviceScheduleUploadFingerprintKey)
             deviceSyncStatusMessage = "Device schedule synced."
-            logNonFatal("Device schedule uploaded: \(reason)")
+            logNonFatal("Device schedule uploaded: \(reason) tripCount=\(schedules.count)")
         } catch {
             deviceSyncStatusMessage = "Device sync upload failed."
             logNonFatal("Device schedule upload failed: \(error.localizedDescription) reason=\(reason)")
@@ -793,14 +827,20 @@ final class AppViewModel: ObservableObject {
                 gemsID: verifiedIdentity.gemsID
             ) else { return }
 
+            // Gate 1: skip if we already accepted this exact snapshot.
             if let lastFetch = lastDeviceScheduleFetchAt, snapshot.updatedAt <= lastFetch { return }
 
-            // Skip snapshots uploaded by this device — they mirror what we already have locally.
+            // Gate 2: skip snapshots uploaded by this device — they mirror local state.
             let myDeviceID = getOrCreateDeviceID()
             if snapshot.deviceID == myDeviceID { return }
 
+            // Gate 3 (local-wins): reject remote if any local schedule is newer than the snapshot.
+            // This prevents a stale remote from rolling back a local import that failed to upload.
+            let localMaxUpdatedAt = crewAccessSchedules.map(\.updatedAt).max()
+            if let localMax = localMaxUpdatedAt, snapshot.updatedAt <= localMax { return }
+
             // LogTen backlog protection: preserve import reference times across schedule replacement.
-            // We intentionally do not prune so past-leg entries survive for any future export needs.
+            // Intentionally not pruned so past-leg entries survive for any future LogTen export.
             let preservedReferenceTimes = crewAccessLegImportReferenceTimes
 
             let remoteSchedules = snapshot.schedules
@@ -818,7 +858,7 @@ final class AppViewModel: ObservableObject {
 
             await rescheduleNotificationsIfAuthorized()
             deviceSyncStatusMessage = "Schedule updated from device sync."
-            logNonFatal("Device schedule fetched: \(reason) source=\(snapshot.source.rawValue)")
+            logNonFatal("Device schedule fetched: \(reason) source=\(snapshot.source.rawValue) tripCount=\(remoteSchedules.count)")
         } catch {
             logNonFatal("Device schedule fetch failed: \(error.localizedDescription) reason=\(reason)")
         }
@@ -896,6 +936,9 @@ final class AppViewModel: ObservableObject {
                         self.clearVerifiedIdentity()
                     }
                     self.updateAdminStatus()
+                    if self.isIdentityVerified {
+                        Task { await self.fetchDeviceScheduleIfNeeded(reason: "identity verified") }
+                    }
                 case let .failure(error):
                     if case CloudKitIdentityFetchError.timeout = error {
                         self.logCloudKitIdentityDiagnostic("timeout after \(timeoutNanoseconds / 1_000_000_000)s")

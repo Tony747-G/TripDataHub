@@ -33,7 +33,8 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         XCTAssertEqual(count, 0)
     }
 
-    func test_uploadDeviceSchedule_emptySchedules_skips() async throws {
+    func test_uploadDeviceSchedule_emptySchedules_uploadsEmptySnapshot() async throws {
+        // Empty crewAccessSchedules must still upload to propagate "all trips deleted" to other devices.
         let deviceService = FakeDeviceScheduleCloudKitService()
         let vm = makeViewModel(deviceService: deviceService)
         setVerifiedIdentity(on: vm)
@@ -42,19 +43,24 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         await vm.uploadDeviceScheduleIfNeeded(reason: "test")
 
         let count = await deviceService.uploadCallCount
-        XCTAssertEqual(count, 0)
+        XCTAssertEqual(count, 1)
+        let uploaded = await deviceService.lastUploadedSchedules
+        XCTAssertEqual(uploaded?.count, 0)
     }
 
     // MARK: - Fetch: newer remote replaces local
 
     func test_fetchDeviceSchedule_newerRemote_replacesLocalSchedule() async throws {
         let deviceService = FakeDeviceScheduleCloudKitService()
+        // Snapshot must be newer than any local schedule (local schedule uses Date() at creation).
+        // Use a future timestamp to guarantee remote wins Gate 3 (local-wins protection).
+        let futureSnapshot = Date(timeIntervalSinceNow: 60)
         await deviceService.setSnapshot(DeviceScheduleSnapshot(
             ownerGEMSID: "7793942",
             ownerRecordName: "_rec",
             schedules: [makeSchedule(id: "CA26-99")],
             schemaVersion: 1,
-            updatedAt: Date(),
+            updatedAt: futureSnapshot,
             deviceID: "other-device",
             source: .iphone
         ))
@@ -121,6 +127,31 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         XCTAssertEqual(vm.crewAccessSchedules[0].id, "CA26-local")
     }
 
+    func test_fetchDeviceSchedule_localNewer_preventsRollback() async throws {
+        // Gate 3: if local schedule is newer than the remote snapshot, reject the remote.
+        // Scenario: local import succeeded but CloudKit upload failed; remote has older data.
+        let deviceService = FakeDeviceScheduleCloudKitService()
+        let pastSnapshot = Date(timeIntervalSinceNow: -3600)
+        await deviceService.setSnapshot(DeviceScheduleSnapshot(
+            ownerGEMSID: "7793942",
+            ownerRecordName: "_rec",
+            schedules: [makeSchedule(id: "CA26-remote-old")],
+            schemaVersion: 1,
+            updatedAt: pastSnapshot,
+            deviceID: "other-device",
+            source: .iphone
+        ))
+
+        let vm = makeViewModel(deviceService: deviceService)
+        setVerifiedIdentity(on: vm)
+        // Local schedule has updatedAt: Date() which is newer than pastSnapshot
+        vm.crewAccessSchedules = [makeSchedule(id: "CA26-local-new")]
+
+        await vm.fetchDeviceScheduleIfNeeded(reason: "test")
+
+        XCTAssertEqual(vm.crewAccessSchedules[0].id, "CA26-local-new")
+    }
+
     func test_fetchDeviceSchedule_noVerifiedIdentity_skips() async throws {
         let deviceService = FakeDeviceScheduleCloudKitService()
         await deviceService.setSnapshot(DeviceScheduleSnapshot(
@@ -145,12 +176,13 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
 
     func test_fetchDeviceSchedule_logTenBacklogSurvivesRemoteReplacement() async throws {
         let deviceService = FakeDeviceScheduleCloudKitService()
+        let futureSnapshot = Date(timeIntervalSinceNow: 60)
         await deviceService.setSnapshot(DeviceScheduleSnapshot(
             ownerGEMSID: "7793942",
             ownerRecordName: "_rec",
             schedules: [makeSchedule(id: "CA26-99")],
             schemaVersion: 1,
-            updatedAt: Date(),
+            updatedAt: futureSnapshot,
             deviceID: "other-device",
             source: .iphone
         ))
@@ -240,6 +272,7 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
 
 private actor FakeDeviceScheduleCloudKitService: DeviceScheduleCloudKitServicing {
     private(set) var uploadCallCount = 0
+    private(set) var lastUploadedSchedules: [PayPeriodSchedule]?
     private var snapshot: DeviceScheduleSnapshot?
 
     func setSnapshot(_ s: DeviceScheduleSnapshot) { snapshot = s }
@@ -252,6 +285,7 @@ private actor FakeDeviceScheduleCloudKitService: DeviceScheduleCloudKitServicing
         source: DeviceScheduleSyncSource
     ) async throws {
         uploadCallCount += 1
+        lastUploadedSchedules = schedules
     }
 
     func fetchDeviceSchedule(gemsID: String) async throws -> DeviceScheduleSnapshot? {
