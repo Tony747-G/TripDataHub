@@ -207,6 +207,7 @@ final class AppViewModel: ObservableObject {
     private var needsDeviceScheduleUpload = false
     private var pendingDeviceScheduleUploadReason: String?
     private var lastDeviceScheduleUploadFingerprint: String?
+    private var foregroundObserver: NSObjectProtocol?
     private var lastDeviceScheduleFetchAt: Date?
     private var cachedDeviceID: String?
 
@@ -327,7 +328,7 @@ final class AppViewModel: ObservableObject {
             await self?.applyCrewAccessRetentionPolicy()
         }
 
-        NotificationCenter.default.addObserver(
+        foregroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.willEnterForegroundNotification,
             object: nil,
             queue: nil
@@ -342,6 +343,9 @@ final class AppViewModel: ObservableObject {
     }
 
     deinit {
+        if let foregroundObserver {
+            NotificationCenter.default.removeObserver(foregroundObserver)
+        }
         NSLog("[VM] deinit vm=%@", String(describing: ObjectIdentifier(self)))
     }
 
