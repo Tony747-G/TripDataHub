@@ -5,6 +5,10 @@ struct IPadTimelineSidebarView: View {
     @Binding var selectedTripID: String?
     @Environment(\.colorScheme) private var colorScheme
 
+    private var dateHeaderTextColor: Color {
+        ScheduleColors.timelineDateHeaderText(for: colorScheme)
+    }
+
     @AppStorage("app_font_size_option") private var appFontSizeOptionRawValue = AppFontSizeOption.medium.rawValue
 
     private static let anchorageTimeZone: TimeZone =
@@ -13,9 +17,10 @@ struct IPadTimelineSidebarView: View {
 
     private static let reportTimeFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US")
         f.timeZone = anchorageTimeZone
-        f.dateFormat = "HH:mm"
+        f.dateFormat = "EEE, MMM d yyyy  HH:mm"
         return f
     }()
 
@@ -153,38 +158,74 @@ struct IPadTimelineSidebarView: View {
 
     private var sidebarHeader: some View {
         Text("Timeline")
-            .font(.system(size: 13, weight: .semibold))
+            .appScaledFont(.headline, weight: .bold, scale: fontScale)
+            .foregroundStyle(.primary)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
+            .padding(.leading, 24)
+            .padding(.trailing, 16)
             .frame(height: 44)
             .background(Color(.secondarySystemBackground))
             .overlay(alignment: .bottom) { Divider() }
     }
 
-    // MARK: Next Report Strip
+    // MARK: Next Report Strip — identical structure to iPhone's nextReportCard
 
     private func nextReportStrip(report: (reportTime: Date, tripLabel: String)) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "clock.fill")
-                .font(.system(size: 12))
-                .foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("NEXT REPORT")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                Text(Self.reportTimeFormatter.string(from: report.reportTime) + " ANC")
-                    .font(.system(size: 13, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.primary)
+        TimelineView(.periodic(from: Date(), by: 60)) { _ in
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text("NEXT REPORT")
+                        .appScaledFont(.caption, weight: .bold, scale: timelineFontScale)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    Text("Trip \(report.tripLabel)")
+                        .appScaledFont(.caption, scale: timelineFontScale)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+                HStack {
+                    Text(Self.reportTimeFormatter.string(from: report.reportTime) + " ANC")
+                        .appScaledFont(.subheadline, weight: .bold, scale: timelineFontScale)
+                        .foregroundStyle(dateHeaderTextColor)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .layoutPriority(1)
+                    Spacer()
+                    Text(countdownText(to: report.reportTime))
+                        .appScaledFont(.subheadline, weight: .bold, scale: timelineFontScale)
+                        .foregroundStyle(countdownColor(to: report.reportTime))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .layoutPriority(1)
+                }
             }
-            Spacer()
-            Text(report.tripLabel)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            .background(.thinMaterial)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(Color.orange.opacity(0.08))
+    }
+
+    private func countdownText(to target: Date) -> String {
+        let deltaSeconds = Int(target.timeIntervalSince(Date()))
+        let sign = deltaSeconds >= 0 ? "-" : "+"
+        let absMinutes = abs(deltaSeconds) / 60
+        let days = absMinutes / (24 * 60)
+        let hours = (absMinutes % (24 * 60)) / 60
+        let minutes = absMinutes % 60
+        if days == 0 {
+            return "(\(sign)\(String(format: "%02d", hours))h \(String(format: "%02d", minutes))m)"
+        }
+        return "(\(sign)\(String(format: "%02d", days))d \(String(format: "%02d", hours))h \(String(format: "%02d", minutes))m)"
+    }
+
+    private func countdownColor(to target: Date) -> Color {
+        let remainingHours = target.timeIntervalSince(Date()) / 3600.0
+        if remainingHours <= 12 { return .red }
+        if remainingHours <= 24 { return .orange }
+        return dateHeaderTextColor
     }
 
     // MARK: Helpers

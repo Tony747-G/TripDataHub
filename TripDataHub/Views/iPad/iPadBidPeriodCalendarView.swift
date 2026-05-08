@@ -121,9 +121,9 @@ struct IPadBidPeriodCalendarView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "chevron.left")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 11, weight: .bold))
                         Text(previousBPLabel)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: 12, weight: .bold))
                     }
                 }
                 .buttonStyle(.bordered)
@@ -140,9 +140,9 @@ struct IPadBidPeriodCalendarView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Text(nextBPLabel)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: 12, weight: .bold))
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 11, weight: .bold))
                     }
                 }
                 .buttonStyle(.bordered)

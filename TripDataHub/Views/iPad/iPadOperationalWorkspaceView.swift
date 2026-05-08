@@ -227,6 +227,7 @@ private struct IPadFriendTimelineSidebarView: View {
                 .foregroundStyle(Color.accentColor)
                 Text(friend.employeeID)
                     .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
                     .lineLimit(1)
                 Spacer()
             }
