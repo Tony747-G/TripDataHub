@@ -124,11 +124,11 @@ struct IPadOperationalWorkspaceView: View {
 
     private var floatingMenu: some View {
         ZStack {
-            fanItem(index: 0, icon: "clock", label: "Timeline", isActive: isOwnTimeline) {
+            fanItem(index: 0, icon: "calendar", label: "Timeline", isActive: isOwnTimeline) {
                 sidebarContent = .ownTimeline
                 withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
             }
-            fanItem(index: 1, icon: "airplane", label: "Open Time", isActive: isOpenTime) {
+            fanItem(index: 1, icon: "clock", label: "Open Time", isActive: isOpenTime) {
                 sidebarContent = .openTime
                 withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
             }

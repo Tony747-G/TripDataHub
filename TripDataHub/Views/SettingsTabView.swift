@@ -53,6 +53,7 @@ struct SettingsTabView: View {
     }
 
     private func loadCrewAccessImportFiles(afterDelete: Bool = false) async {
+        await viewModel.fetchCrewAccessImportFilesIfNeeded(reason: afterDelete ? "settings after delete" : "settings")
         crewAccessImportFiles = await viewModel.listCrewAccessImportFiles()
         if afterDelete {
             NSLog("[CrewAccessFiles] reloaded count=%d", crewAccessImportFiles.count)
