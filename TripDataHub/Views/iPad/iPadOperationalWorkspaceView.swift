@@ -111,7 +111,7 @@ struct IPadOperationalWorkspaceView: View {
         case .ownTimeline:
             IPadTimelineSidebarView(selectedTripID: $selectedTripID)
         case .openTime:
-            OpenTimeTabView()
+            OpenTimeTabView(sidebarMode: true)
         case .friendTimeline(let friend):
             IPadFriendTimelineSidebarView(
                 friend: friend,

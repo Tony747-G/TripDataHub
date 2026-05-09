@@ -1,9 +1,16 @@
 import SwiftUI
 
 struct OpenTimeTabView: View {
+    /// When `true`, the view is hosted in the narrow iPad sidebar:
+    /// - No NavigationStack wrapper (prevents nested navigation)
+    /// - NavigationLink replaced by Button → sheet (prevents freeze + gray oval)
+    /// - Fonts scaled to 78% (matches iPadTimelineSidebarView)
+    var sidebarMode: Bool = false
+
     @EnvironmentObject private var viewModel: AppViewModel
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("app_font_size_option") private var appFontSizeOptionRawValue = AppFontSizeOption.medium.rawValue
+    @State private var selectedDetailTrip: OpenTimeTrip? = nil
     private let ppCardBackground = Color(red: 0.24, green: 0.10, blue: 0.06)
     private let ppCardForeground = Color(red: 0.96, green: 0.74, blue: 0.06)
     private let poBlueDark = Color(red: 0.00, green: 0.36, blue: 0.80)
@@ -26,10 +33,115 @@ struct OpenTimeTabView: View {
     }()
 
     var body: some View {
-        NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+        if sidebarMode {
+            sidebarContent
+                .sheet(item: $selectedDetailTrip) { (trip: OpenTimeTrip) in
+                    NavigationStack {
+                        OpenTimeTripDetailView(
+                            trip: trip,
+                            titleColor: colorForRequestType(trip.requestType)
+                        )
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done") { selectedDetailTrip = nil }
+                            }
+                        }
+                    }
+                }
+        } else {
+            NavigationStack {
+                fullScreenContent
+            }
+        }
+    }
+
+    // MARK: - Sidebar layout (narrow iPad column)
+
+    private var sidebarContent: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    Color.clear.frame(height: 0).id(topAnchorID)
+                    if ppSections.isEmpty {
+                        Text("No fetched data yet. Pull to refresh or tap Fetch in Settings.")
+                            .appScaledFont(.footnote, scale: effScale)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .padding(.horizontal, 12)
+                            .padding(.top, 12)
+                    } else {
+                        ForEach(ppSections) { pp in
+                            Text(pp.label)
+                                .appScaledFont(.caption, weight: .bold, scale: effScale)
+                                .foregroundStyle(ppCardForeground)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(ppCardBackground)
+                                .padding(.top, 4)
+
+                            ForEach(pp.daySections) { day in
+                                Section {
+                                    ForEach(day.rows) { row in
+                                        Button {
+                                            selectedDetailTrip = row.trip
+                                        } label: {
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                HStack {
+                                                    Text(row.pairing)
+                                                        .appScaledFont(.caption, scale: effScale)
+                                                        .foregroundStyle(colorForRequestType(row.requestType))
+                                                    Spacer()
+                                                    Text(row.credit)
+                                                        .appScaledFont(.caption2, scale: effScale)
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                                Text(row.route)
+                                                    .appScaledFont(.caption, weight: .semibold, scale: effScale)
+                                                    .foregroundStyle(colorForRequestType(row.requestType))
+                                                Text("\(row.startLocal) → \(row.endLocal)")
+                                                    .appScaledFont(.caption2, scale: effScale)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 6)
+                                        }
+                                        .buttonStyle(.plain)
+                                        Divider()
+                                    }
+                                } header: {
+                                    Text(day.label)
+                                        .appScaledFont(.caption2, weight: .semibold, scale: effScale)
+                                        .foregroundStyle(dateHeaderTextColor)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 4)
+                                        .background(dayHeaderBackground)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                Text("Open Time")
+                    .appScaledFont(.headline, weight: .semibold, scale: effScale)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .frame(height: 44)
+                    .background(Color(.secondarySystemBackground))
+                    .overlay(alignment: .bottom) { Divider() }
+            }
+        }
+    }
+
+    // MARK: - Full-screen layout (iPhone)
+
+    private var fullScreenContent: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                         Color.clear
                             .frame(height: 0)
                             .id(topAnchorID)
@@ -143,7 +255,6 @@ struct OpenTimeTabView: View {
                 .padding(.vertical, 8)
                 .background(.background)
             }
-        }
     }
 
     private var ppSections: [OpenTimePPSection] {
@@ -264,5 +375,10 @@ struct OpenTimeTabView: View {
     private var fontScale: CGFloat {
         let option = AppFontSizeOption(rawValue: appFontSizeOptionRawValue) ?? .medium
         return option.scaleFactor
+    }
+
+    /// In sidebar mode fonts are scaled to 78% to match iPadTimelineSidebarView.
+    private var effScale: CGFloat {
+        sidebarMode ? fontScale * 0.78 : fontScale
     }
 }
