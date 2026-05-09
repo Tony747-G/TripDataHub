@@ -86,16 +86,20 @@ struct IPadOperationalWorkspaceView: View {
         .sheet(isPresented: $showingSettings) {
             NavigationStack { SettingsTabView() }
                 .environmentObject(viewModel)
-        }
-        .sheet(isPresented: $viewModel.isShowingLoginSheet) {
-            TripBoardLoginView(
-                onAuthenticated: { cookies, url in
-                    viewModel.handleLoginSucceeded(cookies: cookies, url: url)
-                },
-                onCancel: {
-                    viewModel.handleLoginCanceled()
+                // Login sheet must be attached to the Settings sheet itself —
+                // SwiftUI only allows one sheet per view at a time, so attaching
+                // it to the workspace (parent) while Settings is already open
+                // produces "only presenting a single sheet is supported".
+                .sheet(isPresented: $viewModel.isShowingLoginSheet) {
+                    TripBoardLoginView(
+                        onAuthenticated: { cookies, url in
+                            viewModel.handleLoginSucceeded(cookies: cookies, url: url)
+                        },
+                        onCancel: {
+                            viewModel.handleLoginCanceled()
+                        }
+                    )
                 }
-            )
         }
     }
 
