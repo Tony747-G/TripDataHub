@@ -41,12 +41,11 @@ enum OpenTimeSectionBuilder {
 
         for schedule in schedules {
             for trip in schedule.openTimeTrips {
-                let dateKey = ScheduleDateText.datePart(from: trip.startLocal)
                 // Derive the actual PP from the trip's departure date using the
                 // app's own BP/PP calendar. Fall back to TripBoard's label if
                 // the date can't be resolved.
                 let ppLabel: String
-                if let date = SharedDateFormatters.localDayInput.date(from: dateKey),
+                if let date = departureUTC(for: trip, domicile: domicile),
                    let resolved = resolvePayPeriodLabel(for: date, domicile: domicile) {
                     ppLabel = resolved
                 } else {
@@ -102,5 +101,36 @@ enum OpenTimeSectionBuilder {
 
             return OpenTimePPSection(id: ppLabel, label: ppLabel, daySections: daySections)
         }
+    }
+
+    private static func departureUTC(for trip: OpenTimeTrip, domicile: String) -> Date? {
+        let legDeparture = trip.legs
+            .compactMap { LegConnectionTextBuilder.parseUTC($0.depUTC) }
+            .min()
+        if let legDeparture { return legDeparture }
+
+        return parseLocalDateTime(trip.startLocal, domicile: domicile)
+            ?? parseLocalDayAtStartOfDay(trip.startLocal, domicile: domicile)
+    }
+
+    private static func parseLocalDateTime(_ value: String, domicile: String) -> Date? {
+        let timeZone = DomicileSupport.timeZone(for: domicile)
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter.date(from: value.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private static func parseLocalDayAtStartOfDay(_ value: String, domicile: String) -> Date? {
+        let timeZone = DomicileSupport.timeZone(for: domicile)
+        let dateKey = ScheduleDateText.datePart(from: value)
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: dateKey)
     }
 }

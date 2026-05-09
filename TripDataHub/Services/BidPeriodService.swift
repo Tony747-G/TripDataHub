@@ -28,14 +28,19 @@ private let bidPeriodDefinitions: [BidPeriodDefinition] = [
 /// by looking up the BP and using payPeriodIndex (0 = first PP, 1 = second PP).
 /// Falls back to nil if the date is outside all defined BPs.
 func resolvePayPeriodLabel(for dateUTC: Date, domicile: String = DomicileSupport.defaultDomicile) -> String? {
-    guard let bp = bidPeriod(for: dateUTC, domicile: domicile) else { return nil }
-    let secondsPerDay: TimeInterval = 86_400
-    guard let firstDay = bp.days.first else { return nil }
-    let dayOffset = max(0, Int((dateUTC.timeIntervalSince(firstDay.dayStartUTC) / secondsPerDay).rounded(.down)))
-    let ppIndex = dayOffset / 28
-    guard let matchingDef = bidPeriodDefinitions.first(where: { $0.id == bp.id }),
-          ppIndex < matchingDef.ppLabels.count
+    guard let bp = bidPeriod(for: dateUTC, domicile: domicile),
+          let matchingDef = bidPeriodDefinitions.first(where: { $0.id == bp.id })
     else { return nil }
+
+    let calendar = bidPeriodDomicileCalendar(for: domicile)
+    let startBoundaryUTC = bidPeriodStartBoundaryUTC(for: matchingDef, domicile: domicile)
+    let ppIndex = (0..<matchingDef.ppLabels.count).last { index in
+        guard let boundary = calendar.date(byAdding: .day, value: index * 28, to: startBoundaryUTC) else {
+            return false
+        }
+        return boundary <= dateUTC
+    } ?? 0
+    guard ppIndex < matchingDef.ppLabels.count else { return nil }
     return matchingDef.ppLabels[ppIndex]
 }
 

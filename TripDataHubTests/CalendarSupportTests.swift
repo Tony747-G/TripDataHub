@@ -131,6 +131,38 @@ final class CalendarBidPeriodGenerationTests: XCTestCase {
     }
 }
 
+final class OpenTimeSectionBuilderTests: XCTestCase {
+    func test_openTimePPLabel_usesLegUTCBeforeDomicile0300Boundary() {
+        let trip = openTimeTrip(
+            payPeriod: "PP_TRIPBOARD_FALLBACK",
+            pairing: "OT-early",
+            startLocal: "2026-05-17 02:59",
+            depUTC: "2026-05-17T06:59:00Z"
+        )
+        let sections = OpenTimeSectionBuilder.build(
+            schedules: [schedule(id: "OT", label: "PP_TRIPBOARD_FALLBACK", legs: [], openTimeTrips: [trip])],
+            domicile: "SDF"
+        )
+
+        XCTAssertEqual(sections.map { $0.label }, ["PP26-05"])
+    }
+
+    func test_openTimePPLabel_usesLegUTCAtDomicile0300Boundary() {
+        let trip = openTimeTrip(
+            payPeriod: "PP_TRIPBOARD_FALLBACK",
+            pairing: "OT-boundary",
+            startLocal: "2026-05-17 03:00",
+            depUTC: "2026-05-17T07:00:00Z"
+        )
+        let sections = OpenTimeSectionBuilder.build(
+            schedules: [schedule(id: "OT", label: "PP_TRIPBOARD_FALLBACK", legs: [], openTimeTrips: [trip])],
+            domicile: "SDF"
+        )
+
+        XCTAssertEqual(sections.map { $0.label }, ["PP26-06"])
+    }
+}
+
 final class CalendarNormalizationTests: XCTestCase {
     private static let iso = ISO8601DateFormatter()
 
@@ -626,6 +658,40 @@ private func openTimeTrip(payPeriod: String, pairing: String) -> OpenTimeTrip {
         credit: "",
         requestType: "",
         status: ""
+    )
+}
+
+private func openTimeTrip(
+    payPeriod: String,
+    pairing: String,
+    startLocal: String,
+    depUTC: String
+) -> OpenTimeTrip {
+    OpenTimeTrip(
+        payPeriod: payPeriod,
+        pairing: pairing,
+        startLocal: startLocal,
+        endLocal: startLocal,
+        route: "SDF-ANC",
+        credit: "",
+        requestType: "",
+        status: "",
+        legs: [
+            TripLeg(
+                payPeriod: payPeriod,
+                pairing: pairing,
+                leg: 1,
+                flight: "5X1",
+                depAirport: "SDF",
+                depLocal: startLocal,
+                arrAirport: "ANC",
+                arrLocal: startLocal,
+                depUTC: depUTC,
+                arrUTC: depUTC,
+                status: "-",
+                block: ""
+            )
+        ]
     )
 }
 
