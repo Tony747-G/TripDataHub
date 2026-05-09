@@ -197,49 +197,50 @@ func endFraction(for utcDate: Date, timeZone: TimeZone) -> Double {
 func localRegressionMetadata(for trip: CalendarTrip, days: [CalendarDay]) -> [Int: ClosedRange<Double>] {
     var result: [Int: ClosedRange<Double>] = [:]
 
-    for leg in trip.legs {
-        guard let departureUTC = LegConnectionTextBuilder.parseUTC(leg.depUTC),
-              let arrivalUTC = LegConnectionTextBuilder.parseUTC(leg.arrUTC),
-              let departureTimeZone = resolvedTimeZone(for: leg.depAirport),
-              let arrivalTimeZone = resolvedTimeZone(for: leg.arrAirport)
-        else {
-            continue
-        }
-
-        // Regressions only occur when the dep and arr are in different timezones.
-        // A same-timezone overnight flight naturally crosses local midnight and is not
-        // a regression — it would create a false positive if checked by fraction alone.
-        guard departureTimeZone.identifier != arrivalTimeZone.identifier else {
-            continue
-        }
-
-        let localDeparture = localDateComponents(for: departureUTC, in: departureTimeZone)
-        let localArrival = localDateComponents(for: arrivalUTC, in: arrivalTimeZone)
-
-        // Regression is the visible "watch winding back" caused by crossing into a different
-        // UTC offset (or DST transition) during a leg. Same-offset overnight trips (dep 23:00,
-        // arr 06:00 next morning in the same zone) progress forward in absolute time and must
-        // not be flagged. We compare the actual offsets at dep/arr UTC times so that DST
-        // transitions register as a different offset on the same airport.
-        let departureOffset = departureTimeZone.secondsFromGMT(for: departureUTC)
-        let arrivalOffset = arrivalTimeZone.secondsFromGMT(for: arrivalUTC)
-        guard departureOffset != arrivalOffset,
-              let dayIndex = resolveDayIndex(for: arrivalUTC, timeZone: arrivalTimeZone, calendarDays: days)
-        else {
-            continue
-        }
-
-        let arrivalFraction = fraction(from: localArrival)
-        let departureFraction = fraction(from: localDeparture)
-        guard arrivalFraction < departureFraction else {
-            continue
-        }
-
-        result[dayIndex] = widestRange(
-            existing: result[dayIndex],
-            candidate: arrivalFraction...departureFraction
-        )
+    // Only show the local-time "clock moves backward" cue on the trip's final leg.
+    // Intermediate timezone regressions add visual noise to the iPad BP calendar,
+    // while the operationally meaningful case is usually a westbound return leg
+    // back to domicile/base (for example Asia -> ANC).
+    guard let leg = trip.legs.last,
+          let departureUTC = LegConnectionTextBuilder.parseUTC(leg.depUTC),
+          let arrivalUTC = LegConnectionTextBuilder.parseUTC(leg.arrUTC),
+          let departureTimeZone = resolvedTimeZone(for: leg.depAirport),
+          let arrivalTimeZone = resolvedTimeZone(for: leg.arrAirport)
+    else {
+        return result
     }
+
+    // Regressions only occur when the dep and arr are in different timezones.
+    // A same-timezone overnight flight naturally crosses local midnight and is not
+    // a regression — it would create a false positive if checked by fraction alone.
+    guard departureTimeZone.identifier != arrivalTimeZone.identifier else {
+        return result
+    }
+
+    let localDeparture = localDateComponents(for: departureUTC, in: departureTimeZone)
+    let localArrival = localDateComponents(for: arrivalUTC, in: arrivalTimeZone)
+
+    // Regression is the visible "watch winding back" caused by crossing into a different
+    // UTC offset during the final leg. Same-offset overnight trips (dep 23:00, arr 06:00
+    // next morning in the same zone) progress forward in absolute time and must not be flagged.
+    let departureOffset = departureTimeZone.secondsFromGMT(for: departureUTC)
+    let arrivalOffset = arrivalTimeZone.secondsFromGMT(for: arrivalUTC)
+    guard departureOffset != arrivalOffset,
+          let dayIndex = resolveDayIndex(for: arrivalUTC, timeZone: arrivalTimeZone, calendarDays: days)
+    else {
+        return result
+    }
+
+    let arrivalFraction = fraction(from: localArrival)
+    let departureFraction = fraction(from: localDeparture)
+    guard arrivalFraction < departureFraction else {
+        return result
+    }
+
+    result[dayIndex] = widestRange(
+        existing: result[dayIndex],
+        candidate: arrivalFraction...departureFraction
+    )
 
     return result
 }

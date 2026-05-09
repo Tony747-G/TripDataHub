@@ -10,6 +10,13 @@ struct IPadTimelineSidebarView: View {
         ScheduleColors.timelineDateHeaderText(for: colorScheme)
     }
 
+    private var tripCardBackground: Color {
+        if colorScheme == .light {
+            return Color(red: 0.82, green: 0.82, blue: 0.84)
+        }
+        return Color(red: 0.16, green: 0.16, blue: 0.18)
+    }
+
     @AppStorage("app_font_size_option") private var appFontSizeOptionRawValue = AppFontSizeOption.medium.rawValue
 
     private static let anchorageTimeZone: TimeZone =
@@ -376,7 +383,7 @@ struct IPadTimelineSidebarView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
-        .background(Color(.tertiarySystemBackground))
+        .background(tripCardBackground)
     }
 
     private func fallbackCreditHHMM(forPayPeriod payPeriod: String, pairing: String) -> String? {
