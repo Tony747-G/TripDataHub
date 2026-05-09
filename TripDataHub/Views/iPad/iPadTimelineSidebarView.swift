@@ -132,7 +132,7 @@ struct IPadTimelineSidebarView: View {
 
                                     Group {
                                         Button {
-                                            selectedTripID = tripID
+                                            selectedTripID = selectedTripID == tripID ? nil : tripID
                                         } label: {
                                             TimelineFlightRow(
                                                 leg: leg,

@@ -351,7 +351,7 @@ struct IPadBidPeriodCalendarView: View {
                             isSelected: selectedTripID == span.tripID,
                             regressedRanges: span.regressedRanges
                         ) {
-                            selectedTripID = span.tripID
+                            selectedTripID = selectedTripID == span.tripID ? nil : span.tripID
                         }
                         .frame(width: width, height: CalendarDayCell.metrics.laneHeight)
                         .offset(x: x, y: y)
