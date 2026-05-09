@@ -245,14 +245,26 @@ func localRegressionMetadata(for trip: CalendarTrip, days: [CalendarDay]) -> [In
 }
 
 func buildSegments(trip: CalendarTrip, days: [CalendarDay]) -> [CalendarSegment] {
-    guard let displayTimeZone = tripDisplayTimeZone(for: trip),
-          let finalArrivalTimeZone = tripFinalArrivalTimeZone(for: trip),
-          let startDayIndex = resolveDayIndex(for: trip.startUTC, timeZone: displayTimeZone, calendarDays: days),
-          let endDayIndex = resolveDayIndex(for: trip.endUTC, timeZone: displayTimeZone, calendarDays: days),
-          startDayIndex <= endDayIndex
+    // The trip's start/end UTC may fall before/after the displayed BP's days
+    // (carry-in / carry-out). In that case we want to render a partial bar that
+    // begins at the BP's left edge or extends to the BP's right edge rather than
+    // dropping the trip entirely.
+    guard let firstDay = days.first,
+          let displayTimeZone = tripDisplayTimeZone(for: trip),
+          let finalArrivalTimeZone = tripFinalArrivalTimeZone(for: trip)
     else {
         return []
     }
+    let secondsPerDay: TimeInterval = 86_400
+    let rawStart = Int((trip.startUTC.timeIntervalSince(firstDay.dayStartUTC) / secondsPerDay).rounded(.down))
+    let rawEnd = Int((trip.endUTC.timeIntervalSince(firstDay.dayStartUTC) / secondsPerDay).rounded(.down))
+    // Trip is entirely outside the BP range — nothing to render.
+    guard rawEnd >= 0, rawStart < days.count else { return [] }
+    let startDayIndex = max(0, rawStart)
+    let endDayIndex = min(days.count - 1, rawEnd)
+    guard startDayIndex <= endDayIndex else { return [] }
+    let isCarryIn = rawStart < 0
+    let isCarryOut = rawEnd >= days.count
 
     let regressionByDay = localRegressionMetadata(for: trip, days: days)
     var segments: [CalendarSegment] = []
@@ -264,22 +276,30 @@ func buildSegments(trip: CalendarTrip, days: [CalendarDay]) -> [CalendarSegment]
         let regressedRange = regressionByDay[dayIndex]
 
         let start: Double
-        if isFirstDay {
+        if isFirstDay && !isCarryIn {
             start = startFraction(for: trip.startUTC, timeZone: displayTimeZone)
         } else {
+            // Either not the first day of the trip, or the trip carries in from
+            // a previous BP — start at the cell's left edge.
             start = 0
         }
 
         let end: Double
-        if isLastDay {
+        if isLastDay && !isCarryOut {
             end = endFraction(for: trip.endUTC, timeZone: finalArrivalTimeZone)
         } else {
+            // Either not the last day, or the trip carries out into a later BP —
+            // extend to the cell's right edge.
             end = 1
         }
 
-        let segmentStartUTC = isFirstDay
-            ? trip.startUTC
-            : (localDayStartUTC(at: dayIndex, timeZone: displayTimeZone, calendarDays: days) ?? trip.startUTC)
+        let segmentStartUTC: Date
+        if isFirstDay && !isCarryIn {
+            segmentStartUTC = trip.startUTC
+        } else {
+            // For carry-in OR for non-first cells, anchor to the cell's start.
+            segmentStartUTC = localDayStartUTC(at: dayIndex, timeZone: displayTimeZone, calendarDays: days) ?? trip.startUTC
+        }
 
         let normalizedStart: Double
         let normalizedEnd: Double

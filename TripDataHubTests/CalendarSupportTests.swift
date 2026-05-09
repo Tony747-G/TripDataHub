@@ -443,6 +443,58 @@ final class CalendarSegmentationTests: XCTestCase {
         XCTAssertTrue(segment.hasLocalTimeRegression)
         XCTAssertNotNil(segment.regressedRange)
     }
+
+    // MARK: - Carry-in / carry-out across BP boundaries
+
+    /// A trip whose departure is in the previous BP but whose arrival lands inside
+    /// the displayed BP must produce a partial bar starting at the left edge of the
+    /// first visible day, not be dropped entirely.
+    func test_buildSegments_tripCarriesInFromPreviousBP() {
+        // Displayed BP starts March 22 UTC; trip departed March 20 (2 days earlier)
+        // and arrives March 23 12:00 UTC (well inside the displayed BP).
+        let trip = makeTrip(
+            payPeriod: "PP26-04",
+            pairing: "1234",
+            legs: [
+                leg(payPeriod: "PP26-04", pairing: "1234", flight: "5X1", depAirport: "ANC", arrAirport: "SDF", depUTC: "2026-03-20T18:00:00Z", arrUTC: "2026-03-23T12:00:00Z")
+            ]
+        )
+
+        let segments = buildSegments(trip: trip, days: generateBidPeriodDays(startUTC: Self.iso.date(from: "2026-03-22T00:00:00Z")!))
+        XCTAssertFalse(segments.isEmpty, "Carry-in trip must produce at least one segment")
+        let first = segments.min { $0.dayIndex < $1.dayIndex }
+        XCTAssertEqual(first?.dayIndex, 0)
+        XCTAssertEqual(first?.startFraction ?? -1, 0, accuracy: 0.000001,
+                       "First visible day for a carry-in trip starts at the cell's left edge")
+    }
+
+    /// A trip that starts inside the displayed BP but whose arrival is in the next
+    /// BP must extend its final visible-day segment all the way to the right edge.
+    func test_buildSegments_tripCarriesOutIntoNextBP() {
+        // Displayed BP is the 28-day grid starting March 22 UTC (day index 0..27).
+        // Trip departs April 17 12:00 UTC (day 26) and arrives April 22 (past end).
+        let trip = makeTrip(
+            payPeriod: "PP26-04",
+            pairing: "1234",
+            legs: [
+                leg(payPeriod: "PP26-04", pairing: "1234", flight: "5X1", depAirport: "ANC", arrAirport: "SDF", depUTC: "2026-04-17T12:00:00Z", arrUTC: "2026-04-22T12:00:00Z")
+            ]
+        )
+
+        let days = generateBidPeriodDays(
+            startUTC: Self.iso.date(from: "2026-03-22T00:00:00Z")!,
+            payPeriodCount: 1
+        )
+        let segments = buildSegments(trip: trip, days: days)
+        XCTAssertFalse(segments.isEmpty, "Carry-out trip must produce at least one segment")
+        let last = segments.max { $0.dayIndex < $1.dayIndex }
+        XCTAssertNotNil(last)
+        // BP has 28 days (indices 0..27); trip extends past day 27 so the final
+        // visible segment must reach the right edge.
+        XCTAssertEqual(last?.dayIndex, 27)
+        XCTAssertEqual(last?.endFraction ?? -1, 1, accuracy: 0.000001,
+                       "Last visible day for a carry-out trip ends at the cell's right edge")
+    }
 }
 
 final class CalendarLaneAllocationTests: XCTestCase {

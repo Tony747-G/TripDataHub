@@ -127,11 +127,35 @@ private func nextBidPeriod(after current: CalendarBidPeriod, domicile: String) -
 
 // MARK: - Trip Bar Label
 
-/// Returns "DEP → ARR" using first departure and last arrival airports.
+/// Returns the full ordered route for the trip, e.g. "ANC → HKG → ANC" or
+/// "ANC → SDF → CGN → PVG → ANC". Consecutive duplicates are collapsed so a
+/// same-airport refuel does not produce "X → X" segments. The label always ends
+/// at the trip's final arrival airport (which is the base for return-to-base
+/// pairings) — never truncated mid-route.
+///
+/// Bar widths are constrained at the view layer (truncation), not here, so the
+/// model preserves the full route semantics.
 func tripBarLabel(for trip: CalendarTrip) -> String {
-    guard let dep = trip.legs.first?.depAirport,
-          let arr = trip.legs.last?.arrAirport else {
+    guard let firstLeg = trip.legs.first else {
         return trip.pairing
     }
-    return "\(dep) → \(arr)"
+    func normalized(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+    var route: [String] = []
+    let firstDep = normalized(firstLeg.depAirport)
+    if !firstDep.isEmpty {
+        route.append(firstDep)
+    }
+    for leg in trip.legs {
+        // Prefer layover station when present (more meaningful for a long stop),
+        // otherwise the leg's arrival airport.
+        let candidate = normalized(leg.layoverStation ?? leg.arrAirport)
+        guard !candidate.isEmpty else { continue }
+        if route.last != candidate {
+            route.append(candidate)
+        }
+    }
+    guard !route.isEmpty else { return trip.pairing }
+    return route.joined(separator: " → ")
 }

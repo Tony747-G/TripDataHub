@@ -4,6 +4,7 @@ struct IPadTimelineSidebarView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @Binding var selectedTripID: String?
     @Environment(\.colorScheme) private var colorScheme
+    @State private var tripDataByTripID: [String: IPadTripDataCardInfo] = [:]
 
     private var dateHeaderTextColor: Color {
         ScheduleColors.timelineDateHeaderText(for: colorScheme)
@@ -49,6 +50,36 @@ struct IPadTimelineSidebarView: View {
         TimelineLegData(schedules: sidebarSchedules)
     }
 
+    /// Section (day) IDs that contain at least one leg of the selected trip.
+    /// Used to highlight date headers when a trip is selected.
+    private var selectedSectionIDs: Set<String> {
+        guard let selected = selectedTripID else { return [] }
+        return Set(
+            legData.daySections
+                .filter { section in section.legs.contains { "\($0.payPeriod)|\($0.pairing)" == selected } }
+                .map(\.id)
+        )
+    }
+
+    /// IDs of legs that are the first leg of their trip in the visible timeline
+    /// (sorted by depLocal). Used to insert a compact `Trip Id / Credit` summary
+    /// card before the first leg of each trip.
+    private var tripStartLegIDs: Set<UUID> {
+        var seenTrips = Set<String>()
+        var startIDs = Set<UUID>()
+        let sorted = legData.allLegs.sorted { lhs, rhs in
+            if lhs.depLocal == rhs.depLocal { return lhs.flight < rhs.flight }
+            return lhs.depLocal < rhs.depLocal
+        }
+        for leg in sorted {
+            let key = "\(leg.payPeriod)|\(leg.pairing)"
+            if seenTrips.insert(key).inserted {
+                startIDs.insert(leg.id)
+            }
+        }
+        return startIDs
+    }
+
     private var nextReportInfo: (reportTime: Date, tripLabel: String)? {
         let windows = NextReportWindowBuilder.build(
             schedules: sidebarSchedules,
@@ -77,6 +108,22 @@ struct IPadTimelineSidebarView: View {
                 ScrollView {
                     LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                         ForEach(legData.daySections) { section in
+                            // Trip summary cards for trips whose first leg is in
+                            // this day section. Rendered OUTSIDE the Section so
+                            // they appear above the pinned date header, not below.
+                            let startLegs = section.legs.filter { tripStartLegIDs.contains($0.id) }
+                            if !startLegs.isEmpty {
+                                ForEach(startLegs, id: \.id) { startLeg in
+                                    let isTripSelected = selectedTripID == "\(startLeg.payPeriod)|\(startLeg.pairing)"
+                                    tripSummaryCard(forPairing: startLeg.pairing, isPast: section.isPast)
+                                        .background(isTripSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+                                        .overlay(alignment: .leading) {
+                                            if isTripSelected {
+                                                Rectangle().fill(Color.accentColor).frame(width: 3)
+                                            }
+                                        }
+                                }
+                            }
                             Section {
                                 ForEach(section.legs) { leg in
                                     let tripID = "\(leg.payPeriod)|\(leg.pairing)"
@@ -96,10 +143,7 @@ struct IPadTimelineSidebarView: View {
                                                     from: leg.depLocal,
                                                     to: leg.arrLocal
                                                 ),
-                                                blockText: LegConnectionTextBuilder.blockAndConnectionText(
-                                                    for: leg,
-                                                    nextLegByID: legData.nextLegByID
-                                                )
+                                                blockText: blockText(for: leg)
                                             )
                                         }
                                         .buttonStyle(.plain)
@@ -113,9 +157,13 @@ struct IPadTimelineSidebarView: View {
                                         }
 
                                         if shouldShowLayover(leg: leg) {
+                                            let station = leg.layoverStation ?? leg.arrAirport
+                                            let hotel = leg.layoverHotelName
+                                                ?? tripDataByTripID[Self.normalizedTripKey(leg.pairing)]?.hotelByStation[Self.normalizedStationKey(station)]
+                                                ?? ""
                                             TimelineLayoverCard(
-                                                station: leg.layoverStation ?? leg.arrAirport,
-                                                hotel: leg.layoverHotelName ?? "",
+                                                station: station,
+                                                hotel: hotel,
                                                 durationText: TimelineLayoverSupport.durationText(
                                                     arrDate: LegConnectionTextBuilder.parseUTC(leg.arrUTC),
                                                     nextDepDate: legData.nextLegByID[leg.id].flatMap {
@@ -123,22 +171,36 @@ struct IPadTimelineSidebarView: View {
                                                     },
                                                     fallbackDuration: leg.layoverDuration
                                                 ),
-                                                arrLocalDateLabel: "",
+                                                arrLocalDateLabel: arrivalLocalDateLabel(for: leg),
                                                 isPast: section.isPast,
                                                 fontScale: timelineFontScale
                                             )
+                                            .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+                                            .overlay(alignment: .leading) {
+                                                if isSelected {
+                                                    Rectangle().fill(Color.accentColor).frame(width: 3)
+                                                }
+                                            }
                                         }
                                     }
                                     .id(rowID)
                                 }
                             } header: {
+                                let isSectionSelected = selectedSectionIDs.contains(section.id)
+                                let headerBg = ScheduleColors.dayHeaderBackground(for: colorScheme)
                                 Text(section.label)
                                     .appScaledFont(.caption2, weight: .semibold, scale: timelineFontScale)
                                     .foregroundStyle(ScheduleColors.timelineDateHeaderText(for: colorScheme))
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 5)
-                                    .background(ScheduleColors.dayHeaderBackground(for: colorScheme))
+                                    .background(headerBg)
+                                    .overlay(isSectionSelected ? Color.accentColor.opacity(0.10) : Color.clear)
+                                    .overlay(alignment: .leading) {
+                                        if isSectionSelected {
+                                            Rectangle().fill(Color.accentColor).frame(width: 3)
+                                        }
+                                    }
                             }
                         }
                     }
@@ -149,9 +211,56 @@ struct IPadTimelineSidebarView: View {
                         withAnimation { proxy.scrollTo(firstRowID, anchor: .center) }
                     }
                 }
+                // Scroll the next upcoming leg (or in-progress leg) to the top
+                // when the sidebar appears. Without this, the sidebar shows the
+                // oldest legs at top, requiring the user to scroll to find what
+                // is actually upcoming.
+                .task {
+                    for _ in 0..<3 {
+                        try? await Task.sleep(nanoseconds: 120_000_000)
+                        if let rowID = nextUpcomingLegRowID() {
+                            proxy.scrollTo(rowID, anchor: .top)
+                        }
+                    }
+                }
+                .onChange(of: viewModel.schedules) { _, _ in
+                    Task {
+                        try? await Task.sleep(nanoseconds: 120_000_000)
+                        if let rowID = nextUpcomingLegRowID() {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                proxy.scrollTo(rowID, anchor: .top)
+                            }
+                        }
+                    }
+                }
             }
         }
         .background(Color(.systemBackground))
+        .onAppear { refreshTripDataCards() }
+        .onChange(of: viewModel.crewAccessSchedules) { _, _ in refreshTripDataCards() }
+    }
+
+    /// Row ID of the next upcoming leg: an in-progress leg (dep ≤ now < arr)
+    /// takes precedence; otherwise the earliest leg with departure ≥ now.
+    /// Returns nil if there are no future legs at all.
+    private func nextUpcomingLegRowID() -> String? {
+        let now = Date()
+        let sortedLegs = legData.allLegs.sorted { lhs, rhs in
+            if lhs.depLocal == rhs.depLocal { return lhs.flight < rhs.flight }
+            return lhs.depLocal < rhs.depLocal
+        }
+        let target = sortedLegs.first { leg in
+            guard let dep = LegConnectionTextBuilder.parseUTC(leg.depUTC) else { return false }
+            if let arr = LegConnectionTextBuilder.parseUTC(leg.arrUTC),
+               dep <= now,
+               now < arr {
+                return true
+            }
+            return dep >= now
+        }
+        guard let target else { return nil }
+        let tripID = "\(target.payPeriod)|\(target.pairing)"
+        return "\(tripID)|\(target.leg)|\(target.id.uuidString)"
     }
 
     // MARK: Header
@@ -228,12 +337,99 @@ struct IPadTimelineSidebarView: View {
         return dateHeaderTextColor
     }
 
+    // MARK: Trip summary card
+
+    /// Compact `Trip Id: ... / Credit: ...` row shown above each trip's first leg.
+    /// Mirrors `TimelineTabView.tripDataCard` but uses the narrower iPad sidebar
+    /// layout. CreditTime falls back to the sum of leg block times when the
+    /// CrewAccess JSON does not include a creditTime field.
+    @ViewBuilder
+    private func tripSummaryCard(forPairing pairing: String, isPast: Bool) -> some View {
+        let normalized = Self.normalizedTripKey(pairing)
+        let summary = tripDataByTripID[normalized]
+        let creditText = Self.formattedDurationLabel(
+            summary?.creditTime ?? fallbackCreditHHMM(forPairing: pairing)
+        ) ?? "--"
+        let textColor: Color = isPast ? .gray : dateHeaderTextColor
+        HStack(spacing: 8) {
+            Text("Trip Id: \(pairing)")
+                .appScaledFont(.caption2, scale: timelineFontScale)
+                .foregroundStyle(textColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Spacer()
+            Text("Credit: \(creditText)")
+                .appScaledFont(.caption2, scale: timelineFontScale)
+                .foregroundStyle(textColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .background(Color(.tertiarySystemBackground))
+    }
+
+    private func fallbackCreditHHMM(forPairing pairing: String) -> String? {
+        let totalMinutes = legData.allLegs
+            .filter { $0.pairing == pairing }
+            .reduce(0) { partial, leg in partial + Self.parseDurationMinutes(leg.block) }
+        guard totalMinutes > 0 else { return nil }
+        return "\(totalMinutes / 60):\(String(format: "%02d", totalMinutes % 60))"
+    }
+
+    private static func parseDurationMinutes(_ text: String) -> Int {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parts = trimmed.split(separator: ":")
+        guard parts.count == 2,
+              let hh = Int(parts[0]),
+              let mm = Int(parts[1]),
+              hh >= 0,
+              (0...59).contains(mm) else { return 0 }
+        return hh * 60 + mm
+    }
+
+    private static func formattedDurationLabel(_ hhmm: String?) -> String? {
+        guard let hhmm,
+              let parts = Optional(hhmm.split(separator: ":")),
+              parts.count == 2,
+              let hh = Int(parts[0]),
+              let mm = Int(parts[1]),
+              hh >= 0,
+              (0...59).contains(mm) else { return nil }
+        return "\(hh)h\(String(format: "%02d", mm))m"
+    }
+
     // MARK: Helpers
 
     private func timeRangeText(for leg: TripLeg) -> String {
         let dep = ScheduleDateText.timePart(from: leg.depLocal)
         let arr = ScheduleDateText.timePart(from: leg.arrLocal)
         return "\(dep) - \(arr)"
+    }
+
+    private func blockText(for leg: TripLeg) -> String {
+        let text = LegConnectionTextBuilder.blockAndConnectionText(for: leg, nextLegByID: legData.nextLegByID)
+        if shouldShowLayover(leg: leg),
+           let slashRange = text.range(of: " / ") {
+            return String(text[..<slashRange.lowerBound])
+        }
+        return text
+            .replacingOccurrences(of: "Layover at ", with: "LO at ")
+            .replacingOccurrences(of: "Layover:", with: "LO:")
+    }
+
+    private func arrivalLocalDateLabel(for leg: TripLeg) -> String {
+        guard let arrUTC = LegConnectionTextBuilder.parseUTC(leg.arrUTC),
+              let tzID = IATATimeZoneResolver.shared.resolve(leg.arrAirport),
+              let timeZone = TimeZone(identifier: tzID) else {
+            return ""
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "EEE, MMM d yyyy"
+        return formatter.string(from: arrUTC)
     }
 
     private func shouldShowLayover(leg: TripLeg) -> Bool {
@@ -253,6 +449,192 @@ struct IPadTimelineSidebarView: View {
         }
         return nil
     }
+
+    private func refreshTripDataCards() {
+        Task.detached(priority: .utility) {
+            let result = Self.loadTripDataFromCrewAccessImports()
+            await MainActor.run {
+                tripDataByTripID = result
+            }
+        }
+    }
+
+    private nonisolated static func loadTripDataFromCrewAccessImports() -> [String: IPadTripDataCardInfo] {
+        let fm = FileManager.default
+        guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return [:]
+        }
+        let dir = documents.appendingPathComponent("CrewAccessImports", isDirectory: true)
+        guard fm.fileExists(atPath: dir.path) else { return [:] }
+
+        let urls: [URL]
+        do {
+            urls = try fm.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )
+        } catch {
+            return [:]
+        }
+
+        var latestFileByTripID: [String: (date: Date, url: URL)] = [:]
+        for url in urls {
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey]),
+                  values.isRegularFile == true,
+                  url.pathExtension.lowercased() == "json",
+                  let data = try? Data(contentsOf: url),
+                  let decoded = try? JSONDecoder().decode(IPadCrewAccessTripSummaryCardJSON.self, from: data)
+            else {
+                continue
+            }
+            let tripID = decoded.tripId.trimmingCharacters(in: .whitespacesAndNewlines)
+            let normalizedTripID = normalizedTripKey(tripID)
+            guard !normalizedTripID.isEmpty else { continue }
+            let modifiedAt = values.contentModificationDate ?? .distantPast
+            if latestFileByTripID[normalizedTripID].map({ modifiedAt > $0.date }) ?? true {
+                latestFileByTripID[normalizedTripID] = (modifiedAt, url)
+            }
+        }
+
+        var result: [String: IPadTripDataCardInfo] = [:]
+        for (tripID, (_, url)) in latestFileByTripID {
+            guard let data = try? Data(contentsOf: url),
+                  let decoded = try? JSONDecoder().decode(IPadCrewAccessTripSummaryCardJSON.self, from: data)
+            else {
+                continue
+            }
+            var hotelByStation: [String: String] = [:]
+            for detail in decoded.hotelDetails {
+                let (station, name) = IPadCrewAccessTripSummaryCardJSON.parseHotelDetail(detail)
+                let stationKey = normalizedStationKey(station)
+                if !stationKey.isEmpty && !name.isEmpty {
+                    hotelByStation[stationKey] = name
+                }
+            }
+
+            let legacyHotelDetails = decoded.hotelDetails.filter { $0.hasPrefix("Hotel details ") }
+            if !legacyHotelDetails.isEmpty {
+                var legacyHotelIndex = 0
+                let sortedItems = decoded.items.sorted { $0.sequence < $1.sequence }
+                for index in sortedItems.indices.dropLast() {
+                    guard legacyHotelIndex < legacyHotelDetails.count else { break }
+                    let item = sortedItems[index]
+                    let next = sortedItems[index + 1]
+                    guard let endDate = LegConnectionTextBuilder.parseUTC(item.endUtc),
+                          let nextStartDate = LegConnectionTextBuilder.parseUTC(next.startUtc),
+                          nextStartDate.timeIntervalSince(endDate) >= 180 * 60 else {
+                        continue
+                    }
+                    let station = normalizedStationKey(item.arrAirport)
+                    guard !station.isEmpty, hotelByStation[station] == nil else {
+                        legacyHotelIndex += 1
+                        continue
+                    }
+                    let (_, name) = IPadCrewAccessTripSummaryCardJSON.parseHotelDetail(legacyHotelDetails[legacyHotelIndex])
+                    if !name.isEmpty { hotelByStation[station] = name }
+                    legacyHotelIndex += 1
+                }
+            }
+
+            result[tripID] = IPadTripDataCardInfo(
+                hotelByStation: hotelByStation,
+                creditTime: decoded.creditTime?.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+        }
+        return result
+    }
+
+    private nonisolated static func normalizedTripKey(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+
+    private nonisolated static func normalizedStationKey(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+}
+
+private struct IPadTripDataCardInfo {
+    let hotelByStation: [String: String]
+    let creditTime: String?
+}
+
+private struct IPadCrewAccessTripSummaryCardJSON: Decodable {
+    let tripId: String
+    let creditTime: String?
+    let hotelDetails: [String]
+    let items: [IPadCrewAccessTripSummaryCardItemJSON]
+
+    private enum CodingKeys: String, CodingKey {
+        case tripId
+        case creditTime
+        case hotelDetails
+        case items
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        tripId = try container.decode(String.self, forKey: .tripId)
+        creditTime = try container.decodeIfPresent(String.self, forKey: .creditTime)
+        hotelDetails = try container.decodeIfPresent([String].self, forKey: .hotelDetails) ?? []
+        items = try container.decodeIfPresent([IPadCrewAccessTripSummaryCardItemJSON].self, forKey: .items) ?? []
+    }
+
+    static func parseHotelDetail(_ detail: String) -> (station: String, hotelName: String) {
+        if detail.hasPrefix("Hotel details ") {
+            return parseLegacyHotelDetail(detail)
+        }
+
+        guard let colonRange = detail.range(of: ": ") else {
+            return (detail.trimmingCharacters(in: .whitespaces), "")
+        }
+        let station = String(detail[..<colonRange.lowerBound]).trimmingCharacters(in: .whitespaces)
+        var rest = String(detail[colonRange.upperBound...])
+        if let parenRange = rest.range(of: " (", options: .backwards) {
+            rest = String(rest[..<parenRange.lowerBound])
+        }
+        let words = rest.split(separator: " ").map(String.init)
+        var hotelWords: [String] = []
+        for word in words {
+            let dashCount = word.filter { $0 == "-" }.count
+            if word.hasPrefix("+") || dashCount >= 2 { break }
+            hotelWords.append(word)
+        }
+        return (station, hotelWords.joined(separator: " ").trimmingCharacters(in: .whitespaces))
+    }
+
+    private static func parseLegacyHotelDetail(_ detail: String) -> (station: String, hotelName: String) {
+        guard let hotelRange = detail.range(of: "Hotel: ") else { return ("", "") }
+        let afterHotel = String(detail[hotelRange.upperBound...])
+        let hotelOnly: String
+        if let transportRange = afterHotel.range(of: " Hotel Transport:") {
+            hotelOnly = String(afterHotel[..<transportRange.lowerBound])
+        } else {
+            hotelOnly = afterHotel
+        }
+
+        let cleaned = hotelOnly
+            .replacingOccurrences(of: " UPS Only", with: "")
+            .replacingOccurrences(of: "UPS Only ", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let words = cleaned.split(separator: " ").map(String.init)
+        var hotelWords: [String] = []
+        for word in words {
+            let digitCount = word.filter(\.isNumber).count
+            let dashCount = word.filter { $0 == "-" }.count
+            if word.hasPrefix("+") || digitCount >= 3 || dashCount >= 2 { break }
+            hotelWords.append(word)
+        }
+        return ("", hotelWords.joined(separator: " ").trimmingCharacters(in: .whitespaces))
+    }
+}
+
+private struct IPadCrewAccessTripSummaryCardItemJSON: Decodable {
+    let sequence: Int
+    let arrAirport: String
+    let startUtc: String
+    let endUtc: String
 }
 
 #Preview {
