@@ -26,56 +26,81 @@ struct OpenTimePPSection: Identifiable {
 }
 
 enum OpenTimeSectionBuilder {
-    static func build(schedules: [PayPeriodSchedule]) -> [OpenTimePPSection] {
-        schedules.compactMap { schedule in
-            let rows = schedule.openTimeTrips
-                .map { trip in
-                    OpenTimeDisplayRow(
-                        id: trip.id,
-                        trip: trip,
-                        payPeriod: schedule.label,
-                        pairing: trip.pairing,
-                        route: trip.route,
-                        credit: trip.credit,
-                        startLocal: trip.startLocal,
-                        endLocal: trip.endLocal,
-                        requestType: trip.requestType,
-                        status: trip.status
-                    )
-                }
-                .sorted { lhs, rhs in
-                    if lhs.startLocal == rhs.startLocal {
-                        return lhs.pairing < rhs.pairing
-                    }
-                    return lhs.startLocal < rhs.startLocal
+    /// Build PP sections from all open time trips across all schedules.
+    /// Groups trips by their actual Pay Period derived from the trip's departure
+    /// date (via resolvePayPeriodLabel), not from TripBoard's payPeriodId.
+    /// TripBoard's payPeriodId numbering may differ from the app's PP calendar,
+    /// which causes mislabelling when using schedule.label directly.
+    static func build(
+        schedules: [PayPeriodSchedule],
+        domicile: String = DomicileSupport.defaultDomicile
+    ) -> [OpenTimePPSection] {
+        // Collect all rows, keyed by actual PP derived from startLocal
+        var rowsByPP: [String: [OpenTimeDisplayRow]] = [:]
+        var ppOrder: [String] = []
+
+        for schedule in schedules {
+            for trip in schedule.openTimeTrips {
+                let dateKey = ScheduleDateText.datePart(from: trip.startLocal)
+                // Derive the actual PP from the trip's departure date using the
+                // app's own BP/PP calendar. Fall back to TripBoard's label if
+                // the date can't be resolved.
+                let ppLabel: String
+                if let date = SharedDateFormatters.localDayInput.date(from: dateKey),
+                   let resolved = resolvePayPeriodLabel(for: date, domicile: domicile) {
+                    ppLabel = resolved
+                } else {
+                    ppLabel = schedule.label
                 }
 
-            guard !rows.isEmpty else { return nil }
+                let row = OpenTimeDisplayRow(
+                    id: trip.id,
+                    trip: trip,
+                    payPeriod: ppLabel,
+                    pairing: trip.pairing,
+                    route: trip.route,
+                    credit: trip.credit,
+                    startLocal: trip.startLocal,
+                    endLocal: trip.endLocal,
+                    requestType: trip.requestType,
+                    status: trip.status
+                )
 
-            var order: [String] = []
-            var grouped: [String: [OpenTimeDisplayRow]] = [:]
-            for row in rows {
-                let key = ScheduleDateText.datePart(from: row.startLocal)
-                if grouped[key] == nil {
-                    order.append(key)
-                    grouped[key] = []
+                if rowsByPP[ppLabel] == nil {
+                    ppOrder.append(ppLabel)
+                    rowsByPP[ppLabel] = []
                 }
-                grouped[key]?.append(row)
+                rowsByPP[ppLabel]?.append(row)
+            }
+        }
+
+        // Sort rows within each PP by startLocal, then build day-sections
+        return ppOrder.compactMap { ppLabel -> OpenTimePPSection? in
+            guard var rows = rowsByPP[ppLabel], !rows.isEmpty else { return nil }
+            rows.sort { lhs, rhs in
+                lhs.startLocal == rhs.startLocal ? lhs.pairing < rhs.pairing : lhs.startLocal < rhs.startLocal
             }
 
-            let daySections = order.map { key in
+            var dayOrder: [String] = []
+            var dayGrouped: [String: [OpenTimeDisplayRow]] = [:]
+            for row in rows {
+                let key = ScheduleDateText.datePart(from: row.startLocal)
+                if dayGrouped[key] == nil {
+                    dayOrder.append(key)
+                    dayGrouped[key] = []
+                }
+                dayGrouped[key]?.append(row)
+            }
+
+            let daySections = dayOrder.map { key in
                 OpenTimeDaySection(
-                    id: "\(schedule.label)-\(key)",
+                    id: "\(ppLabel)-\(key)",
                     label: ScheduleDateText.dayHeaderLabel(from: key),
-                    rows: grouped[key] ?? []
+                    rows: dayGrouped[key] ?? []
                 )
             }
 
-            return OpenTimePPSection(
-                id: schedule.label,
-                label: schedule.label,
-                daySections: daySections
-            )
+            return OpenTimePPSection(id: ppLabel, label: ppLabel, daySections: daySections)
         }
     }
 }

@@ -4,24 +4,40 @@ private struct BidPeriodDefinition {
     let id: String
     let startDateString: String
     let payPeriodCount: Int
+    let ppLabels: [String]
 }
 
 private let bidPeriodDefinitions: [BidPeriodDefinition] = [
-    .init(id: "BP26-01", startDateString: "2025-11-30", payPeriodCount: 2),
-    .init(id: "BP26-02", startDateString: "2026-01-25", payPeriodCount: 2),
-    .init(id: "BP26-03", startDateString: "2026-03-22", payPeriodCount: 2),
-    .init(id: "BP26-04", startDateString: "2026-05-17", payPeriodCount: 2),
-    .init(id: "BP26-05", startDateString: "2026-07-12", payPeriodCount: 2),
-    .init(id: "BP26-06", startDateString: "2026-09-06", payPeriodCount: 2),
-    .init(id: "BP26-07", startDateString: "2026-11-01", payPeriodCount: 1),
-    .init(id: "BP27-01", startDateString: "2026-11-29", payPeriodCount: 2),
-    .init(id: "BP27-02", startDateString: "2027-01-24", payPeriodCount: 2),
-    .init(id: "BP27-03", startDateString: "2027-03-21", payPeriodCount: 2),
-    .init(id: "BP27-04", startDateString: "2027-05-16", payPeriodCount: 2),
-    .init(id: "BP27-05", startDateString: "2027-07-11", payPeriodCount: 2),
-    .init(id: "BP27-06", startDateString: "2027-09-05", payPeriodCount: 2),
-    .init(id: "BP27-07", startDateString: "2027-10-31", payPeriodCount: 2)
+    .init(id: "BP26-01", startDateString: "2025-11-30", payPeriodCount: 2, ppLabels: ["PP25-13", "PP26-01"]),
+    .init(id: "BP26-02", startDateString: "2026-01-25", payPeriodCount: 2, ppLabels: ["PP26-02", "PP26-03"]),
+    .init(id: "BP26-03", startDateString: "2026-03-22", payPeriodCount: 2, ppLabels: ["PP26-04", "PP26-05"]),
+    .init(id: "BP26-04", startDateString: "2026-05-17", payPeriodCount: 2, ppLabels: ["PP26-06", "PP26-07"]),
+    .init(id: "BP26-05", startDateString: "2026-07-12", payPeriodCount: 2, ppLabels: ["PP26-08", "PP26-09"]),
+    .init(id: "BP26-06", startDateString: "2026-09-06", payPeriodCount: 2, ppLabels: ["PP26-10", "PP26-11"]),
+    .init(id: "BP26-07", startDateString: "2026-11-01", payPeriodCount: 1, ppLabels: ["PP26-12"]),
+    .init(id: "BP27-01", startDateString: "2026-11-29", payPeriodCount: 2, ppLabels: ["PP26-13", "PP27-01"]),
+    .init(id: "BP27-02", startDateString: "2027-01-24", payPeriodCount: 2, ppLabels: ["PP27-02", "PP27-03"]),
+    .init(id: "BP27-03", startDateString: "2027-03-21", payPeriodCount: 2, ppLabels: ["PP27-04", "PP27-05"]),
+    .init(id: "BP27-04", startDateString: "2027-05-16", payPeriodCount: 2, ppLabels: ["PP27-06", "PP27-07"]),
+    .init(id: "BP27-05", startDateString: "2027-07-11", payPeriodCount: 2, ppLabels: ["PP27-08", "PP27-09"]),
+    .init(id: "BP27-06", startDateString: "2027-09-05", payPeriodCount: 2, ppLabels: ["PP27-10", "PP27-11"]),
+    .init(id: "BP27-07", startDateString: "2027-10-31", payPeriodCount: 2, ppLabels: ["PP27-12", "PP27-13"])
 ]
+
+/// Returns the Pay Period label ("PP26-05") for the given UTC date and domicile
+/// by looking up the BP and using payPeriodIndex (0 = first PP, 1 = second PP).
+/// Falls back to nil if the date is outside all defined BPs.
+func resolvePayPeriodLabel(for dateUTC: Date, domicile: String = DomicileSupport.defaultDomicile) -> String? {
+    guard let bp = bidPeriod(for: dateUTC, domicile: domicile) else { return nil }
+    let secondsPerDay: TimeInterval = 86_400
+    guard let firstDay = bp.days.first else { return nil }
+    let dayOffset = max(0, Int((dateUTC.timeIntervalSince(firstDay.dayStartUTC) / secondsPerDay).rounded(.down)))
+    let ppIndex = dayOffset / 28
+    guard let matchingDef = bidPeriodDefinitions.first(where: { $0.id == bp.id }),
+          ppIndex < matchingDef.ppLabels.count
+    else { return nil }
+    return matchingDef.ppLabels[ppIndex]
+}
 
 private let bidPeriodUTCCalendar: Calendar = {
     var calendar = Calendar(identifier: .gregorian)

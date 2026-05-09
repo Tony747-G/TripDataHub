@@ -260,7 +260,8 @@ struct OpenTimeTabView: View {
     }
 
     private var ppSections: [OpenTimePPSection] {
-        OpenTimeSectionBuilder.build(schedules: viewModel.schedules)
+        let domicile = viewModel.verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
+        return OpenTimeSectionBuilder.build(schedules: viewModel.schedules, domicile: domicile)
     }
 
     private func refreshOpenTime(using proxy: ScrollViewProxy) async {
