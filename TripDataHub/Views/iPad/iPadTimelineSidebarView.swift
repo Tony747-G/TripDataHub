@@ -115,7 +115,7 @@ struct IPadTimelineSidebarView: View {
                             if !startLegs.isEmpty {
                                 ForEach(startLegs, id: \.id) { startLeg in
                                     let isTripSelected = selectedTripID == "\(startLeg.payPeriod)|\(startLeg.pairing)"
-                                    tripSummaryCard(forPairing: startLeg.pairing, isPast: section.isPast)
+                                    tripSummaryCard(for: startLeg, isPast: section.isPast)
                                         .background(isTripSelected ? Color.accentColor.opacity(0.12) : Color.clear)
                                         .overlay(alignment: .leading) {
                                             if isTripSelected {
@@ -159,7 +159,7 @@ struct IPadTimelineSidebarView: View {
                                         if shouldShowLayover(leg: leg) {
                                             let station = leg.layoverStation ?? leg.arrAirport
                                             let hotel = leg.layoverHotelName
-                                                ?? tripDataByTripID[Self.normalizedTripKey(leg.pairing)]?.hotelByStation[Self.normalizedStationKey(station)]
+                                                ?? tripDataByTripID[Self.fileKey(for: leg)]?.hotelByStation[Self.normalizedStationKey(station)]
                                                 ?? ""
                                             TimelineLayoverCard(
                                                 station: station,
@@ -224,6 +224,16 @@ struct IPadTimelineSidebarView: View {
                     }
                 }
                 .onChange(of: viewModel.schedules) { _, _ in
+                    Task {
+                        try? await Task.sleep(nanoseconds: 120_000_000)
+                        if let rowID = nextUpcomingLegRowID() {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                proxy.scrollTo(rowID, anchor: .top)
+                            }
+                        }
+                    }
+                }
+                .onChange(of: viewModel.crewAccessSchedules) { _, _ in
                     Task {
                         try? await Task.sleep(nanoseconds: 120_000_000)
                         if let rowID = nextUpcomingLegRowID() {
@@ -340,19 +350,17 @@ struct IPadTimelineSidebarView: View {
     // MARK: Trip summary card
 
     /// Compact `Trip Id: ... / Credit: ...` row shown above each trip's first leg.
-    /// Mirrors `TimelineTabView.tripDataCard` but uses the narrower iPad sidebar
-    /// layout. CreditTime falls back to the sum of leg block times when the
-    /// CrewAccess JSON does not include a creditTime field.
+    /// Keyed by `{depLocalDate}_{pairing}` (payPeriod granularity) so that the
+    /// same pairing in different pay periods resolves to the correct credit value.
     @ViewBuilder
-    private func tripSummaryCard(forPairing pairing: String, isPast: Bool) -> some View {
-        let normalized = Self.normalizedTripKey(pairing)
-        let summary = tripDataByTripID[normalized]
+    private func tripSummaryCard(for startLeg: TripLeg, isPast: Bool) -> some View {
+        let summary = tripDataByTripID[Self.fileKey(for: startLeg)]
         let creditText = Self.formattedDurationLabel(
-            summary?.creditTime ?? fallbackCreditHHMM(forPairing: pairing)
+            summary?.creditTime ?? fallbackCreditHHMM(forPayPeriod: startLeg.payPeriod, pairing: startLeg.pairing)
         ) ?? "--"
         let textColor: Color = isPast ? .gray : dateHeaderTextColor
         HStack(spacing: 8) {
-            Text("Trip Id: \(pairing)")
+            Text("Trip Id: \(startLeg.pairing)")
                 .appScaledFont(.caption2, scale: timelineFontScale)
                 .foregroundStyle(textColor)
                 .lineLimit(1)
@@ -370,12 +378,20 @@ struct IPadTimelineSidebarView: View {
         .background(Color(.tertiarySystemBackground))
     }
 
-    private func fallbackCreditHHMM(forPairing pairing: String) -> String? {
+    private func fallbackCreditHHMM(forPayPeriod payPeriod: String, pairing: String) -> String? {
         let totalMinutes = legData.allLegs
-            .filter { $0.pairing == pairing }
+            .filter { $0.pairing == pairing && $0.payPeriod == payPeriod }
             .reduce(0) { partial, leg in partial + Self.parseDurationMinutes(leg.block) }
         guard totalMinutes > 0 else { return nil }
         return "\(totalMinutes / 60):\(String(format: "%02d", totalMinutes % 60))"
+    }
+
+    /// Lookup key matching the file format `{depLocalDate}_{pairing}` (upper-cased).
+    /// Aligns tripDataByTripID lookups with the payPeriod|pairing granularity of
+    /// the calendar selection key.
+    private static func fileKey(for leg: TripLeg) -> String {
+        let datePrefix = String(leg.depLocal.prefix(10))
+        return "\(datePrefix)_\(leg.pairing)".uppercased()
     }
 
     private static func parseDurationMinutes(_ text: String) -> Int {
@@ -478,27 +494,28 @@ struct IPadTimelineSidebarView: View {
             return [:]
         }
 
-        var latestFileByTripID: [String: (date: Date, url: URL)] = [:]
+        // Key by the file's base name ("{date}_{tripId}", e.g. "2026-05-14_A70303R")
+        // rather than tripId alone. This gives payPeriod-level disambiguation when
+        // the same pairing appears in multiple pay periods.
+        var latestFileByKey: [String: (date: Date, url: URL)] = [:]
         for url in urls {
             guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey]),
                   values.isRegularFile == true,
-                  url.pathExtension.lowercased() == "json",
-                  let data = try? Data(contentsOf: url),
-                  let decoded = try? JSONDecoder().decode(IPadCrewAccessTripSummaryCardJSON.self, from: data)
+                  url.pathExtension.lowercased() == "json"
             else {
                 continue
             }
-            let tripID = decoded.tripId.trimmingCharacters(in: .whitespacesAndNewlines)
-            let normalizedTripID = normalizedTripKey(tripID)
-            guard !normalizedTripID.isEmpty else { continue }
+            let fileKey = url.deletingPathExtension().lastPathComponent.uppercased()
+            guard !fileKey.isEmpty else { continue }
             let modifiedAt = values.contentModificationDate ?? .distantPast
-            if latestFileByTripID[normalizedTripID].map({ modifiedAt > $0.date }) ?? true {
-                latestFileByTripID[normalizedTripID] = (modifiedAt, url)
+            if latestFileByKey[fileKey].map({ modifiedAt > $0.date }) ?? true {
+                latestFileByKey[fileKey] = (modifiedAt, url)
             }
         }
 
         var result: [String: IPadTripDataCardInfo] = [:]
-        for (tripID, (_, url)) in latestFileByTripID {
+        for (fileKey, (_, url)) in latestFileByKey {
+            let tripID = fileKey
             guard let data = try? Data(contentsOf: url),
                   let decoded = try? JSONDecoder().decode(IPadCrewAccessTripSummaryCardJSON.self, from: data)
             else {
