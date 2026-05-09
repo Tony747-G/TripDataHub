@@ -341,17 +341,19 @@ final class CalendarRegressionMetadataTests: XCTestCase {
         XCTAssertTrue(localRegressionMetadata(for: trip, days: generateBidPeriodDays(startUTC: Self.iso.date(from: "2026-03-22T00:00:00Z")!)).isEmpty)
     }
 
-    func test_localRegressionMetadata_timezoneHeavyCase_detectsRegression() {
+    func test_localRegressionMetadata_domicileForwardCase_hasNoRegression() {
         let trip = makeTrip(
             payPeriod: "PP26-04",
             pairing: "1234",
             legs: [
-                leg(payPeriod: "PP26-04", pairing: "1234", flight: "5X1", depAirport: "CGN", arrAirport: "HKG", depUTC: "2026-03-22T18:00:00Z", arrUTC: "2026-03-22T21:00:00Z")
+                // ANC dep wall time = 06:00, arrival in ANC domicile time = 12:00.
+                // The visual end is not after actual domicile arrival, so no orange cue.
+                leg(payPeriod: "PP26-04", pairing: "1234", flight: "5X1", depAirport: "ANC", arrAirport: "SDF", depUTC: "2026-03-22T14:00:00Z", arrUTC: "2026-03-22T20:00:00Z")
             ]
         )
 
         let metadata = localRegressionMetadata(for: trip, days: generateBidPeriodDays(startUTC: Self.iso.date(from: "2026-03-22T00:00:00Z")!))
-        XCTAssertFalse(metadata.isEmpty)
+        XCTAssertTrue(metadata.isEmpty)
     }
 
     func test_localRegressionMetadata_dateLineStyleCase_detectsRegression() {
@@ -365,6 +367,35 @@ final class CalendarRegressionMetadataTests: XCTestCase {
 
         let metadata = localRegressionMetadata(for: trip, days: generateBidPeriodDays(startUTC: Self.iso.date(from: "2026-03-22T00:00:00Z")!))
         XCTAssertFalse(metadata.isEmpty)
+    }
+
+    func test_localRegressionMetadata_previousLocalDateWithLaterClock_detectsRegression() {
+        let trip = makeTrip(
+            payPeriod: "PP26-04",
+            pairing: "1234",
+            legs: [
+                // ICN local dep = Mar 23 07:00, ANC local arr = Mar 22 22:00.
+                // The clock number is later, but the displayed local date moves backward.
+                leg(payPeriod: "PP26-04", pairing: "1234", flight: "5X1", depAirport: "ICN", arrAirport: "ANC", depUTC: "2026-03-22T22:00:00Z", arrUTC: "2026-03-23T06:00:00Z")
+            ]
+        )
+
+        let metadata = localRegressionMetadata(for: trip, days: generateBidPeriodDays(startUTC: Self.iso.date(from: "2026-03-22T00:00:00Z")!))
+        XCTAssertFalse(metadata.isEmpty)
+    }
+
+    func test_localRegressionMetadata_intermediateRegressionOnly_isIgnored() {
+        let trip = makeTrip(
+            payPeriod: "PP26-04",
+            pairing: "1234",
+            legs: [
+                leg(payPeriod: "PP26-04", pairing: "1234", flight: "5X1", depAirport: "NRT", arrAirport: "ANC", depUTC: "2026-03-22T06:00:00Z", arrUTC: "2026-03-22T09:00:00Z", legNumber: 1),
+                leg(payPeriod: "PP26-04", pairing: "1234", flight: "5X2", depAirport: "ANC", arrAirport: "SDF", depUTC: "2026-03-22T14:00:00Z", arrUTC: "2026-03-22T20:00:00Z", legNumber: 2)
+            ]
+        )
+
+        let metadata = localRegressionMetadata(for: trip, days: generateBidPeriodDays(startUTC: Self.iso.date(from: "2026-03-22T00:00:00Z")!))
+        XCTAssertTrue(metadata.isEmpty)
     }
 
     func test_localRegressionMetadata_dstBoundaryDoesNotBreakUTCOrdering() {
@@ -399,8 +430,8 @@ final class CalendarSegmentationTests: XCTestCase {
     }
 
     func test_buildSegments_overnightTrip() {
-        // Calendar days are UTC-indexed. A flight crosses a calendar day boundary when it
-        // spans a UTC midnight. dep at 23:00Z = UTC day 0, arr at 06:00Z next UTC day = UTC day 1.
+        // Calendar cells are Domicile-local days, independent from the 03:00 BP/PP
+        // operational boundary. For SDF domicile, this leg crosses local midnight.
         // SDF = EDT (UTC-4): dep = 19:00 local, arr = 02:00 local next day.
         let trip = makeTrip(
             payPeriod: "PP26-04",
@@ -410,7 +441,14 @@ final class CalendarSegmentationTests: XCTestCase {
             ]
         )
 
-        let segments = buildSegments(trip: trip, days: generateBidPeriodDays(startUTC: Self.iso.date(from: "2026-03-22T00:00:00Z")!))
+        let segments = buildSegments(
+            trip: trip,
+            days: generateBidPeriodDays(
+                startUTC: Self.iso.date(from: "2026-03-22T07:00:00Z")!,
+                payPeriodCount: 2,
+                domicile: "SDF"
+            )
+        )
         XCTAssertEqual(segments.count, 2)
         XCTAssertEqual(segments[0].endFraction, 1, accuracy: 0.000001)
         XCTAssertEqual(segments[1].startFraction, 0, accuracy: 0.000001)
@@ -441,17 +479,17 @@ final class CalendarSegmentationTests: XCTestCase {
         )
 
         let segments = buildSegments(trip: trip, days: generateBidPeriodDays(startUTC: Self.iso.date(from: "2026-03-22T00:00:00Z")!))
-        XCTAssertEqual(segments.map(\.weekIndex), [0, 1, 1])
+        XCTAssertEqual(segments.map(\.weekIndex), [1, 1, 1])
     }
 
     func test_buildSegments_tinySegmentNearMidnight() {
-        // A 2-minute flight spanning a UTC midnight (23:59Z → 00:01Z) crosses a calendar day
-        // boundary, producing two tiny segments even though the local duration is negligible.
+        // A 2-minute flight spanning ANC domicile midnight crosses a calendar day
+        // boundary, producing two tiny segments even though the duration is negligible.
         let trip = makeTrip(
             payPeriod: "PP26-04",
             pairing: "1234",
             legs: [
-                leg(payPeriod: "PP26-04", pairing: "1234", flight: "5X1", depAirport: "SDF", arrAirport: "SDF", depUTC: "2026-03-22T23:59:00Z", arrUTC: "2026-03-23T00:01:00Z")
+                leg(payPeriod: "PP26-04", pairing: "1234", flight: "5X1", depAirport: "ANC", arrAirport: "ANC", depUTC: "2026-03-22T07:59:00Z", arrUTC: "2026-03-22T08:01:00Z")
             ]
         )
 
@@ -459,21 +497,27 @@ final class CalendarSegmentationTests: XCTestCase {
         XCTAssertEqual(segments.count, 2)
     }
 
-    func test_buildSegments_singleSegmentRegression_becomesFullWidth() throws {
+    func test_buildSegments_finalLegRegressionExtendsToDepartureWallClockInDomicileCell() throws {
         let trip = makeTrip(
             payPeriod: "PP26-04",
             pairing: "1234",
             legs: [
-                leg(payPeriod: "PP26-04", pairing: "1234", flight: "5X1", depAirport: "NRT", arrAirport: "ANC", depUTC: "2026-03-22T06:00:00Z", arrUTC: "2026-03-22T09:00:00Z")
+                // HKG dep wall time = Apr 29 19:38. ANC arrival = Apr 29 13:07.
+                // The bar should remain on the ANC Apr 29 cell, blue through 13:07,
+                // and orange from 13:07 to the unconverted HKG wall-clock 19:38.
+                leg(payPeriod: "PP26-04", pairing: "1234", flight: "5X1", depAirport: "HKG", arrAirport: "ANC", depUTC: "2026-04-29T11:38:00Z", arrUTC: "2026-04-29T21:07:00Z")
             ]
         )
 
-        let segments = buildSegments(trip: trip, days: generateBidPeriodDays(startUTC: Self.iso.date(from: "2026-03-22T00:00:00Z")!))
+        let segments = buildSegments(trip: trip, days: generateBidPeriodDays(startUTC: Self.iso.date(from: "2026-04-29T08:00:00Z")!))
         let segment = try XCTUnwrap(segments.first)
-        XCTAssertEqual(segment.startFraction, 0, accuracy: 0.000001)
-        XCTAssertEqual(segment.endFraction, 1, accuracy: 0.000001)
+        XCTAssertEqual(segments.count, 1)
+        XCTAssertEqual(segment.startFraction, (3.0 + 38.0 / 60.0) / 24.0, accuracy: 0.000001)
+        XCTAssertEqual(segment.endFraction, (19.0 + 38.0 / 60.0) / 24.0, accuracy: 0.000001)
         XCTAssertTrue(segment.hasLocalTimeRegression)
-        XCTAssertNotNil(segment.regressedRange)
+        let range = try XCTUnwrap(segment.regressedRange)
+        XCTAssertEqual(range.lowerBound, (13.0 + 7.0 / 60.0) / 24.0, accuracy: 0.000001)
+        XCTAssertEqual(range.upperBound, (19.0 + 38.0 / 60.0) / 24.0, accuracy: 0.000001)
     }
 
     // MARK: - Carry-in / carry-out across BP boundaries
@@ -699,10 +743,11 @@ private func makeBidPeriod(startUTC: String) -> CalendarBidPeriod {
     let formatter = ISO8601DateFormatter()
     let start = formatter.date(from: startUTC)!
     let days = generateBidPeriodDays(startUTC: start)
+    let end = start.addingTimeInterval(TimeInterval(days.count) * 86_400)
     return CalendarBidPeriod(
         id: "BP",
         startDateUTC: start,
-        endDateUTC: days.last!.dayEndUTC,
+        endDateUTC: end,
         days: days
     )
 }

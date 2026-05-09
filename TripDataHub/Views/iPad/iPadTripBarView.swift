@@ -47,6 +47,15 @@ struct IPadTripBarSpanView: View {
     let hasRegression: Bool
     let onTap: () -> Void
 
+    private var visibleRegressionRanges: [ClosedRange<Double>] {
+        regressedRanges.compactMap { range in
+            let lower = min(max(range.lowerBound, 0), 1)
+            let upper = min(max(range.upperBound, 0), 1)
+            guard upper > lower else { return nil }
+            return lower...upper
+        }
+    }
+
     var body: some View {
         Button(action: onTap) {
             GeometryReader { geo in
@@ -58,29 +67,19 @@ struct IPadTripBarSpanView: View {
                                 .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
                         )
 
-                    // Regression indicator: show as the trailing 30% of the bar.
-                    // regressedRanges is normalised relative to the span, but it
-                    // collapses to zero-width when the arrival is exactly at the
-                    // span's end (a known edge-case for timezone-crossing return legs).
-                    // We therefore fall back to a fixed trailing stripe whenever the
-                    // span has a regression, regardless of whether the normalised
-                    // ranges have positive width.
-                    if hasRegression {
+                    if visibleRegressionRanges.isEmpty, hasRegression {
+                        // Defensive fallback for legacy segments that only carry the boolean flag.
                         let regressionWidth = geo.size.width * 0.30
                         RoundedRectangle(cornerRadius: 3)
-                            .fill(Color.orange.opacity(isSelected ? 0.95 : 0.75))
+                            .fill(regressionColor)
                             .frame(width: regressionWidth)
                             .offset(x: geo.size.width - regressionWidth)
                     } else {
-                        ForEach(Array(regressedRanges.enumerated()), id: \.offset) { _, range in
-                            let lower = min(max(range.lowerBound, 0), 1)
-                            let upper = min(max(range.upperBound, 0), 1)
-                            if upper > lower {
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(Color.orange.opacity(isSelected ? 0.95 : 0.75))
-                                    .frame(width: max((upper - lower) * geo.size.width, 1))
-                                    .offset(x: lower * geo.size.width)
-                            }
+                        ForEach(Array(visibleRegressionRanges.enumerated()), id: \.offset) { _, range in
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(regressionColor)
+                                .frame(width: max((range.upperBound - range.lowerBound) * geo.size.width, 1))
+                                .offset(x: range.lowerBound * geo.size.width)
                         }
                     }
 
@@ -104,5 +103,10 @@ struct IPadTripBarSpanView: View {
 
     private var barTextColor: Color {
         isSelected ? .white : Color(.label)
+    }
+
+    private var regressionColor: Color {
+        Color(hue: 0.083, saturation: 1.0, brightness: isSelected ? 0.8 : 0.6)
+            .opacity(isSelected ? 0.75 : 0.60)
     }
 }

@@ -101,7 +101,11 @@ func bidPeriod(for dateUTC: Date, domicile: String = DomicileSupport.defaultDomi
     }
 
     let startBoundaryUTC = bidPeriodStartBoundaryUTC(for: matchingDefinition, domicile: domicile)
-    let days = generateBidPeriodDays(startUTC: startBoundaryUTC, payPeriodCount: matchingDefinition.payPeriodCount)
+    let days = generateBidPeriodDays(
+        startUTC: startBoundaryUTC,
+        payPeriodCount: matchingDefinition.payPeriodCount,
+        domicile: domicile
+    )
     return CalendarBidPeriod(
         id: matchingDefinition.id,
         startDateUTC: startBoundaryUTC,
@@ -111,10 +115,23 @@ func bidPeriod(for dateUTC: Date, domicile: String = DomicileSupport.defaultDomi
 }
 
 func generateBidPeriodDays(startUTC: Date, payPeriodCount: Int = 2) -> [CalendarDay] {
-    let normalizedStartUTC = bidPeriodUTCCalendar.startOfDay(for: startUTC)
+    generateBidPeriodDays(
+        startUTC: startUTC,
+        payPeriodCount: payPeriodCount,
+        domicile: DomicileSupport.defaultDomicile
+    )
+}
+
+func generateBidPeriodDays(
+    startUTC: Date,
+    payPeriodCount: Int,
+    domicile: String
+) -> [CalendarDay] {
+    let domicileCalendar = bidPeriodDomicileCalendar(for: domicile)
+    let normalizedStartUTC = domicileCalendar.startOfDay(for: startUTC)
     return (0..<(payPeriodCount * 28)).compactMap { index in
-        guard let dayStartUTC = bidPeriodUTCCalendar.date(byAdding: .day, value: index, to: normalizedStartUTC),
-              let dayEndUTC = bidPeriodUTCCalendar.date(byAdding: .day, value: 1, to: dayStartUTC)
+        guard let dayStartUTC = domicileCalendar.date(byAdding: .day, value: index, to: normalizedStartUTC),
+              let dayEndUTC = domicileCalendar.date(byAdding: .day, value: 1, to: dayStartUTC)
         else {
             return nil
         }
@@ -126,7 +143,7 @@ func generateBidPeriodDays(startUTC: Date, payPeriodCount: Int = 2) -> [Calendar
             payPeriodIndex: index / 28,
             dayStartUTC: dayStartUTC,
             dayEndUTC: dayEndUTC,
-            displayDateKey: dayKey(from: dayStartUTC, timeZone: bidPeriodUTCCalendar.timeZone)
+            displayDateKey: dayKey(from: dayStartUTC, timeZone: domicileCalendar.timeZone)
         )
     }
 }

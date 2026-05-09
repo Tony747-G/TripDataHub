@@ -48,6 +48,23 @@ private func fraction(from components: DateComponents) -> Double {
     return clampFraction((hour + (minute / 60) + (second / 3600)) / 24)
 }
 
+private func dateKey(from components: DateComponents) -> String? {
+    guard let year = components.year,
+          let month = components.month,
+          let day = components.day
+    else {
+        return nil
+    }
+
+    return String(format: "%04d-%02d-%02d", year, month, day)
+}
+
+private func fractionWithinCalendarDay(_ utcDate: Date, day: CalendarDay) -> Double {
+    let duration = day.dayEndUTC.timeIntervalSince(day.dayStartUTC)
+    guard duration > 0 else { return 0 }
+    return clampFraction(utcDate.timeIntervalSince(day.dayStartUTC) / duration)
+}
+
 private func tripDisplayTimeZone(for trip: CalendarTrip) -> TimeZone? {
     guard let firstLeg = trip.legs.first else {
         return nil
@@ -74,11 +91,8 @@ private func localDayStartUTC(
     timeZone: TimeZone,
     calendarDays: [CalendarDay]
 ) -> Date? {
-    guard let firstCalendarDay = calendarDays.first else {
-        return nil
-    }
-    // Calendar days are UTC-indexed; the segment start is simply UTC midnight of day `index`.
-    return calendarEngineUTCCalendar.date(byAdding: .day, value: index, to: firstCalendarDay.dayStartUTC)
+    _ = timeZone
+    return calendarDays.first(where: { $0.index == index })?.dayStartUTC
 }
 
 private func widestRange(
@@ -153,25 +167,10 @@ func visibleTrips(in bidPeriod: CalendarBidPeriod, trips: [CalendarTrip]) -> [Ca
 }
 
 func resolveDayIndex(for utcDate: Date, timeZone: TimeZone, calendarDays: [CalendarDay]) -> Int? {
-    guard let firstCalendarDay = calendarDays.first else {
-        return nil
-    }
-    // The Bid Period grid is indexed by UTC calendar dates: calendarDays[0] = March 22 UTC,
-    // calendarDays[1] = March 23 UTC, etc. We resolve a UTC timestamp to its grid cell by
-    // computing the floor of (utcDate - bpStartUTC) / 1 day.
-    //
-    // Naively using `startOfDay(for: utcDate)` in the local timezone causes a 1-day shift for
-    // UTC- timezones (e.g. ANC at March 22 00:00 UTC = March 21 16:00 AKDT, whose startOfDay is
-    // March 21 00:00 AKDT). The `timeZone` parameter is retained for API compatibility.
-    let secondsPerDay: TimeInterval = 86_400
-    let elapsed = utcDate.timeIntervalSince(firstCalendarDay.dayStartUTC)
-    let dayOffset = Int((elapsed / secondsPerDay).rounded(.down))
-
-    guard (0..<calendarDays.count).contains(dayOffset) else {
-        return nil
-    }
     _ = timeZone
-    return dayOffset
+    return calendarDays.first { day in
+        day.dayStartUTC <= utcDate && utcDate < day.dayEndUTC
+    }?.index
 }
 
 func localComponents(for utcDate: Date, timeZone: TimeZone) -> DateComponents {
@@ -217,30 +216,42 @@ func localRegressionMetadata(for trip: CalendarTrip, days: [CalendarDay]) -> [In
         return result
     }
 
-    let localDeparture = localDateComponents(for: departureUTC, in: departureTimeZone)
-    let localArrival = localDateComponents(for: arrivalUTC, in: arrivalTimeZone)
+    let departureLocalAtDepartureAirport = localDateComponents(for: departureUTC, in: departureTimeZone)
 
-    // Regression is the visible "watch winding back" caused by crossing into a different
-    // UTC offset during the final leg. Same-offset overnight trips (dep 23:00, arr 06:00
-    // next morning in the same zone) progress forward in absolute time and must not be flagged.
+    // Regression is an iPad calendar cue, not a schedule-timing source of truth:
+    // compare the final leg's departure airport wall time against the actual
+    // arrival time in the Domicile calendar cell. Example: HKG 19:38 -> ANC
+    // 13:07 renders blue through 13:07 and orange from 13:07 to 19:38 on the
+    // Domicile day. We intentionally do not convert the HKG wall clock to ANC.
     let departureOffset = departureTimeZone.secondsFromGMT(for: departureUTC)
     let arrivalOffset = arrivalTimeZone.secondsFromGMT(for: arrivalUTC)
     guard departureOffset != arrivalOffset,
-          let dayIndex = resolveDayIndex(for: arrivalUTC, timeZone: arrivalTimeZone, calendarDays: days)
+          let arrivalDayIndex = resolveDayIndex(for: arrivalUTC, timeZone: arrivalTimeZone, calendarDays: days),
+          let arrivalDay = days.first(where: { $0.index == arrivalDayIndex }),
+          let departureWallDateKey = dateKey(from: departureLocalAtDepartureAirport),
+          let visualEndDay = days.first(where: { $0.displayDateKey == departureWallDateKey })
     else {
         return result
     }
 
-    let arrivalFraction = fraction(from: localArrival)
-    let departureFraction = fraction(from: localDeparture)
-    guard arrivalFraction < departureFraction else {
+    let arrivalFraction = fractionWithinCalendarDay(arrivalUTC, day: arrivalDay)
+    let visualEndFraction = fraction(from: departureLocalAtDepartureAirport)
+    let arrivalPosition = Double(arrivalDay.index) + arrivalFraction
+    let visualEndPosition = Double(visualEndDay.index) + visualEndFraction
+
+    guard visualEndPosition > arrivalPosition else {
         return result
     }
 
-    result[dayIndex] = widestRange(
-        existing: result[dayIndex],
-        candidate: arrivalFraction...departureFraction
-    )
+    for dayIndex in arrivalDay.index...visualEndDay.index {
+        let lower: Double = dayIndex == arrivalDay.index ? arrivalFraction : 0
+        let upper: Double = dayIndex == visualEndDay.index ? visualEndFraction : 1
+        guard upper > lower else { continue }
+        result[dayIndex] = widestRange(
+            existing: result[dayIndex],
+            candidate: lower...upper
+        )
+    }
 
     return result
 }
@@ -250,35 +261,35 @@ func buildSegments(trip: CalendarTrip, days: [CalendarDay]) -> [CalendarSegment]
     // (carry-in / carry-out). In that case we want to render a partial bar that
     // begins at the BP's left edge or extends to the BP's right edge rather than
     // dropping the trip entirely.
-    guard let firstDay = days.first,
-          let displayTimeZone = tripDisplayTimeZone(for: trip),
-          let finalArrivalTimeZone = tripFinalArrivalTimeZone(for: trip)
+    guard let firstDay = days.first
     else {
         return []
     }
+    let regressionByDay = localRegressionMetadata(for: trip, days: days)
     let secondsPerDay: TimeInterval = 86_400
     let rawStart = Int((trip.startUTC.timeIntervalSince(firstDay.dayStartUTC) / secondsPerDay).rounded(.down))
     let rawEnd = Int((trip.endUTC.timeIntervalSince(firstDay.dayStartUTC) / secondsPerDay).rounded(.down))
+    let regressionMaxDayIndex = regressionByDay.keys.max()
     // Trip is entirely outside the BP range — nothing to render.
-    guard rawEnd >= 0, rawStart < days.count else { return [] }
+    guard max(rawEnd, regressionMaxDayIndex ?? rawEnd) >= 0, rawStart < days.count else { return [] }
     let startDayIndex = max(0, rawStart)
-    let endDayIndex = min(days.count - 1, rawEnd)
+    let endDayIndex = min(days.count - 1, max(rawEnd, regressionMaxDayIndex ?? rawEnd))
     guard startDayIndex <= endDayIndex else { return [] }
     let isCarryIn = rawStart < 0
     let isCarryOut = rawEnd >= days.count
 
-    let regressionByDay = localRegressionMetadata(for: trip, days: days)
     var segments: [CalendarSegment] = []
 
     for dayIndex in startDayIndex...endDayIndex {
         let isFirstDay = dayIndex == startDayIndex
         let isLastDay = dayIndex == endDayIndex
-        let hasRegression = regressionByDay[dayIndex] != nil
-        let regressedRange = regressionByDay[dayIndex]
-
         let start: Double
         if isFirstDay && !isCarryIn {
-            start = startFraction(for: trip.startUTC, timeZone: displayTimeZone)
+            if let day = days.first(where: { $0.index == dayIndex }) {
+                start = fractionWithinCalendarDay(trip.startUTC, day: day)
+            } else {
+                start = 0
+            }
         } else {
             // Either not the first day of the trip, or the trip carries in from
             // a previous BP — start at the cell's left edge.
@@ -287,7 +298,13 @@ func buildSegments(trip: CalendarTrip, days: [CalendarDay]) -> [CalendarSegment]
 
         let end: Double
         if isLastDay && !isCarryOut {
-            end = endFraction(for: trip.endUTC, timeZone: finalArrivalTimeZone)
+            if let day = days.first(where: { $0.index == dayIndex }) {
+                let arrivalEnd = dayIndex == rawEnd ? fractionWithinCalendarDay(trip.endUTC, day: day) : 0
+                let regressionEnd = regressionByDay[dayIndex]?.upperBound
+                end = max(arrivalEnd, regressionEnd ?? arrivalEnd)
+            } else {
+                end = 1
+            }
         } else {
             // Either not the last day, or the trip carries out into a later BP —
             // extend to the cell's right edge.
@@ -299,7 +316,7 @@ func buildSegments(trip: CalendarTrip, days: [CalendarDay]) -> [CalendarSegment]
             segmentStartUTC = trip.startUTC
         } else {
             // For carry-in OR for non-first cells, anchor to the cell's start.
-            segmentStartUTC = localDayStartUTC(at: dayIndex, timeZone: displayTimeZone, calendarDays: days) ?? trip.startUTC
+            segmentStartUTC = localDayStartUTC(at: dayIndex, timeZone: calendarEngineUTCCalendar.timeZone, calendarDays: days) ?? trip.startUTC
         }
 
         let normalizedStart: Double
@@ -316,6 +333,8 @@ func buildSegments(trip: CalendarTrip, days: [CalendarDay]) -> [CalendarSegment]
             continue
         }
 
+        let regressedRange = regressionByDay[dayIndex]
+
         segments.append(
             CalendarSegment(
                 tripID: trip.id,
@@ -325,7 +344,7 @@ func buildSegments(trip: CalendarTrip, days: [CalendarDay]) -> [CalendarSegment]
                 startFraction: normalizedStart,
                 endFraction: normalizedEnd,
                 lane: 0,
-                hasLocalTimeRegression: hasRegression,
+                hasLocalTimeRegression: regressedRange != nil,
                 regressedRange: regressedRange
             )
         )
