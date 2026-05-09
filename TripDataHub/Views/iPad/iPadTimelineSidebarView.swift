@@ -34,14 +34,15 @@ struct IPadTimelineSidebarView: View {
     }
 
     private var sidebarSchedules: [PayPeriodSchedule] {
-        // crewAccess is primary. Add bidpro schedules whose pairings have no overlap with
-        // crewAccess so we never show the same trip twice (viewModel.schedules is the merged
-        // union of both sources and would cause duplicates if used directly here).
+        // crewAccess is primary. Include bidpro schedules only when their pairing
+        // is not already covered by crewAccess. Keying by payPeriod|pairing would
+        // miss the match because crewAccess uses "CA{yy}-{mm}-{tripId}|pairing"
+        // while bidpro uses "PP{yy}-{nn}|pairing" — pairing alone is the stable key.
         let crewAccessPairings = Set(
-            viewModel.crewAccessSchedules.flatMap(\.legs).map { "\($0.payPeriod)|\($0.pairing)" }
+            viewModel.crewAccessSchedules.flatMap(\.legs).map(\.pairing)
         )
         let bidproOnly = viewModel.bidproSchedules.filter { schedule in
-            !schedule.legs.contains { crewAccessPairings.contains("\($0.payPeriod)|\($0.pairing)") }
+            !schedule.legs.contains { crewAccessPairings.contains($0.pairing) }
         }
         return viewModel.crewAccessSchedules + bidproOnly
     }

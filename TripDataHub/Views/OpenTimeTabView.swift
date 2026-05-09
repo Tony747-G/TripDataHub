@@ -126,9 +126,11 @@ struct OpenTimeTabView: View {
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 Text("Open Time")
-                    .appScaledFont(.headline, weight: .semibold, scale: effScale)
+                    .appScaledFont(.headline, weight: .bold, scale: fontScale)
+                    .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
+                    .padding(.leading, 24)
+                    .padding(.trailing, 16)
                     .frame(height: 44)
                     .background(Color(.secondarySystemBackground))
                     .overlay(alignment: .bottom) { Divider() }

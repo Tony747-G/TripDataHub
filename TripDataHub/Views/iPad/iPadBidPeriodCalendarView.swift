@@ -34,7 +34,11 @@ struct IPadBidPeriodCalendarView: View {
     // MARK: Derived data
 
     private var allTrips: [CalendarTrip] {
-        mergedCalendarTrips(crewAccess: viewModel.crewAccessSchedules, supplemental: viewModel.schedules)
+        // Must use bidproSchedules, not schedules: schedules already contains
+        // crewAccess data, which would generate duplicate CalendarTrips with
+        // different IDs (crewAccess uses "CA{yy}-{mm}-{tripId}|pairing" keys
+        // while bidpro uses "PP{yy}-{nn}|pairing").
+        mergedCalendarTrips(crewAccess: viewModel.crewAccessSchedules, supplemental: viewModel.bidproSchedules)
     }
 
     private var domicile: String {

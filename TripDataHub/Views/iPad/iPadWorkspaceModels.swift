@@ -31,9 +31,16 @@ func mergedCalendarTrips(
     let crewAccessUpdatedAt = updatedAtByTripID(schedules: crewAccess)
     let supplementalUpdatedAt = updatedAtByTripID(schedules: supplemental)
 
+    // crewAccess payPeriod IDs are "CA{yy}-{mm}-{tripId}" while bidpro uses
+    // "PP{yy}-{nn}" — so the same pairing produces different CalendarTrip IDs.
+    // Dedup by pairing alone as a secondary gate so crewAccess always wins.
+    let crewAccessPairings = Set(crewAccessTrips.map(\.pairing))
+
     // Keep supplemental trips only when they have no crewAccess counterpart,
     // or when supplemental data is demonstrably newer.
     let retainedSupplemental = supplementalTrips.filter { trip in
+        // Secondary dedup: crewAccess pairing wins regardless of ID format.
+        guard !crewAccessPairings.contains(trip.pairing) else { return false }
         guard crewAccessIDs.contains(trip.id) else { return true }
         let crewDate = crewAccessUpdatedAt[trip.id] ?? .distantPast
         let suppDate = supplementalUpdatedAt[trip.id] ?? .distantPast
