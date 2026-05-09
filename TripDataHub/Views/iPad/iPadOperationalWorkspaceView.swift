@@ -87,6 +87,16 @@ struct IPadOperationalWorkspaceView: View {
             NavigationStack { SettingsTabView() }
                 .environmentObject(viewModel)
         }
+        .sheet(isPresented: $viewModel.isShowingLoginSheet) {
+            TripBoardLoginView(
+                onAuthenticated: { cookies, url in
+                    viewModel.handleLoginSucceeded(cookies: cookies, url: url)
+                },
+                onCancel: {
+                    viewModel.handleLoginCanceled()
+                }
+            )
+        }
     }
 
     // MARK: Sidebar switcher
