@@ -353,7 +353,8 @@ struct IPadBidPeriodCalendarView: View {
                         IPadTripBarSpanView(
                             label: tripBarLabel(for: trip),
                             isSelected: selectedTripID == span.tripID,
-                            regressedRanges: span.regressedRanges
+                            regressedRanges: span.regressedRanges,
+                            hasRegression: span.hasRegression
                         ) {
                             selectedTripID = selectedTripID == span.tripID ? nil : span.tripID
                         }
@@ -467,6 +468,11 @@ private struct IPadRowTripSpan: Identifiable {
     let startRowFraction: Double
     let endRowFraction: Double
     let regressedRanges: [ClosedRange<Double>]
+    /// True when any segment of this span has a local-time regression.
+    /// Used to paint the trailing portion of the bar orange when the
+    /// normalised regressedRanges collapse to zero width (a known edge case
+    /// where arrival == span end, making both bounds equal after clamping).
+    let hasRegression: Bool
 }
 
 private func rowTripSpans(
@@ -482,7 +488,7 @@ private func rowTripSpans(
     }
 
     var spans: [IPadRowTripSpan] = []
-    var current: (tripID: String, lane: Int, startDay: CalendarDay, endDay: CalendarDay, start: Double, end: Double, ranges: [ClosedRange<Double>])?
+    var current: (tripID: String, lane: Int, startDay: CalendarDay, endDay: CalendarDay, start: Double, end: Double, ranges: [ClosedRange<Double>], hasRegression: Bool)?
 
     func rowFraction(day: CalendarDay, fraction: Double) -> Double {
         (Double(day.weekdayIndex) + fraction) / 7
@@ -507,7 +513,8 @@ private func rowTripSpans(
             lane: current.lane,
             startRowFraction: start,
             endRowFraction: end,
-            regressedRanges: normalizedRanges
+            regressedRanges: normalizedRanges,
+            hasRegression: current.hasRegression
         ))
     }
 
@@ -516,6 +523,8 @@ private func rowTripSpans(
         let segmentRanges: [ClosedRange<Double>] = segment.regressedRange.map {
             rowFraction(day: day, fraction: $0.lowerBound)...rowFraction(day: day, fraction: $0.upperBound)
         }.map { [$0] } ?? []
+
+        let segmentHasRegression = segment.hasLocalTimeRegression
 
         if let existing = current,
            existing.tripID == segment.tripID,
@@ -530,7 +539,8 @@ private func rowTripSpans(
                 day,
                 existing.start,
                 segment.endFraction,
-                existing.ranges + segmentRanges
+                existing.ranges + segmentRanges,
+                existing.hasRegression || segmentHasRegression
             )
         } else {
             appendCurrent()
@@ -541,7 +551,8 @@ private func rowTripSpans(
                 day,
                 segment.startFraction,
                 segment.endFraction,
-                segmentRanges
+                segmentRanges,
+                segmentHasRegression
             )
         }
     }
