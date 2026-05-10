@@ -41,17 +41,10 @@ struct IPadTimelineSidebarView: View {
     }
 
     private var sidebarSchedules: [PayPeriodSchedule] {
-        // crewAccess is primary. Include bidpro schedules only when their pairing
-        // is not already covered by crewAccess. Keying by payPeriod|pairing would
-        // miss the match because crewAccess uses "CA{yy}-{mm}-{tripId}|pairing"
-        // while bidpro uses "PP{yy}-{nn}|pairing" — pairing alone is the stable key.
-        let crewAccessPairings = Set(
-            viewModel.crewAccessSchedules.flatMap(\.legs).map(\.pairing)
-        )
-        let bidproOnly = viewModel.bidproSchedules.filter { schedule in
-            !schedule.legs.contains { crewAccessPairings.contains($0.pairing) }
-        }
-        return viewModel.crewAccessSchedules + bidproOnly
+        // Match iPhone Timeline semantics: only explicitly imported CrewAccess
+        // trips appear in Timeline. TripBoard/BidPro schedules are not import
+        // files and should not surface here as unexpected future trips.
+        viewModel.crewAccessSchedules
     }
 
     private var legData: TimelineLegData {

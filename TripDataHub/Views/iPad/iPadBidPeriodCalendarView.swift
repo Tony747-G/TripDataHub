@@ -35,11 +35,10 @@ struct IPadBidPeriodCalendarView: View {
     // MARK: Derived data
 
     private var allTrips: [CalendarTrip] {
-        // Must use bidproSchedules, not schedules: schedules already contains
-        // crewAccess data, which would generate duplicate CalendarTrips with
-        // different IDs (crewAccess uses "CA{yy}-{mm}-{tripId}|pairing" keys
-        // while bidpro uses "PP{yy}-{nn}|pairing").
-        mergedCalendarTrips(crewAccess: viewModel.crewAccessSchedules, supplemental: viewModel.bidproSchedules)
+        // Match iPhone Timeline semantics: the operational calendar is driven by
+        // CrewAccess imports only. TripBoard/BidPro schedules remain available to
+        // OpenTime/TripBoard flows, but should not appear as imported trips here.
+        normalizeCalendarTrips(from: viewModel.crewAccessSchedules)
     }
 
     private var domicile: String {
