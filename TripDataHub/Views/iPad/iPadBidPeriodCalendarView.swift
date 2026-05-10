@@ -10,6 +10,7 @@ struct IPadBidPeriodCalendarView: View {
 
     @State private var currentBidPeriod: CalendarBidPeriod? = nil
     @State private var headerBidPeriod: CalendarBidPeriod? = nil
+    @State private var scrollTrigger = UUID()
 
     // BP date range labels (e.g. "May 17 – Jul 11, 2026") must render the BP's UTC calendar
     // dates verbatim. Without an explicit UTC timezone, the device's local timezone shifts the
@@ -159,6 +160,7 @@ struct IPadBidPeriodCalendarView: View {
 
                 Button("Today") {
                     loadBidPeriod(for: Date())
+                    scrollTrigger = UUID()
                 }
                 .buttonStyle(.borderedProminent)
                 .font(.system(size: 12, weight: .medium))
@@ -294,6 +296,15 @@ struct IPadBidPeriodCalendarView: View {
                     try? await Task.sleep(nanoseconds: 120_000_000)
                     withAnimation(.easeInOut(duration: 0.25)) {
                         proxy.scrollTo(newID, anchor: .top)
+                    }
+                }
+            }
+            .onChange(of: scrollTrigger) { _, _ in
+                guard let id = currentBidPeriod?.id else { return }
+                Task {
+                    try? await Task.sleep(nanoseconds: 120_000_000)
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        proxy.scrollTo(id, anchor: .top)
                     }
                 }
             }
@@ -597,9 +608,11 @@ private struct CalendarDayCell: View {
 
     private var dayDate: Date { gridDay.calendarDay.dayStartUTC }
     private var isToday: Bool {
-        var utc = Calendar(identifier: .gregorian)
-        utc.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
-        return utc.isDateInToday(dayDate)
+        var utcCal = Calendar(identifier: .gregorian)
+        utcCal.timeZone = .gmt
+        let cell = utcCal.dateComponents([.year, .month, .day], from: dayDate)
+        let local = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        return cell.year == local.year && cell.month == local.month && cell.day == local.day
     }
     private var isSunday: Bool { gridDay.calendarDay.weekdayIndex == 0 }
     private var isSaturday: Bool { gridDay.calendarDay.weekdayIndex == 6 }
@@ -629,8 +642,8 @@ private struct CalendarDayCell: View {
                     }
                 }
                 if isFirstOfMonth || gridDay.calendarDay.index == 0 {
-                    Text(Self.monthFormatter.string(from: dayDate))
-                        .font(.system(size: 11, weight: .medium))
+                    Text(Self.monthFormatter.string(from: dayDate).uppercased())
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.secondary)
                 }
             }

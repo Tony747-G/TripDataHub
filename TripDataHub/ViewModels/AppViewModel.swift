@@ -218,6 +218,7 @@ final class AppViewModel: ObservableObject {
     private var pendingDeviceScheduleUploadReason: String?
     private var lastDeviceScheduleUploadFingerprint: String?
     private var foregroundObserver: NSObjectProtocol?
+    private var iCloudKVObserver: NSObjectProtocol?
     private var lastDeviceScheduleFetchAt: Date?
     private var cachedDeviceID: String?
     private var isFetchingCrewAccessImports = false
@@ -227,6 +228,7 @@ final class AppViewModel: ObservableObject {
     private let notification24hKey = "notification_24h_enabled"
     private let notification12hKey = "notification_12h_enabled"
     private let friendConnectionsKey = "friend_connections_v1"
+    private let friendConnectionsSyncKey = "friend_connections_sync_v1"
     private let scheduleSharingEnabledKey = "schedule_sharing_enabled_v1"
     private let seniorityRecordsKey = "pilot_seniority_records_v1"
     // Legacy keys/file names are kept so upgrades from pre-CloudKit verification builds can clean up local seniority data.
@@ -374,6 +376,15 @@ final class AppViewModel: ObservableObject {
             }
         }
 
+        NSUbiquitousKeyValueStore.default.synchronize()
+        iCloudKVObserver = NotificationCenter.default.addObserver(
+            forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
+            object: NSUbiquitousKeyValueStore.default,
+            queue: .main
+        ) { [weak self] _ in
+            Task { await self?.mergeICloudKVFriendConnections() }
+        }
+
 #if DEBUG
         logNonFatal("Cache restore (v2): crew=\(cachedCrewAccessSchedules.count) bidpro=\(cachedBidproSchedules.count)")
 #endif
@@ -383,6 +394,9 @@ final class AppViewModel: ObservableObject {
     deinit {
         if let foregroundObserver {
             NotificationCenter.default.removeObserver(foregroundObserver)
+        }
+        if let iCloudKVObserver {
+            NotificationCenter.default.removeObserver(iCloudKVObserver)
         }
         NSLog("[VM] deinit vm=%@", String(describing: ObjectIdentifier(self)))
     }
@@ -731,10 +745,10 @@ final class AppViewModel: ObservableObject {
             friendCloudKitSyncMessage = "Verify GEMS and iCloud before sharing schedules."
             return
         }
-        let shareableSchedules = crewAccessSchedules
+        let shareableSchedules = schedules.isEmpty ? crewAccessSchedules : schedules
         guard !shareableSchedules.isEmpty else {
-            friendCloudKitSyncMessage = "No CrewAccess schedule to share yet."
-            logNonFatal("Friend CloudKit schedule upload skipped: no CrewAccess schedules (\(reason))")
+            friendCloudKitSyncMessage = "No schedule to share yet."
+            logNonFatal("Friend CloudKit schedule upload skipped: no schedules (\(reason))")
             return
         }
         let crewAccessTrips = await Self.loadCrewAccessTripJSONPayloadsFromImportFiles()
@@ -895,6 +909,7 @@ final class AppViewModel: ObservableObject {
             crewAccessSchedules = remoteSchedules
             crewAccessLegImportReferenceTimes = preservedReferenceTimes
             schedules = mergeAndSortSchedules(crew: remoteSchedules, bidpro: bidproSchedules)
+            handleSchedulesChangedForSharing()
             lastDeviceScheduleFetchAt = snapshot.updatedAt
             UserDefaults.standard.set(snapshot.updatedAt, forKey: deviceScheduleFetchAtKey)
 
@@ -1546,6 +1561,7 @@ final class AppViewModel: ObservableObject {
         crewAccessSchedules = rebuiltSchedules
         pruneCrewAccessLegImportReferenceTimes()
         schedules = mergeAndSortSchedules(crew: crewAccessSchedules, bidpro: bidproSchedules)
+        handleSchedulesChangedForSharing()
         let persistedLastSyncAt = lastSyncAt ?? Date()
         do {
             try cacheService.save(
@@ -1629,6 +1645,7 @@ final class AppViewModel: ObservableObject {
             .count
         pruneCrewAccessLegImportReferenceTimes()
         schedules = mergeAndSortSchedules(crew: crewAccessSchedules, bidpro: bidproSchedules)
+        handleSchedulesChangedForSharing()
         NSLog("[CrewAccessFileDelete] removedTrips=%d", removedTripsCount)
 
         var cacheSaved = false
@@ -1705,6 +1722,7 @@ final class AppViewModel: ObservableObject {
         crewAccessSchedules.removeAll { ids.contains($0.id) }
         pruneCrewAccessLegImportReferenceTimes()
         schedules = mergeAndSortSchedules(crew: crewAccessSchedules, bidpro: bidproSchedules)
+        handleSchedulesChangedForSharing()
         NSLog("[CrewAccessDelete] removedSchedules=%d", toDelete.count)
 
         do {
@@ -3665,19 +3683,61 @@ final class AppViewModel: ObservableObject {
 
     private func loadFriendConnections() -> [FriendConnection] {
         let defaults = UserDefaults.standard
-        guard let data = defaults.data(forKey: friendConnectionsKey) else { return [] }
-        do {
-            let decoded = try JSONDecoder().decode([FriendConnection].self, from: data)
-            let normalized = normalizeFriendConnections(decoded)
-            if normalized != decoded,
-               let migratedData = try? JSONEncoder().encode(normalized) {
-                defaults.set(migratedData, forKey: friendConnectionsKey)
-            }
-            return normalized
-        } catch {
-            logNonFatal("Failed to decode friend connections: \(error.localizedDescription)")
-            return []
+        var local: [FriendConnection] = []
+        if let data = defaults.data(forKey: friendConnectionsKey),
+           let decoded = try? JSONDecoder().decode([FriendConnection].self, from: data) {
+            local = decoded
         }
+        // Merge with iCloud KV lightweight status so accepted connections
+        // flow from iPhone to iPad (and vice-versa) without needing CloudKit.
+        let kvEntries = iCloudKVFriendConnectionEntries()
+        let combined = local + kvEntries.map { friendConnection(from: $0) }
+        let normalized = normalizeFriendConnections(combined)
+        if normalized != local,
+           let migratedData = try? JSONEncoder().encode(normalized) {
+            defaults.set(migratedData, forKey: friendConnectionsKey)
+        }
+        return normalized
+    }
+
+    private func iCloudKVFriendConnectionEntries() -> [FriendConnectionSyncEntry] {
+        guard let data = NSUbiquitousKeyValueStore.default.data(forKey: friendConnectionsSyncKey) else { return [] }
+        return (try? JSONDecoder().decode([FriendConnectionSyncEntry].self, from: data)) ?? []
+    }
+
+    private func friendConnection(from entry: FriendConnectionSyncEntry) -> FriendConnection {
+        let schedules: [PayPeriodSchedule]
+        if let data = entry.sharedSchedulesData,
+           let decoded = try? JSONDecoder().decode([PayPeriodSchedule].self, from: data) {
+            schedules = decoded
+        } else {
+            schedules = []
+        }
+        return FriendConnection(
+            id: entry.id, employeeID: entry.employeeID,
+            status: entry.status, requestedAt: entry.requestedAt, linkedAt: entry.linkedAt,
+            sharedSchedules: schedules
+        )
+    }
+
+    private func mergeICloudKVFriendConnections() {
+        let kvEntries = iCloudKVFriendConnectionEntries()
+        guard !kvEntries.isEmpty else { return }
+        let kvConnections = kvEntries.map { friendConnection(from: $0) }
+        let merged = normalizeFriendConnections(friendConnections + kvConnections)
+        if merged != friendConnections {
+            friendConnections = merged
+            saveFriendConnections()
+        }
+    }
+
+    private struct FriendConnectionSyncEntry: Codable {
+        var id: UUID
+        var employeeID: String
+        var status: FriendConnectionStatus
+        var requestedAt: Date
+        var linkedAt: Date?
+        var sharedSchedulesData: Data?
     }
 
     private func normalizeFriendConnections(_ connections: [FriendConnection]) -> [FriendConnection] {
@@ -3721,6 +3781,46 @@ final class AppViewModel: ObservableObject {
             UserDefaults.standard.set(data, forKey: friendConnectionsKey)
         } catch {
             logNonFatal("Failed to save friend connections: \(error.localizedDescription)")
+        }
+        // Write status + cached schedule data to iCloud KV so other devices
+        // (e.g. iPad) can show friend timelines even when CloudKit records are stale.
+        // CRITICAL: never overwrite existing KV schedule data with empty data.
+        // If our local sharedSchedules for a friend is empty, preserve whatever
+        // schedule data is already in KV (likely written by another device that
+        // has the friend's cache). This prevents the iPad-clobbers-iPhone-data
+        // race condition where the device without cache wipes out the cached
+        // data that another device wrote.
+        let existingEntries = iCloudKVFriendConnectionEntries()
+        let existingByID = Dictionary(uniqueKeysWithValues: existingEntries.map {
+            (GEMSIDNormalizer.normalize($0.employeeID), $0)
+        })
+        var kvBudget = 800_000
+        let encoder = JSONEncoder()
+        let entries = friendConnections.map { conn -> FriendConnectionSyncEntry in
+            let normalizedID = GEMSIDNormalizer.normalize(conn.employeeID)
+            var schedData: Data? = nil
+            if conn.status == .accepted, !conn.sharedSchedules.isEmpty,
+               let encoded = try? encoder.encode(conn.sharedSchedules),
+               encoded.count <= kvBudget {
+                schedData = encoded
+                kvBudget -= encoded.count
+            } else if conn.status == .accepted,
+                      let existing = existingByID[normalizedID]?.sharedSchedulesData,
+                      existing.count <= kvBudget {
+                // Local schedule is empty/missing — keep existing KV data so we
+                // don't blow away cached schedules another device just wrote.
+                schedData = existing
+                kvBudget -= existing.count
+            }
+            return FriendConnectionSyncEntry(
+                id: conn.id, employeeID: conn.employeeID,
+                status: conn.status, requestedAt: conn.requestedAt, linkedAt: conn.linkedAt,
+                sharedSchedulesData: schedData
+            )
+        }
+        if let syncData = try? encoder.encode(entries) {
+            NSUbiquitousKeyValueStore.default.set(syncData, forKey: friendConnectionsSyncKey)
+            NSUbiquitousKeyValueStore.default.synchronize()
         }
     }
 

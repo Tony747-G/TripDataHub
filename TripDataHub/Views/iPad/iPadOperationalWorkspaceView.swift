@@ -5,7 +5,7 @@ import SwiftUI
 private enum IPadSidebarContent {
     case ownTimeline
     case openTime
-    case friendTimeline(friend: FriendConnection)
+    case friendTimeline(friendID: UUID)
 }
 
 // MARK: - Main workspace
@@ -13,6 +13,7 @@ private enum IPadSidebarContent {
 struct IPadOperationalWorkspaceView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @AppStorage("appearance_mode") private var appearanceModeRawValue = AppearanceMode.system.rawValue
+    @Environment(\.scenePhase) private var scenePhase
 
     private var selectedAppearanceMode: AppearanceMode {
         AppearanceMode(rawValue: appearanceModeRawValue) ?? .system
@@ -67,11 +68,16 @@ struct IPadOperationalWorkspaceView: View {
         .task {
             await viewModel.fetchCrewAccessImportFilesIfNeeded(reason: "ipad workspace")
             await viewModel.fetchDeviceScheduleIfNeeded(reason: "ipad workspace")
+            await viewModel.syncFriendCloudKit(reason: "ipad workspace opened")
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                Task { await viewModel.syncFriendCloudKit(reason: "ipad workspace active") }
+            }
         }
         .onChange(of: friendForSidebar?.id) { _, friendID in
-            if let friendID,
-               let friend = viewModel.acceptedFriendConnections.first(where: { $0.id == friendID }) {
-                sidebarContent = .friendTimeline(friend: friend)
+            if let friendID {
+                sidebarContent = .friendTimeline(friendID: friendID)
                 friendForSidebar = nil
             }
         }
@@ -112,12 +118,15 @@ struct IPadOperationalWorkspaceView: View {
             IPadTimelineSidebarView(selectedTripID: $selectedTripID)
         case .openTime:
             OpenTimeTabView(sidebarMode: true)
-        case .friendTimeline(let friend):
-            IPadFriendTimelineSidebarView(
-                friend: friend,
-                selectedTripID: $selectedTripID,
-                onBack: { sidebarContent = .ownTimeline }
-            )
+        case .friendTimeline(let friendID):
+            if let friend = viewModel.acceptedFriendConnections.first(where: { $0.id == friendID }) {
+                IPadFriendTimelineSidebarView(
+                    friend: friend,
+                    selectedTripID: $selectedTripID,
+                    onBack: { sidebarContent = .ownTimeline }
+                )
+                .environmentObject(viewModel)
+            }
         }
     }
 
@@ -232,6 +241,7 @@ private struct IPadFriendTimelineSidebarView: View {
     let friend: FriendConnection
     @Binding var selectedTripID: String?
     let onBack: () -> Void
+    @EnvironmentObject private var viewModel: AppViewModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -257,6 +267,9 @@ private struct IPadFriendTimelineSidebarView: View {
                 schedules: friend.sharedSchedules,
                 emptyStateMessage: "No shared timeline for \(friend.employeeID)."
             )
+            .task {
+                await viewModel.syncFriendCloudKit(reason: "ipad friend timeline opened")
+            }
         }
         .background(Color(.systemBackground))
     }

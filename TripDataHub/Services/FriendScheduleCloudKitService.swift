@@ -261,12 +261,24 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
             throw error
         }
         // If the record was not found in CloudKit (.unknownItem → record = nil),
-        // preserve the existing connection status rather than forcibly downgrading to
-        // .pending. This prevents a previously accepted connection from flipping to
-        // pending when the direct record-ID lookup misses due to GEMS ID normalisation
-        // differences between app versions (e.g. "554744" vs "0554744").
+        // preserve the existing connection status. For accepted connections, still
+        // attempt to fetch the friend's shared schedule — the link record lookup
+        // may miss due to GEMS ID normalisation differences, but the schedule record
+        // name is derived independently and may still resolve correctly.
+        NSLog("[TDHFriendLink] refreshConnection: friend=\(friend) recordFound=\(record != nil) connectionStatus=\(connection.status.rawValue)")
+
         guard let record else {
-            return connection
+            var fallback = connection
+            if connection.status == .accepted {
+                NSLog("[TDHFriendLink] refreshConnection: link record missing, trying fetchSchedule for accepted friend")
+                do {
+                    fallback.sharedSchedules = try await fetchSchedule(gemsID: friend, database: database)
+                } catch {
+                    NSLog("[TDHFriendLink] refreshConnection: fetchSchedule failed (no link record): \(error)")
+                    fallback.sharedSchedules = connection.sharedSchedules
+                }
+            }
+            return fallback
         }
 
         do {
@@ -276,38 +288,72 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         }
 
         let link = self.link(from: record, myGEMSID: myGEMSID, friendGEMSID: friend)
+        NSLog("[TDHFriendLink] refreshConnection: link.isAccepted=\(link.isAccepted) status=\(record["status"] as? String ?? "nil")")
         var updated = connection
         if link.isAccepted {
             updated.status = .accepted
             updated.linkedAt = link.linkedAt ?? updated.linkedAt ?? Date()
-            // Friends Timeline は本人と同じ TripLeg ベース表示エンジンを使用するため、
-            // TDHSharedSchedule のみを取得する。TripScheduleSnapshot (WebTimelineCard) は
-            // ブラウザ用ビューア専用となり、アプリ内では fetch しない。
-            updated.sharedSchedules = (try? await fetchSchedule(gemsID: friend, database: database))
-                ?? updated.sharedSchedules
-        } else if connection.status == .accepted {
-            // Record exists but isAccepted = false while the local connection is accepted.
-            // Only downgrade to pending if the record is explicitly marked as canceled.
-            // A CloudKit record inconsistency (e.g. missing approvals from an older build)
-            // must not silently flip a mutually-accepted connection back to pending.
+            do {
+                updated.sharedSchedules = try await fetchSchedule(gemsID: friend, database: database)
+            } catch {
+                NSLog("[TDHFriendLink] refreshConnection: fetchSchedule failed (accepted): \(error)")
+                updated.sharedSchedules = connection.sharedSchedules
+            }
+        } else {
             let isExplicitlyCanceled = (record[Field.status] as? String) == LinkStatus.canceled
-            if isExplicitlyCanceled {
+            if !isExplicitlyCanceled {
+                applyApproval(to: record, myGEMSID: myGEMSID, pair: pair)
+                let healedLink: FriendScheduleCloudKitLink?
+                do {
+                    let saved = try await database.save(record)
+                    healedLink = self.link(from: saved, myGEMSID: myGEMSID, friendGEMSID: friend)
+                    NSLog("[TDHFriendLink] refreshConnection: re-apply saved, healedLink.isAccepted=\(healedLink?.isAccepted ?? false)")
+                } catch {
+                    NSLog("[TDHFriendLink] approval re-apply failed: \(error.localizedDescription)")
+                    healedLink = nil
+                }
+                if healedLink?.isAccepted == true {
+                    updated.status = .accepted
+                    updated.linkedAt = healedLink?.linkedAt ?? updated.linkedAt ?? Date()
+                    do {
+                        updated.sharedSchedules = try await fetchSchedule(gemsID: friend, database: database)
+                    } catch {
+                        NSLog("[TDHFriendLink] refreshConnection: fetchSchedule failed (healed): \(error)")
+                        updated.sharedSchedules = connection.sharedSchedules
+                    }
+                } else if connection.status == .accepted {
+                    do {
+                        updated.sharedSchedules = try await fetchSchedule(gemsID: friend, database: database)
+                    } catch {
+                        NSLog("[TDHFriendLink] refreshConnection: fetchSchedule failed (preserved-accepted): \(error)")
+                        updated.sharedSchedules = connection.sharedSchedules
+                    }
+                } else {
+                    updated.status = .pending
+                }
+            } else {
                 updated.status = .pending
             }
-            // In either case, try to refresh the shared schedule.
-            updated.sharedSchedules = (try? await fetchSchedule(gemsID: friend, database: database))
-                ?? updated.sharedSchedules
-        } else {
-            updated.status = .pending
         }
         return updated
     }
 
     private func fetchSchedule(gemsID: String, database: FriendScheduleCloudKitDatabase) async throws -> [PayPeriodSchedule] {
         let recordID = CKRecord.ID(recordName: Self.scheduleRecordName(for: gemsID))
-        let record = try await database.record(for: recordID)
-        guard let data = record[Field.schedulesData] as? Data else { return [] }
-        return try JSONDecoder().decode([PayPeriodSchedule].self, from: data)
+        NSLog("[TDHSchedule] fetchSchedule: attempting recordName=\(recordID.recordName)")
+        do {
+            let record = try await database.record(for: recordID)
+            guard let data = record[Field.schedulesData] as? Data else {
+                NSLog("[TDHSchedule] fetchSchedule: record found but no schedulesData field")
+                return []
+            }
+            let schedules = try JSONDecoder().decode([PayPeriodSchedule].self, from: data)
+            NSLog("[TDHSchedule] fetchSchedule: success, \(schedules.count) schedules")
+            return schedules
+        } catch {
+            NSLog("[TDHSchedule] fetchSchedule: FAILED error=\(error)")
+            throw error
+        }
     }
 
     private func friendLinkRecord(
