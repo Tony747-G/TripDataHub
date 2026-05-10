@@ -23,6 +23,12 @@ This is the routing layer for AI sessions working on TripDataHub. It tells you w
 
 - `docs/TERMINOLOGY.md`
 
+## If Performing QA / Invariant Review
+
+- `QWEN.md`
+- `docs/INVARIANTS.md`
+- relevant domain docs from the sections above
+
 ## Before Implementation
 
 1. Identify the touched domain.
@@ -37,7 +43,15 @@ This is the routing layer for AI sessions working on TripDataHub. It tells you w
 
 ## Role Note
 
-Codex primarily acts as PM / reviewer / orchestration agent. Claude primarily acts as implementation SWE. Either agent may implement changes, but both must follow the docs and invariants in this layer.
+Codex primarily acts as PM / reviewer / orchestration agent.
+
+Claude primarily acts as implementation SWE.
+
+Qwen primarily acts as QA / invariant validation / regression detection agent.
+
+Either Codex or Claude may implement changes, but all agents must follow the docs and invariants in this layer.
+
+Qwen should not implement features or redesign architecture unless explicitly instructed by Codex. Its default role is diff-only QA review.
 
 ## Phase
 

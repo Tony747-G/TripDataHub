@@ -6,6 +6,8 @@ import UIKit
 struct FriendsTabView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @State private var employeeIDInput = ""
+    @State private var editingFriend: FriendConnection?
+    @State private var nicknameInput = ""
 
     var body: some View {
         NavigationStack {
@@ -38,15 +40,30 @@ struct FriendsTabView: View {
                                 FriendTimelineView(friend: friend)
                             } label: {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(friend.employeeID)
+                                    Text(friend.displayName)
                                         .font(.headline)
-                                    if let linkedAt = friend.linkedAt {
+                                    if friend.nickname != nil {
+                                        Text(friend.employeeID)
+                                            .font(.caption2)
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                    if let updatedAt = friend.sharedSchedules.map(\.updatedAt).max() {
+                                        Text("Last Updated: \(updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    } else if let linkedAt = friend.linkedAt {
                                         Text("Linked: \(linkedAt.formatted(date: .abbreviated, time: .shortened))")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
                                 }
                             }
+                            .simultaneousGesture(
+                                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                    editingFriend = friend
+                                    nicknameInput = friend.nickname ?? ""
+                                }
+                            )
                         }
                     }
                 }
@@ -134,6 +151,23 @@ struct FriendsTabView: View {
             } message: {
                 Text(viewModel.friendActionMessage ?? "")
             }
+            .alert("Rename Friend", isPresented: Binding(
+                get: { editingFriend != nil },
+                set: { if !$0 { editingFriend = nil } }
+            )) {
+                TextField("Nickname (leave blank to reset)", text: $nicknameInput)
+                Button("Save") {
+                    if let friend = editingFriend {
+                        viewModel.setFriendNickname(id: friend.id, nickname: nicknameInput)
+                    }
+                    editingFriend = nil
+                }
+                Button("Cancel", role: .cancel) { editingFriend = nil }
+            } message: {
+                if let friend = editingFriend {
+                    Text("GEMS: \(friend.employeeID)")
+                }
+            }
         }
     }
 
@@ -195,7 +229,7 @@ struct FriendTimelineView: View {
             schedules: friend.sharedSchedules,
             emptyStateMessage: "No shared timeline data for \(friend.employeeID)."
         )
-        .navigationTitle("\(friend.employeeID) Timeline")
+        .navigationTitle("\(friend.displayName) Timeline")
 #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
 #endif

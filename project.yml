@@ -23,7 +23,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.sfune.BidProSchedule
         PRODUCT_NAME: TripDataHub
         MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "10"
+        CURRENT_PROJECT_VERSION: "42"
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: TripDataHub/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -63,7 +63,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.sfune.BidProSchedule.ShareAction
         PRODUCT_NAME: "TripDataShareActionExtension"
         MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "10"
+        CURRENT_PROJECT_VERSION: "42"
         INFOPLIST_FILE: TripDataShareActionExtension/Info.plist
         CODE_SIGN_ENTITLEMENTS: TripDataShareActionExtension/TripDataShareActionExtension.entitlements
         CODE_SIGN_STYLE: Automatic
@@ -82,7 +82,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.sfune.BidProSchedule.CountdownWidget
         PRODUCT_NAME: "TripDataCountdownWidgetExtension"
         MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "10"
+        CURRENT_PROJECT_VERSION: "42"
         INFOPLIST_FILE: TripDataCountdownWidgetExtension/Info.plist
         CODE_SIGN_ENTITLEMENTS: TripDataCountdownWidgetExtension/TripDataCountdownWidgetExtension.entitlements
         CODE_SIGN_STYLE: Automatic

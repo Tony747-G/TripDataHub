@@ -252,7 +252,7 @@ private struct IPadFriendTimelineSidebarView: View {
                         .font(.system(size: 13, weight: .semibold))
                 }
                 .foregroundStyle(Color.accentColor)
-                Text(friend.employeeID)
+                Text(friend.displayName)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
@@ -281,6 +281,8 @@ private struct IPadFriendsSheet: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @Binding var friendForSidebar: FriendConnection?
     @Environment(\.dismiss) private var dismiss
+    @State private var editingFriend: FriendConnection?
+    @State private var nicknameInput = ""
 
     var body: some View {
         NavigationStack {
@@ -295,9 +297,14 @@ private struct IPadFriendsSheet: View {
                             } label: {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(friend.employeeID)
+                                        Text(friend.displayName)
                                             .font(.headline)
                                             .foregroundStyle(.primary)
+                                        if friend.nickname != nil {
+                                            Text(friend.employeeID)
+                                                .font(.caption2)
+                                                .foregroundStyle(.tertiary)
+                                        }
                                         Text("View their timeline in sidebar")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
@@ -307,6 +314,12 @@ private struct IPadFriendsSheet: View {
                                         .foregroundStyle(Color.accentColor)
                                 }
                             }
+                            .simultaneousGesture(
+                                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                    editingFriend = friend
+                                    nicknameInput = friend.nickname ?? ""
+                                }
+                            )
                         }
                     }
                 }
@@ -319,6 +332,23 @@ private struct IPadFriendsSheet: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
+                }
+            }
+            .alert("Rename Friend", isPresented: Binding(
+                get: { editingFriend != nil },
+                set: { if !$0 { editingFriend = nil } }
+            )) {
+                TextField("Nickname (leave blank to reset)", text: $nicknameInput)
+                Button("Save") {
+                    if let friend = editingFriend {
+                        viewModel.setFriendNickname(id: friend.id, nickname: nicknameInput)
+                    }
+                    editingFriend = nil
+                }
+                Button("Cancel", role: .cancel) { editingFriend = nil }
+            } message: {
+                if let friend = editingFriend {
+                    Text("GEMS: \(friend.employeeID)")
                 }
             }
         }
@@ -343,9 +373,18 @@ private struct FriendsManagementSection: View {
                         FriendTimelineView(friend: friend)
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(friend.employeeID)
+                            Text(friend.displayName)
                                 .font(.headline)
-                            if let linkedAt = friend.linkedAt {
+                            if friend.nickname != nil {
+                                Text(friend.employeeID)
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            if let updatedAt = friend.sharedSchedules.map(\.updatedAt).max() {
+                                Text("Last Updated: \(updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else if let linkedAt = friend.linkedAt {
                                 Text("Linked: \(linkedAt.formatted(date: .abbreviated, time: .shortened))")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)

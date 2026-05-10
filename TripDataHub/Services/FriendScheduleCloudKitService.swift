@@ -434,6 +434,7 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
             let normalized = FriendConnection(
                 id: connection.id,
                 employeeID: employeeID,
+                nickname: connection.nickname,
                 status: connection.status,
                 requestedAt: connection.requestedAt,
                 linkedAt: connection.linkedAt,
@@ -454,6 +455,7 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         return FriendConnection(
             id: lhs.id,
             employeeID: lhs.employeeID,
+            nickname: lhs.nickname ?? rhs.nickname,
             status: accepted ? .accepted : .pending,
             requestedAt: max(lhs.requestedAt, rhs.requestedAt),
             linkedAt: lhs.linkedAt ?? rhs.linkedAt,

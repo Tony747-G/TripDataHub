@@ -140,6 +140,7 @@ enum FriendConnectionStatus: String, Codable {
 struct FriendConnection: Identifiable, Codable, Hashable {
     let id: UUID
     let employeeID: String
+    var nickname: String?
     var status: FriendConnectionStatus
     var requestedAt: Date
     var linkedAt: Date?
@@ -147,9 +148,15 @@ struct FriendConnection: Identifiable, Codable, Hashable {
     // TODO: Phase B 以降で削除予定。iOS アプリ内では未使用（Web ビューア専用）。
     var sharedTimelineCards: [WebTimelineCard]
 
+    var displayName: String {
+        let trimmedNickname = nickname?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmedNickname.isEmpty ? employeeID : trimmedNickname
+    }
+
     init(
         id: UUID = UUID(),
         employeeID: String,
+        nickname: String? = nil,
         status: FriendConnectionStatus,
         requestedAt: Date = Date(),
         linkedAt: Date? = nil,
@@ -158,6 +165,7 @@ struct FriendConnection: Identifiable, Codable, Hashable {
     ) {
         self.id = id
         self.employeeID = employeeID
+        self.nickname = nickname
         self.status = status
         self.requestedAt = requestedAt
         self.linkedAt = linkedAt

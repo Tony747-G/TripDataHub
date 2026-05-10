@@ -694,6 +694,21 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    private func notifyFriendLinked(_ friend: FriendConnection) async {
+        let center = UNUserNotificationCenter.current()
+        let status = await center.notificationSettings().authorizationStatus
+        guard status == .authorized || status == .provisional else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Friend Connected"
+        content.body = "\(friend.displayName) is now linked. You can view their timeline."
+        content.sound = .default
+        content.threadIdentifier = "friend.linked"
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+        let identifier = "friend.linked.\(friend.employeeID)"
+        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
+        try? await center.add(request)
+    }
+
     func handleSchedulesChangedForSharing() {
         guard isScheduleSharingEnabled else { return }
         Task { [weak self] in
@@ -793,6 +808,7 @@ final class AppViewModel: ObservableObject {
         }
 
         do {
+            let previouslyAccepted = Set(friendConnections.filter { $0.status == .accepted }.map(\.employeeID))
             friendConnections = try await friendScheduleCloudKitService.refreshConnections(
                 myGEMSID: verifiedIdentity.gemsID,
                 connections: friendConnections
@@ -800,6 +816,12 @@ final class AppViewModel: ObservableObject {
             saveFriendConnections()
             updateScheduleSharingAfterFriendListChange()
             friendCloudKitSyncMessage = "Friend schedules updated."
+            let newlyAccepted = friendConnections.filter {
+                $0.status == .accepted && !previouslyAccepted.contains($0.employeeID)
+            }
+            for friend in newlyAccepted {
+                await notifyFriendLinked(friend)
+            }
         } catch {
             friendCloudKitSyncMessage = "Failed to update friend schedules: \(error.localizedDescription)"
             logNonFatal("Friend CloudKit refresh failed: \(error.localizedDescription)")
@@ -3715,6 +3737,7 @@ final class AppViewModel: ObservableObject {
         }
         return FriendConnection(
             id: entry.id, employeeID: entry.employeeID,
+            nickname: entry.nickname,
             status: entry.status, requestedAt: entry.requestedAt, linkedAt: entry.linkedAt,
             sharedSchedules: schedules
         )
@@ -3734,6 +3757,7 @@ final class AppViewModel: ObservableObject {
     private struct FriendConnectionSyncEntry: Codable {
         var id: UUID
         var employeeID: String
+        var nickname: String?
         var status: FriendConnectionStatus
         var requestedAt: Date
         var linkedAt: Date?
@@ -3744,9 +3768,11 @@ final class AppViewModel: ObservableObject {
         var normalized: [FriendConnection] = []
         for connection in connections {
             let employeeID = GEMSIDNormalizer.normalize(connection.employeeID)
+            let trimmedNickname = connection.nickname?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let migrated = FriendConnection(
                 id: connection.id,
                 employeeID: employeeID,
+                nickname: trimmedNickname.isEmpty ? nil : trimmedNickname,
                 status: connection.status,
                 requestedAt: connection.requestedAt,
                 linkedAt: connection.linkedAt,
@@ -3767,12 +3793,20 @@ final class AppViewModel: ObservableObject {
         return FriendConnection(
             id: lhs.id,
             employeeID: lhs.employeeID,
+            nickname: lhs.nickname ?? rhs.nickname,
             status: accepted ? .accepted : .pending,
             requestedAt: min(lhs.requestedAt, rhs.requestedAt),
             linkedAt: lhs.linkedAt ?? rhs.linkedAt,
             sharedSchedules: lhs.sharedSchedules.isEmpty ? rhs.sharedSchedules : lhs.sharedSchedules,
             sharedTimelineCards: lhs.sharedTimelineCards.isEmpty ? rhs.sharedTimelineCards : lhs.sharedTimelineCards
         )
+    }
+
+    func setFriendNickname(id: UUID, nickname: String) {
+        let trimmed = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let index = friendConnections.firstIndex(where: { $0.id == id }) else { return }
+        friendConnections[index].nickname = trimmed.isEmpty ? nil : trimmed
+        saveFriendConnections()
     }
 
     private func saveFriendConnections() {
@@ -3814,11 +3848,14 @@ final class AppViewModel: ObservableObject {
             }
             return FriendConnectionSyncEntry(
                 id: conn.id, employeeID: conn.employeeID,
+                nickname: conn.nickname,
                 status: conn.status, requestedAt: conn.requestedAt, linkedAt: conn.linkedAt,
                 sharedSchedulesData: schedData
             )
         }
         if let syncData = try? encoder.encode(entries) {
+            let schedSizes = entries.map { "\($0.employeeID):\($0.sharedSchedulesData?.count ?? 0)B" }.joined(separator: ", ")
+            NSLog("[KVSync] saveFriendConnections: writing \(syncData.count)B total — schedules: [\(schedSizes)]")
             NSUbiquitousKeyValueStore.default.set(syncData, forKey: friendConnectionsSyncKey)
             NSUbiquitousKeyValueStore.default.synchronize()
         }
