@@ -107,8 +107,9 @@ enum SharedScheduleExporter {
             return nil
         }
 
-        let startUTC = arrivalUTC.addingTimeInterval(60 * 60)
-        let endUTC = nextDepartureUTC.addingTimeInterval(-120 * 60)
+        let startUTC = arrivalUTC.addingTimeInterval(30 * 60)
+        let endUTC = TimelineLayoverSupport.restInfo(arrDate: arrivalUTC, nextLeg: nextLeg)?.dutyStartUTC
+            ?? nextDepartureUTC.addingTimeInterval(-90 * 60)
         guard endUTC > startUTC else { return nil }
 
         let durationMinutes = Int(endUTC.timeIntervalSince(startUTC) / 60)

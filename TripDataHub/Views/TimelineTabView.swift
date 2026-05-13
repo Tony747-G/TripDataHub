@@ -193,7 +193,7 @@ struct TimelineTabView: View {
                                         )
                                     } else {
                                         Rectangle()
-                                            .fill(isPastLeg(leg) ? Color.gray : dateHeaderTextColor)
+                                            .fill(isPastLeg(leg, nextLeg: connectionMap[leg.id]) ? Color.gray : dateHeaderTextColor)
                                             .frame(height: 4)
                                     }
                                 } else {
@@ -276,7 +276,7 @@ struct TimelineTabView: View {
         let hasFlightMatch = !flightMatches.isEmpty
         return TimelineFlightRow(
             leg: leg,
-            isPast: isPastLeg(leg),
+            isPast: isPastLeg(leg, nextLeg: nextLegByID[leg.id]),
             fontScale: fontScale,
             timeRangeText: timeRangeText(for: leg),
             dayDiff: dayShift(for: leg),
@@ -323,16 +323,18 @@ struct TimelineTabView: View {
         let restOverlaps = friendScheduleMatches.restOverlapsByArrivalLegID[leg.id] ?? []
         let hasRestOverlap = !restOverlaps.isEmpty
         let next = connectionMap[leg.id]
+        let arrDate = utcArrivalDate(for: leg)
         TimelineLayoverCard(
             station: station,
             hotel: hotel,
             durationText: TimelineLayoverSupport.durationText(
-                arrDate: utcArrivalDate(for: leg),
-                nextDepDate: next.flatMap { utcDepartureDate(for: $0) },
+                arrDate: arrDate,
+                nextLeg: next,
                 fallbackDuration: leg.layoverDuration
             ),
+            remainingText: TimelineLayoverSupport.remainingText(arrDate: arrDate, nextLeg: next),
             arrLocalDateLabel: arrivalLocalDateLabel(for: leg),
-            isPast: isPastLeg(leg),
+            isPast: TimelineLayoverSupport.isPastLayover(arrDate: arrDate, nextLeg: next),
             fontScale: fontScale,
             iconColor: hasRestOverlap ? friendMatchAmber : .primary,
             onIconTap: hasRestOverlap
@@ -661,7 +663,13 @@ struct TimelineTabView: View {
         return dateHeaderTextColor
     }
 
-    private func isPastLeg(_ leg: TripLeg) -> Bool {
+    private func isPastLeg(_ leg: TripLeg, nextLeg: TripLeg? = nil) -> Bool {
+        if shouldShowLayover(leg: leg, connectionMap: nextLeg.map { [leg.id: $0] } ?? [:]) {
+            return TimelineLayoverSupport.isPastLayover(
+                arrDate: utcArrivalDate(for: leg),
+                nextLeg: nextLeg
+            )
+        }
         let reference = utcArrivalDate(for: leg)
             ?? parseLocalDateTime(leg.arrLocal)
             ?? utcDepartureDate(for: leg)
@@ -711,9 +719,12 @@ struct TimelineTabView: View {
             grouped[key]?.append(leg)
         }
 
+        let legData = TimelineLegData(schedules: viewModel.crewAccessSchedules)
         return order.map { key in
             let sectionLegs = grouped[key] ?? []
-            let isPast = !sectionLegs.isEmpty && sectionLegs.allSatisfy { isPastLeg($0) }
+            let isPast = !sectionLegs.isEmpty && sectionLegs.allSatisfy {
+                isPastLeg($0, nextLeg: legData.nextLegByID[$0.id])
+            }
             return TimelineDaySection(
                 id: key,
                 label: dayHeaderLabel(from: key),

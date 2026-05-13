@@ -3,7 +3,7 @@ import XCTest
 @testable import TripDataHub
 
 final class FriendScheduleMatchingTests: XCTestCase {
-    func test_restWindow_usesArrivalPlus60AndDepartureMinus120() {
+    func test_restWindow_usesDutyEndAndNextDutyStart() {
         let arrivalLeg = makeLeg(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
             leg: 1,
@@ -30,9 +30,41 @@ final class FriendScheduleMatchingTests: XCTestCase {
 
         XCTAssertEqual(snapshot.restWindows.count, 1)
         XCTAssertEqual(snapshot.restWindows[0].station, "SDF")
-        XCTAssertEqual(snapshot.restWindows[0].startUTC, iso("2026-05-01T11:00:00Z"))
-        XCTAssertEqual(snapshot.restWindows[0].endUTC, iso("2026-05-01T20:00:00Z"))
-        XCTAssertEqual(snapshot.restWindows[0].durationMinutes, 540)
+        XCTAssertEqual(snapshot.restWindows[0].startUTC, iso("2026-05-01T10:30:00Z"))
+        XCTAssertEqual(snapshot.restWindows[0].endUTC, iso("2026-05-01T20:30:00Z"))
+        XCTAssertEqual(snapshot.restWindows[0].durationMinutes, 600)
+    }
+
+    func test_restWindow_usesSixtyMinuteReportForLower48Flight() {
+        let arrivalLeg = makeLeg(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000003")!,
+            leg: 1,
+            flight: "100",
+            depAirport: "ANC",
+            arrAirport: "SDF",
+            depUTC: "2026-05-01T06:00:00Z",
+            arrUTC: "2026-05-01T10:00:00Z"
+        )
+        let departureLeg = makeLeg(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
+            leg: 2,
+            flight: "101",
+            depAirport: "SDF",
+            arrAirport: "ONT",
+            depUTC: "2026-05-01T22:00:00Z",
+            arrUTC: "2026-05-02T02:00:00Z"
+        )
+
+        let snapshot = SharedScheduleExporter.snapshot(
+            ownerGEMSID: "123456",
+            schedules: [makeSchedule(legs: [arrivalLeg, departureLeg])]
+        )
+
+        XCTAssertEqual(snapshot.restWindows.count, 1)
+        XCTAssertEqual(snapshot.restWindows[0].station, "SDF")
+        XCTAssertEqual(snapshot.restWindows[0].startUTC, iso("2026-05-01T10:30:00Z"))
+        XCTAssertEqual(snapshot.restWindows[0].endUTC, iso("2026-05-01T21:00:00Z"))
+        XCTAssertEqual(snapshot.restWindows[0].durationMinutes, 630)
     }
 
     func test_restOverlap_matchesAtOneHour() {
@@ -41,7 +73,7 @@ final class FriendScheduleMatchingTests: XCTestCase {
             makeLeg(leg: 2, flight: "101", depAirport: "SDF", arrAirport: "ANC", depUTC: "2026-05-01T22:00:00Z", arrUTC: "2026-05-02T02:00:00Z")
         ])]
         let friendSchedules = [makeSchedule(legs: [
-            makeLeg(leg: 1, flight: "200", depAirport: "ONT", arrAirport: "SDF", depUTC: "2026-05-01T13:00:00Z", arrUTC: "2026-05-01T18:00:00Z"),
+            makeLeg(leg: 1, flight: "200", depAirport: "ONT", arrAirport: "SDF", depUTC: "2026-05-01T13:00:00Z", arrUTC: "2026-05-01T19:00:00Z"),
             makeLeg(leg: 2, flight: "201", depAirport: "SDF", arrAirport: "ONT", depUTC: "2026-05-01T23:00:00Z", arrUTC: "2026-05-02T03:00:00Z")
         ])]
 
@@ -61,7 +93,7 @@ final class FriendScheduleMatchingTests: XCTestCase {
             makeLeg(leg: 2, flight: "101", depAirport: "SDF", arrAirport: "ANC", depUTC: "2026-05-01T22:00:00Z", arrUTC: "2026-05-02T02:00:00Z")
         ])]
         let friendSchedules = [makeSchedule(legs: [
-            makeLeg(leg: 1, flight: "200", depAirport: "ONT", arrAirport: "SDF", depUTC: "2026-05-01T13:01:00Z", arrUTC: "2026-05-01T18:01:00Z"),
+            makeLeg(leg: 1, flight: "200", depAirport: "ONT", arrAirport: "SDF", depUTC: "2026-05-01T13:01:00Z", arrUTC: "2026-05-01T19:31:00Z"),
             makeLeg(leg: 2, flight: "201", depAirport: "SDF", arrAirport: "ONT", depUTC: "2026-05-01T23:00:00Z", arrUTC: "2026-05-02T03:00:00Z")
         ])]
 

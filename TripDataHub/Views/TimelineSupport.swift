@@ -161,20 +161,116 @@ enum TimelineLegIconSupport {
 
 /// Layover card logic shared by TimelineTabView and ScheduleTimelineRendererView.
 enum TimelineLayoverSupport {
+    struct RestInfo {
+        let dutyEndUTC: Date
+        let dutyStartUTC: Date
+        let totalMinutes: Int
+
+        func remainingMinutes(at now: Date = Date()) -> Int? {
+            guard now >= dutyEndUTC, now < dutyStartUTC else { return nil }
+            return max(0, Int(dutyStartUTC.timeIntervalSince(now) / 60))
+        }
+
+        func isPast(at now: Date = Date()) -> Bool {
+            dutyStartUTC < now
+        }
+    }
+
     /// Returns true when the gap between arrival and next departure is ≥ 3 h (same pairing).
     static func shouldShow(arrDate: Date?, nextDepDate: Date?, samePairing: Bool) -> Bool {
         guard samePairing, let arr = arrDate, let dep = nextDepDate else { return false }
         return Int(dep.timeIntervalSince(arr) / 60) >= 180
     }
 
-    /// "H:MM" duration string from UTC dates, falling back to the stored field.
-    static func durationText(arrDate: Date?, nextDepDate: Date?, fallbackDuration: String?) -> String {
-        if let arr = arrDate, let dep = nextDepDate {
-            let mins = max(0, Int(dep.timeIntervalSince(arr) / 60))
-            return "\(mins / 60):\(String(format: "%02d", mins % 60))"
+    /// Rest begins at duty end (arrival + 30m) and ends at the next duty start.
+    /// The next duty starts 90m before departure, except flights wholly inside
+    /// CONUS-48, Asia, or Europe, where report is 60m before departure.
+    static func restInfo(arrDate: Date?, nextLeg: TripLeg?) -> RestInfo? {
+        guard let arr = arrDate,
+              let nextLeg,
+              let dep = LegConnectionTextBuilder.parseUTC(nextLeg.depUTC)
+        else {
+            return nil
+        }
+        let dutyEnd = arr.addingTimeInterval(30 * 60)
+        let reportLeadMinutes = reportLeadMinutes(for: nextLeg)
+        let dutyStart = dep.addingTimeInterval(TimeInterval(-reportLeadMinutes * 60))
+        guard dutyStart > dutyEnd else { return nil }
+        return RestInfo(
+            dutyEndUTC: dutyEnd,
+            dutyStartUTC: dutyStart,
+            totalMinutes: Int(dutyStart.timeIntervalSince(dutyEnd) / 60)
+        )
+    }
+
+    /// "H:MM" rest string from duty-end/start rules, falling back to the stored field.
+    static func durationText(arrDate: Date?, nextLeg: TripLeg?, fallbackDuration: String?) -> String {
+        if let info = restInfo(arrDate: arrDate, nextLeg: nextLeg) {
+            return durationText(minutes: info.totalMinutes)
         }
         return fallbackDuration ?? ""
     }
+
+    static func remainingText(arrDate: Date?, nextLeg: TripLeg?, now: Date = Date()) -> String {
+        guard let minutes = restInfo(arrDate: arrDate, nextLeg: nextLeg)?.remainingMinutes(at: now) else {
+            return ""
+        }
+        return durationText(minutes: minutes)
+    }
+
+    static func isPastLayover(arrDate: Date?, nextLeg: TripLeg?, now: Date = Date()) -> Bool {
+        if let info = restInfo(arrDate: arrDate, nextLeg: nextLeg) {
+            return info.isPast(at: now)
+        }
+        guard let arrDate else { return false }
+        return arrDate < now
+    }
+
+    private static func durationText(minutes: Int) -> String {
+        let safeMinutes = max(0, minutes)
+        return "\(safeMinutes / 60):\(String(format: "%02d", safeMinutes % 60))"
+    }
+
+    private static func reportLeadMinutes(for nextLeg: TripLeg) -> Int {
+        flightIsWhollyInsideReducedReportRegion(nextLeg) ? 60 : 90
+    }
+
+    private static func flightIsWhollyInsideReducedReportRegion(_ leg: TripLeg) -> Bool {
+        guard let depRegion = reportRegion(for: leg.depAirport),
+              let arrRegion = reportRegion(for: leg.arrAirport)
+        else {
+            return false
+        }
+        return depRegion == arrRegion
+    }
+
+    private static func reportRegion(for airport: String) -> String? {
+        let normalized = airport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard let tzID = IATATimeZoneResolver.shared.resolve(normalized) else { return nil }
+        if tzID.hasPrefix("Asia/") { return "asia" }
+        if tzID.hasPrefix("Europe/") { return "europe" }
+        if lower48TimeZoneIDs.contains(tzID) { return "conus48" }
+        return nil
+    }
+
+    private static let lower48TimeZoneIDs: Set<String> = [
+        "America/New_York",
+        "America/Detroit",
+        "America/Kentucky/Louisville",
+        "America/Kentucky/Monticello",
+        "America/Indiana/Indianapolis",
+        "America/Indiana/Knox",
+        "America/Indiana/Vincennes",
+        "America/Chicago",
+        "America/Menominee",
+        "America/North_Dakota/Center",
+        "America/North_Dakota/New_Salem",
+        "America/North_Dakota/Beulah",
+        "America/Denver",
+        "America/Boise",
+        "America/Phoenix",
+        "America/Los_Angeles"
+    ]
 }
 
 /// "+Nd" / "−Nd" day-shift label suffix, or empty string for zero shift.

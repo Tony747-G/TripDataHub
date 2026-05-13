@@ -74,6 +74,7 @@ struct TimelineLayoverCard: View {
     let station: String
     let hotel: String
     let durationText: String
+    let remainingText: String
     let arrLocalDateLabel: String
     let isPast: Bool
     let fontScale: CGFloat
@@ -102,7 +103,7 @@ struct TimelineLayoverCard: View {
                     .background(dateCardBackground)
             }
 
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
                 let resolvedIconColor: Color = isPast ? .gray : iconColor
                 let bedIcon = Image(systemName: "bed.double.fill")
                     .font(.system(size: 16 * fontScale))
@@ -118,9 +119,17 @@ struct TimelineLayoverCard: View {
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Layover at \(station)")
-                        .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
-                        .foregroundStyle(isPast ? .gray : .primary)
+                    HStack {
+                        Text("Layover at \(station)")
+                            .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
+                            .foregroundStyle(isPast ? .gray : iconColor)
+                        Spacer()
+                        if !durationText.isEmpty {
+                            Text("Rest: \(durationText)")
+                                .appScaledFont(.caption, scale: fontScale)
+                                .foregroundStyle(isPast ? .gray : .primary)
+                        }
+                    }
                     HStack {
                         if !hotel.isEmpty {
                             Text(hotel)
@@ -128,8 +137,8 @@ struct TimelineLayoverCard: View {
                                 .foregroundStyle(isPast ? .gray : .secondary)
                         }
                         Spacer()
-                        if !durationText.isEmpty {
-                            Text("Rest: \(durationText)")
+                        if !remainingText.isEmpty {
+                            Text("Remain: \(remainingText)")
                                 .appScaledFont(.caption, scale: fontScale)
                                 .foregroundStyle(isPast ? .gray : .primary)
                         }

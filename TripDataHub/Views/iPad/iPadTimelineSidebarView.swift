@@ -137,7 +137,7 @@ struct IPadTimelineSidebarView: View {
                                         } label: {
                                             TimelineFlightRow(
                                                 leg: leg,
-                                                isPast: section.isPast,
+                                                isPast: isPastLeg(leg),
                                                 fontScale: timelineFontScale,
                                                 timeRangeText: timeRangeText(for: leg),
                                                 dayDiff: ScheduleDateText.dayShift(
@@ -167,13 +167,18 @@ struct IPadTimelineSidebarView: View {
                                                 hotel: hotel,
                                                 durationText: TimelineLayoverSupport.durationText(
                                                     arrDate: LegConnectionTextBuilder.parseUTC(leg.arrUTC),
-                                                    nextDepDate: legData.nextLegByID[leg.id].flatMap {
-                                                        LegConnectionTextBuilder.parseUTC($0.depUTC)
-                                                    },
+                                                    nextLeg: legData.nextLegByID[leg.id],
                                                     fallbackDuration: leg.layoverDuration
                                                 ),
+                                                remainingText: TimelineLayoverSupport.remainingText(
+                                                    arrDate: LegConnectionTextBuilder.parseUTC(leg.arrUTC),
+                                                    nextLeg: legData.nextLegByID[leg.id]
+                                                ),
                                                 arrLocalDateLabel: arrivalLocalDateLabel(for: leg),
-                                                isPast: section.isPast,
+                                                isPast: TimelineLayoverSupport.isPastLayover(
+                                                    arrDate: LegConnectionTextBuilder.parseUTC(leg.arrUTC),
+                                                    nextLeg: legData.nextLegByID[leg.id]
+                                                ),
                                                 fontScale: timelineFontScale
                                             )
                                             .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
@@ -456,6 +461,21 @@ struct IPadTimelineSidebarView: View {
             nextDepDate: nextLeg.flatMap { LegConnectionTextBuilder.parseUTC($0.depUTC) },
             samePairing: nextLeg?.pairing == leg.pairing
         )
+    }
+
+    private func isPastLeg(_ leg: TripLeg) -> Bool {
+        if shouldShowLayover(leg: leg) {
+            return TimelineLayoverSupport.isPastLayover(
+                arrDate: LegConnectionTextBuilder.parseUTC(leg.arrUTC),
+                nextLeg: legData.nextLegByID[leg.id]
+            )
+        }
+        guard let reference = LegConnectionTextBuilder.parseUTC(leg.arrUTC)
+            ?? LegConnectionTextBuilder.parseUTC(leg.depUTC)
+        else {
+            return false
+        }
+        return reference < Date()
     }
 
     private func firstRowID(for tripID: String) -> String? {

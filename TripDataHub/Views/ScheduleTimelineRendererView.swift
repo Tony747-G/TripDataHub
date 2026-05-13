@@ -70,7 +70,7 @@ struct ScheduleTimelineRendererView: View {
     private func legRow(leg: TripLeg, nextLegByID: [UUID: TripLeg]) -> some View {
         TimelineFlightRow(
             leg: leg,
-            isPast: isPastLeg(leg),
+            isPast: isPastLeg(leg, nextLeg: nextLegByID[leg.id]),
             fontScale: fontScale,
             timeRangeText: timeRangeText(for: leg),
             dayDiff: dayShift(for: leg),
@@ -87,8 +87,12 @@ struct ScheduleTimelineRendererView: View {
             station: leg.layoverStation ?? leg.arrAirport,
             hotel: leg.layoverHotelName ?? "",
             durationText: layoverDurationText(for: leg, connectionMap: connectionMap),
+            remainingText: layoverRemainingText(for: leg, connectionMap: connectionMap),
             arrLocalDateLabel: arrivalLocalDateLabel(for: leg),
-            isPast: isPastLeg(leg),
+            isPast: TimelineLayoverSupport.isPastLayover(
+                arrDate: utcArrivalDate(for: leg),
+                nextLeg: connectionMap[leg.id]
+            ),
             fontScale: fontScale
             // iconColor and onIconTap omitted: Friends Timeline uses defaults (no highlights)
         )
@@ -109,8 +113,15 @@ struct ScheduleTimelineRendererView: View {
         let next = connectionMap[leg.id]
         return TimelineLayoverSupport.durationText(
             arrDate: utcArrivalDate(for: leg),
-            nextDepDate: next.flatMap { utcDepartureDate(for: $0) },
+            nextLeg: next,
             fallbackDuration: leg.layoverDuration
+        )
+    }
+
+    private func layoverRemainingText(for leg: TripLeg, connectionMap: [UUID: TripLeg]) -> String {
+        TimelineLayoverSupport.remainingText(
+            arrDate: utcArrivalDate(for: leg),
+            nextLeg: connectionMap[leg.id]
         )
     }
 
@@ -150,7 +161,13 @@ struct ScheduleTimelineRendererView: View {
         return text
     }
 
-    private func isPastLeg(_ leg: TripLeg) -> Bool {
+    private func isPastLeg(_ leg: TripLeg, nextLeg: TripLeg? = nil) -> Bool {
+        if shouldShowLayover(leg: leg, connectionMap: nextLeg.map { [leg.id: $0] } ?? [:]) {
+            return TimelineLayoverSupport.isPastLayover(
+                arrDate: utcArrivalDate(for: leg),
+                nextLeg: nextLeg
+            )
+        }
         let reference = utcArrivalDate(for: leg)
             ?? parseLocalDateTime(leg.arrLocal)
             ?? utcDepartureDate(for: leg)
