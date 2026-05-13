@@ -123,6 +123,7 @@ struct IPadTimelineSidebarView: View {
                                                 Rectangle().fill(Color.accentColor).frame(width: 3)
                                             }
                                         }
+                                        .id("ipad.tripdata.\(startLeg.id.uuidString)")
                                 }
                             }
                             Section {
@@ -162,31 +163,35 @@ struct IPadTimelineSidebarView: View {
                                             let hotel = leg.layoverHotelName
                                                 ?? tripDataByTripID[Self.fileKey(for: leg)]?.hotelByStation[Self.normalizedStationKey(station)]
                                                 ?? ""
-                                            TimelineLayoverCard(
-                                                station: station,
-                                                hotel: hotel,
-                                                durationText: TimelineLayoverSupport.durationText(
-                                                    arrDate: LegConnectionTextBuilder.parseUTC(leg.arrUTC),
-                                                    nextLeg: legData.nextLegByID[leg.id],
-                                                    fallbackDuration: leg.layoverDuration
-                                                ),
-                                                remainingText: TimelineLayoverSupport.remainingText(
-                                                    arrDate: LegConnectionTextBuilder.parseUTC(leg.arrUTC),
-                                                    nextLeg: legData.nextLegByID[leg.id]
-                                                ),
-                                                arrLocalDateLabel: arrivalLocalDateLabel(for: leg),
-                                                isPast: TimelineLayoverSupport.isPastLayover(
-                                                    arrDate: LegConnectionTextBuilder.parseUTC(leg.arrUTC),
-                                                    nextLeg: legData.nextLegByID[leg.id]
-                                                ),
-                                                fontScale: timelineFontScale
-                                            )
-                                            .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
-                                            .overlay(alignment: .leading) {
-                                                if isSelected {
-                                                    Rectangle().fill(Color.accentColor).frame(width: 3)
+                                            TimelineView(.periodic(from: Date(), by: 60)) { context in
+                                                TimelineLayoverCard(
+                                                    station: station,
+                                                    hotel: hotel,
+                                                    durationText: TimelineLayoverSupport.durationText(
+                                                        arrDate: LegConnectionTextBuilder.parseUTC(leg.arrUTC),
+                                                        nextLeg: legData.nextLegByID[leg.id],
+                                                        fallbackDuration: leg.layoverDuration
+                                                    ),
+                                                    remainingText: TimelineLayoverSupport.remainingText(
+                                                        arrDate: LegConnectionTextBuilder.parseUTC(leg.arrUTC),
+                                                        nextLeg: legData.nextLegByID[leg.id],
+                                                        now: context.date
+                                                    ),
+                                                    arrLocalDateLabel: arrivalLocalDateLabel(for: leg),
+                                                    isPast: TimelineLayoverSupport.isPastLayover(
+                                                        arrDate: LegConnectionTextBuilder.parseUTC(leg.arrUTC),
+                                                        nextLeg: legData.nextLegByID[leg.id]
+                                                    ),
+                                                    fontScale: timelineFontScale
+                                                )
+                                                .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+                                                .overlay(alignment: .leading) {
+                                                    if isSelected {
+                                                        Rectangle().fill(Color.accentColor).frame(width: 3)
+                                                    }
                                                 }
                                             }
+                                            .id("ipad.layover.\(leg.id.uuidString)")
                                         }
                                     }
                                     .id(rowID)
@@ -224,7 +229,7 @@ struct IPadTimelineSidebarView: View {
                 .task {
                     for _ in 0..<3 {
                         try? await Task.sleep(nanoseconds: 120_000_000)
-                        if let rowID = nextUpcomingLegRowID() {
+                        if let rowID = nextScrollTargetID() {
                             proxy.scrollTo(rowID, anchor: .top)
                         }
                     }
@@ -232,7 +237,7 @@ struct IPadTimelineSidebarView: View {
                 .onChange(of: viewModel.schedules) { _, _ in
                     Task {
                         try? await Task.sleep(nanoseconds: 120_000_000)
-                        if let rowID = nextUpcomingLegRowID() {
+                        if let rowID = nextScrollTargetID() {
                             withAnimation(.easeInOut(duration: 0.25)) {
                                 proxy.scrollTo(rowID, anchor: .top)
                             }
@@ -242,7 +247,7 @@ struct IPadTimelineSidebarView: View {
                 .onChange(of: viewModel.crewAccessSchedules) { _, _ in
                     Task {
                         try? await Task.sleep(nanoseconds: 120_000_000)
-                        if let rowID = nextUpcomingLegRowID() {
+                        if let rowID = nextScrollTargetID() {
                             withAnimation(.easeInOut(duration: 0.25)) {
                                 proxy.scrollTo(rowID, anchor: .top)
                             }
@@ -256,15 +261,30 @@ struct IPadTimelineSidebarView: View {
         .onChange(of: viewModel.crewAccessSchedules) { _, _ in refreshTripDataCards() }
     }
 
-    /// Row ID of the next upcoming leg: an in-progress leg (dep ≤ now < arr)
-    /// takes precedence; otherwise the earliest leg with departure ≥ now.
-    /// Returns nil if there are no future legs at all.
-    private func nextUpcomingLegRowID() -> String? {
+    /// Layover中→Layoverカード、Trip先頭（未開始）→Trip summaryカード、
+    /// それ以外→フライト行へのスクロールID。
+    private func nextScrollTargetID() -> String? {
         let now = Date()
         let sortedLegs = legData.allLegs.sorted { lhs, rhs in
             if lhs.depLocal == rhs.depLocal { return lhs.flight < rhs.flight }
             return lhs.depLocal < rhs.depLocal
         }
+
+        // 1. 現在 Layover 中か判定（到着 ≤ now < duty start）
+        for leg in sortedLegs {
+            guard shouldShowLayover(leg: leg),
+                  let arr = LegConnectionTextBuilder.parseUTC(leg.arrUTC),
+                  let nextLeg = legData.nextLegByID[leg.id]
+            else { continue }
+            let layoverEnd = TimelineLayoverSupport.restInfo(arrDate: arr, nextLeg: nextLeg)?.dutyStartUTC
+                ?? LegConnectionTextBuilder.parseUTC(nextLeg.depUTC).map { $0.addingTimeInterval(-90 * 60) }
+            guard let end = layoverEnd else { continue }
+            if arr <= now && now < end {
+                return "ipad.layover.\(leg.id.uuidString)"
+            }
+        }
+
+        // 2. 現在飛行中または次のフライトを探す
         let target = sortedLegs.first { leg in
             guard let dep = LegConnectionTextBuilder.parseUTC(leg.depUTC) else { return false }
             if let arr = LegConnectionTextBuilder.parseUTC(leg.arrUTC),
@@ -275,6 +295,13 @@ struct IPadTimelineSidebarView: View {
             return dep >= now
         }
         guard let target else { return nil }
+
+        // 3. そのレグがTrip先頭でsummaryカードがある場合はそちらへ
+        if tripStartLegIDs.contains(target.id) {
+            return "ipad.tripdata.\(target.id.uuidString)"
+        }
+
+        // 4. フライト行へ
         let tripID = "\(target.payPeriod)|\(target.pairing)"
         return "\(tripID)|\(target.leg)|\(target.id.uuidString)"
     }

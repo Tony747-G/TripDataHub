@@ -183,7 +183,10 @@ struct TimelineTabView: View {
                                     .id("\(leg.id.uuidString)|\(selectedClockDisplay.rawValue)")
                                 // レイオーバーカード（接続時間 > 3h かつ同一ステーション）
                                 if shouldShowLayover(leg: leg, connectionMap: connectionMap) {
-                                    layoverCard(for: leg, connectionMap: connectionMap)
+                                    TimelineView(.periodic(from: Date(), by: 60)) { context in
+                                        layoverCard(for: leg, connectionMap: connectionMap, now: context.date)
+                                    }
+                                    .id(layoverScrollID(leg.id))
                                 }
                                 if tripBoundaryAfterLegs.contains(leg.id) {
                                     if let nextTripStartLeg = tripStartLegAfterBoundary[leg.id] {
@@ -191,6 +194,7 @@ struct TimelineTabView: View {
                                             forTripID: nextTripStartLeg.pairing,
                                             isPast: isPastTrip(nextTripStartLeg.pairing)
                                         )
+                                        .id(tripDataScrollID(leg.id))
                                     } else {
                                         Rectangle()
                                             .fill(isPastLeg(leg, nextLeg: connectionMap[leg.id]) ? Color.gray : dateHeaderTextColor)
@@ -314,7 +318,7 @@ struct TimelineTabView: View {
     }
 
     @ViewBuilder
-    private func layoverCard(for leg: TripLeg, connectionMap: [UUID: TripLeg]) -> some View {
+    private func layoverCard(for leg: TripLeg, connectionMap: [UUID: TripLeg], now: Date = Date()) -> some View {
         let station = leg.layoverStation ?? leg.arrAirport
         // TripLeg フィールド → JSON hotelDetails の順でフォールバック
         let hotel = leg.layoverHotelName
@@ -332,7 +336,7 @@ struct TimelineTabView: View {
                 nextLeg: next,
                 fallbackDuration: leg.layoverDuration
             ),
-            remainingText: TimelineLayoverSupport.remainingText(arrDate: arrDate, nextLeg: next),
+            remainingText: TimelineLayoverSupport.remainingText(arrDate: arrDate, nextLeg: next, now: now),
             arrLocalDateLabel: arrivalLocalDateLabel(for: leg),
             isPast: TimelineLayoverSupport.isPastLayover(arrDate: arrDate, nextLeg: next),
             fontScale: fontScale,
@@ -438,9 +442,35 @@ struct TimelineTabView: View {
         legData.allLegs
     }
 
-    private var focusDayID: String? {
-        let now = Date()
+    private func layoverScrollID(_ legID: UUID) -> String {
+        "timeline.layover.\(legID.uuidString)"
+    }
 
+    private func tripDataScrollID(_ boundaryLegID: UUID) -> String {
+        "timeline.tripdata.\(boundaryLegID.uuidString)"
+    }
+
+    /// Layover中 → Layoverカードへ、Trip先頭（未開始）→ Trip dataカードへ、
+    /// それ以外 → フライト行へ、スクロールするためのID。
+    private var focusScrollID: String? {
+        let now = Date()
+        let connectionMap = legData.nextLegByID
+
+        // 1. 現在 Layover 中か判定（到着 ≤ now < duty start）
+        for leg in allLegs {
+            guard shouldShowLayover(leg: leg, connectionMap: connectionMap),
+                  let arr = utcArrivalDate(for: leg),
+                  let nextLeg = connectionMap[leg.id]
+            else { continue }
+            let layoverEnd = TimelineLayoverSupport.restInfo(arrDate: arr, nextLeg: nextLeg)?.dutyStartUTC
+                ?? utcDepartureDate(for: nextLeg).map { $0.addingTimeInterval(-90 * 60) }
+            guard let end = layoverEnd else { continue }
+            if arr <= now && now < end {
+                return layoverScrollID(leg.id)
+            }
+        }
+
+        // 2. 現在飛行中または次のフライト/Tripを探す
         let currentOrNextLeg = allLegs.first { leg in
             guard let dep = utcDepartureDate(for: leg) ?? parseLocalDateTime(leg.depLocal) else {
                 return false
@@ -452,9 +482,16 @@ struct TimelineTabView: View {
             }
             return dep >= now
         }
+        guard let targetLeg = currentOrNextLeg else { return nil }
 
-        guard let currentOrNextLeg else { return nil }
-        return dayKey(for: currentOrNextLeg)
+        // 3. そのレグがTrip先頭でTripDataカードがある場合はそちらへ
+        let tripStartMap = tripStartLegByBoundaryLegID
+        if let (boundaryLegID, _) = tripStartMap.first(where: { $0.value.id == targetLeg.id }) {
+            return tripDataScrollID(boundaryLegID)
+        }
+
+        // 4. フライト行へ
+        return "\(targetLeg.id.uuidString)|\(selectedClockDisplay.rawValue)"
     }
 
     private var nextReportInfo: NextReportInfo? {
@@ -540,17 +577,16 @@ struct TimelineTabView: View {
 
     private var focusScrollContextKey: String {
         let dayIDs = daySections.map(\.id).joined(separator: "|")
-        let focusKey = focusDayID ?? "none"
+        let focusKey = focusScrollID ?? "none"
         return "\(selectedClockDisplay.rawValue)|\(focusKey)|\(dayIDs)"
     }
 
     @MainActor
     private func autoScrollToFocusDay(using proxy: ScrollViewProxy) async {
-        guard let focusDayID else {
+        guard let scrollID = focusScrollID else {
             return
         }
 
-        let scrollID = daySectionScrollID(focusDayID)
         for _ in 0..<3 {
             try? await Task.sleep(nanoseconds: 120_000_000)
             withAnimation(.easeInOut(duration: 0.25)) {
