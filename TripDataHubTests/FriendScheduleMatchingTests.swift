@@ -67,6 +67,122 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertEqual(snapshot.restWindows[0].durationMinutes, 630)
     }
 
+    func test_timelineRestInfo_usesSixtyMinuteReportForAsiaAndEuropeFlights() {
+        let arrDate = iso("2026-05-01T10:00:00Z")
+        let asiaLeg = makeLeg(
+            leg: 2,
+            flight: "101",
+            depAirport: "HKG",
+            arrAirport: "ICN",
+            depUTC: "2026-05-01T22:00:00Z",
+            arrUTC: "2026-05-02T02:00:00Z"
+        )
+        let europeLeg = makeLeg(
+            leg: 2,
+            flight: "102",
+            depAirport: "CGN",
+            arrAirport: "CDG",
+            depUTC: "2026-05-01T22:00:00Z",
+            arrUTC: "2026-05-02T02:00:00Z"
+        )
+
+        let asiaInfo = TimelineLayoverSupport.restInfo(arrDate: arrDate, nextLeg: asiaLeg)
+        let europeInfo = TimelineLayoverSupport.restInfo(arrDate: arrDate, nextLeg: europeLeg)
+
+        XCTAssertEqual(asiaInfo?.dutyEndUTC, iso("2026-05-01T10:30:00Z"))
+        XCTAssertEqual(asiaInfo?.dutyStartUTC, iso("2026-05-01T21:00:00Z"))
+        XCTAssertEqual(asiaInfo?.totalMinutes, 630)
+        XCTAssertEqual(europeInfo?.dutyStartUTC, iso("2026-05-01T21:00:00Z"))
+        XCTAssertEqual(europeInfo?.totalMinutes, 630)
+    }
+
+    func test_timelineRestInfo_usesNinetyMinuteReportWhenFlightLeavesReducedReportRegion() {
+        let nextLeg = makeLeg(
+            leg: 2,
+            flight: "101",
+            depAirport: "HKG",
+            arrAirport: "ANC",
+            depUTC: "2026-05-01T22:00:00Z",
+            arrUTC: "2026-05-02T02:00:00Z"
+        )
+
+        let info = TimelineLayoverSupport.restInfo(
+            arrDate: iso("2026-05-01T10:00:00Z"),
+            nextLeg: nextLeg
+        )
+
+        XCTAssertEqual(info?.dutyEndUTC, iso("2026-05-01T10:30:00Z"))
+        XCTAssertEqual(info?.dutyStartUTC, iso("2026-05-01T20:30:00Z"))
+        XCTAssertEqual(info?.totalMinutes, 600)
+    }
+
+    func test_timelineRestInfo_remainingAndPastUseDutyStart() {
+        let nextLeg = makeLeg(
+            leg: 2,
+            flight: "101",
+            depAirport: "SDF",
+            arrAirport: "ONT",
+            depUTC: "2026-05-01T22:00:00Z",
+            arrUTC: "2026-05-02T02:00:00Z"
+        )
+        let arrDate = iso("2026-05-01T10:00:00Z")
+
+        XCTAssertEqual(
+            TimelineLayoverSupport.remainingText(
+                arrDate: arrDate,
+                nextLeg: nextLeg,
+                now: iso("2026-05-01T20:00:00Z")
+            ),
+            "1:00"
+        )
+        XCTAssertFalse(
+            TimelineLayoverSupport.isPastLayover(
+                arrDate: arrDate,
+                nextLeg: nextLeg,
+                now: iso("2026-05-01T20:59:00Z")
+            )
+        )
+        XCTAssertTrue(
+            TimelineLayoverSupport.isPastLayover(
+                arrDate: arrDate,
+                nextLeg: nextLeg,
+                now: iso("2026-05-01T21:01:00Z")
+            )
+        )
+    }
+
+    func test_friendConnectionDisplayName_trimsNicknameAndFallsBackToEmployeeID() {
+        XCTAssertEqual(
+            FriendConnection(employeeID: "0554744", nickname: " James ", status: .accepted).displayName,
+            "James"
+        )
+        XCTAssertEqual(
+            FriendConnection(employeeID: "0554744", nickname: "   ", status: .accepted).displayName,
+            "0554744"
+        )
+        XCTAssertEqual(
+            FriendConnection(employeeID: "0554744", nickname: nil, status: .accepted).displayName,
+            "0554744"
+        )
+    }
+
+    func test_friendConnectionCodable_preservesNicknameAcrossPersistenceRoundTrip() throws {
+        let connection = FriendConnection(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000005")!,
+            employeeID: "0554744",
+            nickname: "James",
+            status: .accepted,
+            requestedAt: Date(timeIntervalSince1970: 10),
+            linkedAt: Date(timeIntervalSince1970: 20)
+        )
+
+        let data = try JSONEncoder().encode([connection])
+        let decoded = try JSONDecoder().decode([FriendConnection].self, from: data)
+
+        XCTAssertEqual(decoded.first?.nickname, "James")
+        XCTAssertEqual(decoded.first?.displayName, "James")
+    }
+
     func test_restOverlap_matchesAtOneHour() {
         let mySchedules = [makeSchedule(legs: [
             makeLeg(leg: 1, flight: "100", depAirport: "ANC", arrAirport: "SDF", depUTC: "2026-05-01T06:00:00Z", arrUTC: "2026-05-01T10:00:00Z"),
@@ -218,6 +334,36 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertEqual(refreshed.first?.employeeID, "0222222")
         XCTAssertEqual(refreshed.first?.status, .accepted)
         XCTAssertEqual(refreshed.first?.linkedAt, Date(timeIntervalSince1970: 10))
+    }
+
+    func test_refreshConnections_preservesLocalNicknameWhenCloudLinkHasNoNicknameField() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+        await database.insertFriendLink(
+            gemsA: "0111111",
+            gemsB: "0222222",
+            approvedA: true,
+            approvedB: true,
+            status: "accepted",
+            linkedAt: Date(timeIntervalSince1970: 10)
+        )
+        let local = FriendConnection(
+            employeeID: "222222",
+            nickname: "James",
+            status: .accepted,
+            requestedAt: Date(timeIntervalSince1970: 1),
+            linkedAt: Date(timeIntervalSince1970: 10)
+        )
+
+        let refreshed = try await service.refreshConnections(
+            myGEMSID: "111111",
+            connections: [local]
+        )
+
+        XCTAssertEqual(refreshed.count, 1)
+        XCTAssertEqual(refreshed.first?.employeeID, "0222222")
+        XCTAssertEqual(refreshed.first?.nickname, "James")
+        XCTAssertEqual(refreshed.first?.displayName, "James")
     }
 
     private func makeSchedule(legs: [TripLeg]) -> PayPeriodSchedule {
