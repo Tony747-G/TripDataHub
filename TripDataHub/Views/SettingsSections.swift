@@ -157,12 +157,12 @@ struct SettingsCrewAccessImportsSection: View {
                             selectedTripIDs.insert(schedule.id)
                         }
                     }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    .contextMenu {
                         Button(role: .destructive) {
                             deleteTargetIDs = [schedule.id]
                             showingDeleteConfirm = true
                         } label: {
-                            Label("Delete", systemImage: "trash")
+                            Label("Delete Trip", systemImage: "trash")
                         }
                     }
                 }

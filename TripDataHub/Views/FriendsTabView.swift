@@ -40,12 +40,13 @@ struct FriendsTabView: View {
                                 FriendTimelineView(friend: friend)
                             } label: {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(friend.displayName)
-                                        .font(.headline)
-                                    if friend.nickname != nil {
+                                    if let nickname = friend.nickname,
+                                       !nickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                        Text("\(nickname)  (\(friend.employeeID))")
+                                            .font(.headline)
+                                    } else {
                                         Text(friend.employeeID)
-                                            .font(.caption2)
-                                            .foregroundStyle(.tertiary)
+                                            .font(.headline)
                                     }
                                     if let updatedAt = friend.sharedSchedules.map(\.updatedAt).max() {
                                         Text("Last Updated: \(updatedAt.formatted(date: .abbreviated, time: .shortened))")

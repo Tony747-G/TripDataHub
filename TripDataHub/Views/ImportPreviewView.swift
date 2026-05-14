@@ -3,6 +3,7 @@ import SwiftUI
 struct ImportPreviewView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @Environment(\.dismiss) private var dismiss
+    @State private var showingReplacementConfirm = false
 #if DEBUG
     @State private var isShowingDiagnostics = false
 #endif
@@ -83,6 +84,33 @@ struct ImportPreviewView: View {
                     }
 #endif
 
+                    let replacements = viewModel.pendingImportReplacementCandidates
+                    if !replacements.isEmpty {
+                        Section("Replacements") {
+                            ForEach(replacements) { candidate in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    switch candidate.reason {
+                                    case .sameTripID:
+                                        Label(
+                                            "This import will replace Trip \(candidate.tripId).",
+                                            systemImage: "arrow.triangle.2.circlepath"
+                                        )
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.orange)
+                                    case .timeOverlap:
+                                        Label(
+                                            "This import overlaps existing Trip \(candidate.tripId). \(candidate.tripId) will be removed from Timeline and synced devices.",
+                                            systemImage: "exclamationmark.triangle.fill"
+                                        )
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.red)
+                                    }
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
+                    }
+
                     if !pending.errors.isEmpty {
                         Section("Errors (Confirm blocked)") {
                             ForEach(pending.errors) { error in
@@ -119,9 +147,14 @@ struct ImportPreviewView: View {
 
                     Section {
                         Button("Confirm Import") {
-                            Task {
-                                await viewModel.confirmPendingImport()
-                                dismiss()
+                            let replacements = viewModel.pendingImportReplacementCandidates
+                            if replacements.isEmpty {
+                                Task {
+                                    await viewModel.confirmPendingImport()
+                                    dismiss()
+                                }
+                            } else {
+                                showingReplacementConfirm = true
                             }
                         }
                         .disabled(!pending.canConfirm)
@@ -133,6 +166,30 @@ struct ImportPreviewView: View {
                             }
                         }
                     }
+                }
+                .confirmationDialog(
+                    "Replace existing trip(s)?",
+                    isPresented: $showingReplacementConfirm,
+                    titleVisibility: .visible
+                ) {
+                    Button("Replace and Import", role: .destructive) {
+                        Task {
+                            await viewModel.confirmPendingImport()
+                            dismiss()
+                        }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    let replacements = viewModel.pendingImportReplacementCandidates
+                    let lines = replacements.map { c -> String in
+                        switch c.reason {
+                        case .sameTripID:
+                            return "Trip \(c.tripId) will be replaced."
+                        case .timeOverlap:
+                            return "Trip \(c.tripId) overlaps and will be removed from Timeline and synced devices."
+                        }
+                    }
+                    Text(lines.joined(separator: "\n"))
                 }
             } else {
                 ContentUnavailableView(

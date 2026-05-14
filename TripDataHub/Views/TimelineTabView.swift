@@ -19,6 +19,7 @@ struct TimelineTabView: View {
     @State private var importedUTCTimesByTripAndSequence: [String: ImportLegUTCTimes] = [:]
     @State private var friendMatchAlert: FriendMatchAlert?
     @State private var friendScheduleMatches: FriendScheduleMatches = .empty
+    @State private var deleteTripConfirmPairing: String? = nil
     private static let nextReportTimestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -135,6 +136,31 @@ struct TimelineTabView: View {
                     message: Text(alert.message),
                     dismissButton: .default(Text("OK"))
                 )
+            }
+            .confirmationDialog(
+                deleteTripConfirmPairing.map { "Delete Trip \($0)?" } ?? "Delete Trip?",
+                isPresented: Binding(
+                    get: { deleteTripConfirmPairing != nil },
+                    set: { if !$0 { deleteTripConfirmPairing = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Delete Trip", role: .destructive) {
+                    if let pairing = deleteTripConfirmPairing {
+                        let ids = Set(
+                            viewModel.crewAccessSchedules
+                                .filter { $0.legs.contains { $0.pairing == pairing } }
+                                .map(\.id)
+                        )
+                        Task { await viewModel.deleteCrewAccessTrips(ids: ids) }
+                    }
+                    deleteTripConfirmPairing = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    deleteTripConfirmPairing = nil
+                }
+            } message: {
+                Text("This will remove the trip from Timeline and synced devices.")
             }
         }
     }
@@ -290,6 +316,13 @@ struct TimelineTabView: View {
                 ? { friendMatchAlert = flightMatchAlert(for: leg, matches: flightMatches) }
                 : nil
         )
+        .contextMenu {
+            Button(role: .destructive) {
+                deleteTripConfirmPairing = leg.pairing
+            } label: {
+                Label("Delete Trip", systemImage: "trash")
+            }
+        }
     }
 
     /// 到着日付ラベルを生成（"Tue, Apr 28 2026"）- UTC/LCL トグルに連動
@@ -345,6 +378,13 @@ struct TimelineTabView: View {
                 ? { friendMatchAlert = restOverlapAlert(station: station, overlaps: restOverlaps) }
                 : nil
         )
+        .contextMenu {
+            Button(role: .destructive) {
+                deleteTripConfirmPairing = leg.pairing
+            } label: {
+                Label("Delete Trip", systemImage: "trash")
+            }
+        }
     }
 
     private var timelineTopBar: some View {
@@ -934,6 +974,13 @@ struct TimelineTabView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 4)
         .background(tripCardBackground)
+        .contextMenu {
+            Button(role: .destructive) {
+                deleteTripConfirmPairing = tripID
+            } label: {
+                Label("Delete Trip", systemImage: "trash")
+            }
+        }
     }
 
     private func fallbackCreditHHMM(forTripID tripID: String) -> String? {

@@ -1399,6 +1399,14 @@ final class AppViewModel: ObservableObject {
         }
 
         do {
+            // Compute overlap IDs before any writes so we can roll back cleanly.
+            // Deletion happens AFTER the new import is committed (see below).
+            let overlapIDs = Set(
+                importReplacementCandidates(incomingScheduleID: schedule.id, incomingJSON: json)
+                    .filter { $0.reason == .timeOverlap }
+                    .map(\.id)
+            )
+
             let replacing = crewAccessSchedules.contains(where: { $0.id == schedule.id })
             let jsonWriteContext = try persistCrewAccessJSON(json)
             do {
@@ -1411,6 +1419,11 @@ final class AppViewModel: ObservableObject {
                     logNonFatal("Failed to rollback CrewAccess JSON after merge/cache error: \(error.localizedDescription)")
                 }
                 throw error
+            }
+
+            // New import committed successfully — safe to tombstone overlapping trips.
+            if !overlapIDs.isEmpty {
+                await deleteCrewAccessTrips(ids: overlapIDs)
             }
 
             lastImportDidReplaceExistingTrip = replacing
@@ -1450,6 +1463,76 @@ final class AppViewModel: ObservableObject {
     private struct CrewAccessTripHeader: Decodable {
         let tripId: String?
         let tripInformationDate: String?
+    }
+
+    // MARK: - Import replacement / supersede types
+
+    enum TripReplacementReason {
+        case sameTripID
+        case timeOverlap
+    }
+
+    struct TripImportReplacementCandidate: Identifiable {
+        let id: String          // existing schedule.id
+        let tripId: String      // pairing(s) for display
+        let reason: TripReplacementReason
+    }
+
+    /// Existing schedules that the pending import would replace or supersede.
+    /// Updated automatically when `pendingImport` or `crewAccessSchedules` changes.
+    var pendingImportReplacementCandidates: [TripImportReplacementCandidate] {
+        guard let pending = pendingImport,
+              let schedule = pending.parsedSchedule,
+              let json = pending.jsonPayload
+        else { return [] }
+        return importReplacementCandidates(incomingScheduleID: schedule.id, incomingJSON: json)
+    }
+
+    private func importReplacementCandidates(
+        incomingScheduleID: String,
+        incomingJSON: CrewAccessTripJSON
+    ) -> [TripImportReplacementCandidate] {
+        let incomingPairing = incomingJSON.tripId
+        let newStart = incomingJSON.items
+            .compactMap { LegConnectionTextBuilder.parseUTC($0.startUtc) }.min()
+        let newEnd = incomingJSON.items
+            .compactMap { LegConnectionTextBuilder.parseUTC($0.endUtc) }.max()
+        let reportWindowStart = newStart.map { $0.addingTimeInterval(-90 * 60) }
+
+        var candidates: [TripImportReplacementCandidate] = []
+        for existing in crewAccessSchedules {
+            let existingPairings = Set(existing.legs.map(\.pairing))
+            if existing.id == incomingScheduleID {
+                // Same schedule (normal re-import of same Trip ID). Show orange warning.
+                candidates.append(TripImportReplacementCandidate(
+                    id: existing.id,
+                    tripId: existingPairings.sorted().joined(separator: ", "),
+                    reason: .sameTripID
+                ))
+                continue
+            }
+            if existingPairings.contains(incomingPairing) {
+                // Different schedule but overlapping pairing.
+                candidates.append(TripImportReplacementCandidate(
+                    id: existing.id,
+                    tripId: existingPairings.sorted().joined(separator: ", "),
+                    reason: .sameTripID
+                ))
+                continue
+            }
+            if let ws = reportWindowStart, let we = newEnd {
+                let exStart = existing.legs.compactMap { LegConnectionTextBuilder.parseUTC($0.depUTC) }.min()
+                let exEnd   = existing.legs.compactMap { LegConnectionTextBuilder.parseUTC($0.arrUTC) }.max()
+                if let s = exStart, let e = exEnd, ws < e && we > s {
+                    candidates.append(TripImportReplacementCandidate(
+                        id: existing.id,
+                        tripId: existingPairings.sorted().joined(separator: ", "),
+                        reason: .timeOverlap
+                    ))
+                }
+            }
+        }
+        return candidates
     }
 
     private struct CrewAccessScheduleReference: Hashable {
