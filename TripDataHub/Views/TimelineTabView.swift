@@ -7,6 +7,7 @@ private struct FriendMatchAlert: Identifiable {
 }
 
 struct TimelineTabView: View {
+    let scrollTrigger: Int
     @EnvironmentObject private var viewModel: AppViewModel
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("app_font_size_option") private var appFontSizeOptionRawValue = AppFontSizeOption.medium.rawValue
@@ -205,22 +206,42 @@ struct TimelineTabView: View {
 
                             let legs = section.legs
                             ForEach(Array(legs.enumerated()), id: \.element.id) { _, leg in
+                                let isHighlighted = deleteTripConfirmPairing == leg.pairing
                                 timelineRow(leg: leg, nextLegByID: connectionMap)
                                     .id("\(leg.id.uuidString)|\(selectedClockDisplay.rawValue)")
+                                    .background(isHighlighted ? Color.red.opacity(0.10) : Color.clear)
+                                    .simultaneousGesture(
+                                        LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                            deleteTripConfirmPairing = leg.pairing
+                                        }
+                                    )
                                 // レイオーバーカード（接続時間 > 3h かつ同一ステーション）
                                 if shouldShowLayover(leg: leg, connectionMap: connectionMap) {
                                     TimelineView(.periodic(from: Date(), by: 60)) { context in
                                         layoverCard(for: leg, connectionMap: connectionMap, now: context.date)
                                     }
                                     .id(layoverScrollID(leg.id))
+                                    .background(isHighlighted ? Color.red.opacity(0.10) : Color.clear)
+                                    .simultaneousGesture(
+                                        LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                            deleteTripConfirmPairing = leg.pairing
+                                        }
+                                    )
                                 }
                                 if tripBoundaryAfterLegs.contains(leg.id) {
                                     if let nextTripStartLeg = tripStartLegAfterBoundary[leg.id] {
+                                        let nextHighlighted = deleteTripConfirmPairing == nextTripStartLeg.pairing
                                         tripDataCard(
                                             forTripID: nextTripStartLeg.pairing,
-                                            isPast: isPastTrip(nextTripStartLeg.pairing)
+                                            isPast: isPastTrip(nextTripStartLeg.pairing),
+                                            isHighlighted: nextHighlighted
                                         )
                                         .id(tripDataScrollID(leg.id))
+                                        .simultaneousGesture(
+                                            LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                                deleteTripConfirmPairing = nextTripStartLeg.pairing
+                                            }
+                                        )
                                     } else {
                                         Rectangle()
                                             .fill(isPastLeg(leg, nextLeg: connectionMap[leg.id]) ? Color.gray : dateHeaderTextColor)
@@ -316,13 +337,6 @@ struct TimelineTabView: View {
                 ? { friendMatchAlert = flightMatchAlert(for: leg, matches: flightMatches) }
                 : nil
         )
-        .contextMenu {
-            Button(role: .destructive) {
-                deleteTripConfirmPairing = leg.pairing
-            } label: {
-                Label("Delete Trip", systemImage: "trash")
-            }
-        }
     }
 
     /// 到着日付ラベルを生成（"Tue, Apr 28 2026"）- UTC/LCL トグルに連動
@@ -378,13 +392,6 @@ struct TimelineTabView: View {
                 ? { friendMatchAlert = restOverlapAlert(station: station, overlaps: restOverlaps) }
                 : nil
         )
-        .contextMenu {
-            Button(role: .destructive) {
-                deleteTripConfirmPairing = leg.pairing
-            } label: {
-                Label("Delete Trip", systemImage: "trash")
-            }
-        }
     }
 
     private var timelineTopBar: some View {
@@ -618,7 +625,7 @@ struct TimelineTabView: View {
     private var focusScrollContextKey: String {
         let dayIDs = daySections.map(\.id).joined(separator: "|")
         let focusKey = focusScrollID ?? "none"
-        return "\(selectedClockDisplay.rawValue)|\(focusKey)|\(dayIDs)"
+        return "\(selectedClockDisplay.rawValue)|\(focusKey)|\(dayIDs)|\(scrollTrigger)"
     }
 
     @MainActor
@@ -626,9 +633,13 @@ struct TimelineTabView: View {
         guard let scrollID = focusScrollID else {
             return
         }
-
-        for _ in 0..<3 {
-            try? await Task.sleep(nanoseconds: 120_000_000)
+        // Immediate attempt before LazyVStack may have laid out off-screen cells.
+        proxy.scrollTo(scrollID, anchor: .top)
+        // Retry with increasing delays to handle lazy rendering timing.
+        let delays: [UInt64] = [100_000_000, 200_000_000, 400_000_000]
+        for delay in delays {
+            try? await Task.sleep(nanoseconds: delay)
+            guard !Task.isCancelled else { return }
             withAnimation(.easeInOut(duration: 0.25)) {
                 proxy.scrollTo(scrollID, anchor: .top)
             }
@@ -955,7 +966,7 @@ struct TimelineTabView: View {
     }
 
     @ViewBuilder
-    private func tripDataCard(forTripID tripID: String, isPast: Bool) -> some View {
+    private func tripDataCard(forTripID tripID: String, isPast: Bool, isHighlighted: Bool = false) -> some View {
         let summary = tripDataByTripID[tripID]
         let creditText = formattedDurationLabel(summary?.creditTime ?? fallbackCreditHHMM(forTripID: tripID)) ?? "--"
         let tripCardTextColor: Color = isPast ? .gray : dateHeaderTextColor
@@ -973,12 +984,10 @@ struct TimelineTabView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.vertical, 4)
-        .background(tripCardBackground)
-        .contextMenu {
-            Button(role: .destructive) {
-                deleteTripConfirmPairing = tripID
-            } label: {
-                Label("Delete Trip", systemImage: "trash")
+        .background {
+            ZStack {
+                tripCardBackground
+                if isHighlighted { Color.red.opacity(0.18) }
             }
         }
     }

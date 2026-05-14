@@ -117,7 +117,8 @@ struct IPadTimelineSidebarView: View {
                             if !startLegs.isEmpty {
                                 ForEach(startLegs, id: \.id) { startLeg in
                                     let isTripSelected = selectedTripID == "\(startLeg.payPeriod)|\(startLeg.pairing)"
-                                    tripSummaryCard(for: startLeg, isPast: section.isPast)
+                                    let isTripHighlighted = deleteTripConfirmPairing == startLeg.pairing
+                                    tripSummaryCard(for: startLeg, isPast: section.isPast, isHighlighted: isTripHighlighted)
                                         .background(isTripSelected ? Color.accentColor.opacity(0.12) : Color.clear)
                                         .overlay(alignment: .leading) {
                                             if isTripSelected {
@@ -125,13 +126,11 @@ struct IPadTimelineSidebarView: View {
                                             }
                                         }
                                         .id("ipad.tripdata.\(startLeg.id.uuidString)")
-                                        .contextMenu {
-                                            Button(role: .destructive) {
+                                        .simultaneousGesture(
+                                            LongPressGesture(minimumDuration: 0.5).onEnded { _ in
                                                 deleteTripConfirmPairing = startLeg.pairing
-                                            } label: {
-                                                Label("Delete Trip", systemImage: "trash")
                                             }
-                                        }
+                                        )
                                 }
                             }
                             Section {
@@ -140,6 +139,7 @@ struct IPadTimelineSidebarView: View {
                                     let rowID = "\(tripID)|\(leg.leg)|\(leg.id.uuidString)"
                                     let isSelected = selectedTripID == tripID
 
+                                    let isHighlighted = deleteTripConfirmPairing == leg.pairing
                                     Group {
                                         Button {
                                             selectedTripID = selectedTripID == tripID ? nil : tripID
@@ -157,7 +157,7 @@ struct IPadTimelineSidebarView: View {
                                             )
                                         }
                                         .buttonStyle(.plain)
-                                        .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+                                        .background(isHighlighted ? Color.red.opacity(0.10) : (isSelected ? Color.accentColor.opacity(0.12) : Color.clear))
                                         .overlay(alignment: .leading) {
                                             if isSelected {
                                                 Rectangle()
@@ -165,13 +165,11 @@ struct IPadTimelineSidebarView: View {
                                                     .frame(width: 3)
                                             }
                                         }
-                                        .contextMenu {
-                                            Button(role: .destructive) {
+                                        .simultaneousGesture(
+                                            LongPressGesture(minimumDuration: 0.5).onEnded { _ in
                                                 deleteTripConfirmPairing = leg.pairing
-                                            } label: {
-                                                Label("Delete Trip", systemImage: "trash")
                                             }
-                                        }
+                                        )
 
                                         if shouldShowLayover(leg: leg) {
                                             let station = leg.layoverStation ?? leg.arrAirport
@@ -199,7 +197,7 @@ struct IPadTimelineSidebarView: View {
                                                     ),
                                                     fontScale: timelineFontScale
                                                 )
-                                                .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+                                                .background(isHighlighted ? Color.red.opacity(0.10) : (isSelected ? Color.accentColor.opacity(0.12) : Color.clear))
                                                 .overlay(alignment: .leading) {
                                                     if isSelected {
                                                         Rectangle().fill(Color.accentColor).frame(width: 3)
@@ -207,13 +205,11 @@ struct IPadTimelineSidebarView: View {
                                                 }
                                             }
                                             .id("ipad.layover.\(leg.id.uuidString)")
-                                            .contextMenu {
-                                                Button(role: .destructive) {
+                                            .simultaneousGesture(
+                                                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
                                                     deleteTripConfirmPairing = leg.pairing
-                                                } label: {
-                                                    Label("Delete Trip", systemImage: "trash")
                                                 }
-                                            }
+                                            )
                                         }
                                     }
                                     .id(rowID)
@@ -249,10 +245,14 @@ struct IPadTimelineSidebarView: View {
                 // oldest legs at top, requiring the user to scroll to find what
                 // is actually upcoming.
                 .task {
-                    for _ in 0..<3 {
-                        try? await Task.sleep(nanoseconds: 120_000_000)
+                    // Immediate + retry to handle LazyVStack lazy rendering.
+                    if let rowID = nextScrollTargetID() { proxy.scrollTo(rowID, anchor: .top) }
+                    for delay in [100_000_000, 200_000_000, 400_000_000] as [UInt64] {
+                        try? await Task.sleep(nanoseconds: delay)
                         if let rowID = nextScrollTargetID() {
-                            proxy.scrollTo(rowID, anchor: .top)
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                proxy.scrollTo(rowID, anchor: .top)
+                            }
                         }
                     }
                 }
@@ -433,7 +433,7 @@ struct IPadTimelineSidebarView: View {
     /// Keyed by `{depLocalDate}_{pairing}` (payPeriod granularity) so that the
     /// same pairing in different pay periods resolves to the correct credit value.
     @ViewBuilder
-    private func tripSummaryCard(for startLeg: TripLeg, isPast: Bool) -> some View {
+    private func tripSummaryCard(for startLeg: TripLeg, isPast: Bool, isHighlighted: Bool = false) -> some View {
         let summary = tripDataByTripID[Self.fileKey(for: startLeg)]
         let creditText = Self.formattedDurationLabel(
             summary?.creditTime ?? fallbackCreditHHMM(forPayPeriod: startLeg.payPeriod, pairing: startLeg.pairing)
@@ -455,7 +455,12 @@ struct IPadTimelineSidebarView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
-        .background(tripCardBackground)
+        .background {
+            ZStack {
+                tripCardBackground
+                if isHighlighted { Color.red.opacity(0.18) }
+            }
+        }
     }
 
     private func fallbackCreditHHMM(forPayPeriod payPeriod: String, pairing: String) -> String? {

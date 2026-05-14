@@ -8,44 +8,60 @@ struct RootTabView: View {
     @AppStorage("app_font_size_option") private var appFontSizeOptionRawValue = AppFontSizeOption.medium.rawValue
     @AppStorage("app_font_size_migrated_to_medium") private var didMigrateFontSizeToMedium = false
     @State private var isShowingImportPreviewFromExternalOpen = false
+    @State private var selectedTab = 0
+    /// Increments every time the Timeline tab is tapped (including re-taps while
+    /// already on Timeline), so TimelineTabView can reliably re-trigger its scroll.
+    @State private var timelineScrollTrigger = 0
 
     private var selectedAppearanceMode: AppearanceMode {
         AppearanceMode(rawValue: appearanceModeRawValue) ?? .system
     }
 
     var body: some View {
-        TabView {
-            TimelineTabView()
+        TabView(selection: Binding(
+            get: { selectedTab },
+            set: { newTab in
+                if newTab == 0 { timelineScrollTrigger += 1 }
+                selectedTab = newTab
+            }
+        )) {
+            TimelineTabView(scrollTrigger: timelineScrollTrigger)
                 .tabItem {
                     Label("Timeline", systemImage: "calendar")
                 }
+                .tag(0)
 
             OpenTimeTabView()
                 .tabItem {
                     Label("OpenTime", systemImage: "clock")
                 }
+                .tag(1)
 
             FriendsTabView()
                 .tabItem {
                     Label("Friends", systemImage: "person.2")
                 }
+                .tag(2)
 
             BrowserTabView()
                 .tabItem {
                     Label("Browser", systemImage: "globe")
                 }
+                .tag(3)
 
             if viewModel.canAccessAdminTab {
                 AdminTabView()
                     .tabItem {
                         Label("Admin", systemImage: "checklist")
                     }
+                    .tag(4)
             }
 
             SettingsTabView()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape")
                 }
+                .tag(5)
         }
         .sheet(isPresented: $viewModel.isShowingLoginSheet) {
             TripBoardLoginView(
