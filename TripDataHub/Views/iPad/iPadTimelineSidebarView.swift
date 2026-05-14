@@ -125,6 +125,13 @@ struct IPadTimelineSidebarView: View {
                                             }
                                         }
                                         .id("ipad.tripdata.\(startLeg.id.uuidString)")
+                                        .contextMenu {
+                                            Button(role: .destructive) {
+                                                deleteTripConfirmPairing = startLeg.pairing
+                                            } label: {
+                                                Label("Delete Trip", systemImage: "trash")
+                                            }
+                                        }
                                 }
                             }
                             Section {
