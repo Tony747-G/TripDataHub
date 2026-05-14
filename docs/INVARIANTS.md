@@ -50,13 +50,15 @@ LDT (Local Domicile Time) is determined entirely by the verified pilot's `domici
 
 ---
 
-## INV-005: Timeline and Friends Timeline Share Components
+## INV-005: Equivalent iOS and iPad Surfaces Stay in Sync
 
-The same `TimelineFlightRow` and `TimelineLayoverCard` views are used for the user's own Timeline AND for shared/friend timelines. Visual divergence between the two is a bug, not a feature.
+When a behavior, workflow, or user-facing display is changed on iOS, the equivalent iPadOS surface MUST be identified, reviewed, and updated to match unless the product requirement explicitly says the platforms should differ. The reverse is also true: iPadOS fixes require checking and updating the iOS equivalent.
 
-**Why:** Repeated regressions where one path got a polish update and the other didn't (e.g. iPad layover card was missing the date label).
+Shared components should be used where practical. The same `TimelineFlightRow` and `TimelineLayoverCard` views are used for the user's own Timeline AND for shared/friend timelines. Visual divergence between equivalent Timeline/Friends/Settings/Import surfaces is a bug, not a feature.
 
-**Enforced by:** `TripDataHub/Views/TimelineRowViews.swift` (shared), `ScheduleTimelineRendererView.swift` (shared renderer).
+**Why:** Repeated regressions where one path got a polish update and the other didn't (e.g. iPad layover card was missing the date label; iOS Timeline/Friends changes missed iPad-specific sidebar/sheet implementations).
+
+**Enforced by:** Reviewing equivalent iOS/iPad entry points before marking work complete. Known paired surfaces include `TimelineTabView.swift` / `Views/iPad/iPadTimelineSidebarView.swift`, `FriendsTabView.swift` / `Views/iPad/iPadOperationalWorkspaceView.swift`, and shared Settings/Import flows through `SettingsTabView.swift`, `BrowserTabView.swift`, and `ImportPreviewView.swift`.
 
 ---
 
