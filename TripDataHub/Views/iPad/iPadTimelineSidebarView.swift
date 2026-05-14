@@ -5,6 +5,7 @@ struct IPadTimelineSidebarView: View {
     @Binding var selectedTripID: String?
     @Environment(\.colorScheme) private var colorScheme
     @State private var tripDataByTripID: [String: IPadTripDataCardInfo] = [:]
+    @State private var deleteTripConfirmPairing: String? = nil
 
     private var dateHeaderTextColor: Color {
         ScheduleColors.timelineDateHeaderText(for: colorScheme)
@@ -157,6 +158,13 @@ struct IPadTimelineSidebarView: View {
                                                     .frame(width: 3)
                                             }
                                         }
+                                        .contextMenu {
+                                            Button(role: .destructive) {
+                                                deleteTripConfirmPairing = leg.pairing
+                                            } label: {
+                                                Label("Delete Trip", systemImage: "trash")
+                                            }
+                                        }
 
                                         if shouldShowLayover(leg: leg) {
                                             let station = leg.layoverStation ?? leg.arrAirport
@@ -192,6 +200,13 @@ struct IPadTimelineSidebarView: View {
                                                 }
                                             }
                                             .id("ipad.layover.\(leg.id.uuidString)")
+                                            .contextMenu {
+                                                Button(role: .destructive) {
+                                                    deleteTripConfirmPairing = leg.pairing
+                                                } label: {
+                                                    Label("Delete Trip", systemImage: "trash")
+                                                }
+                                            }
                                         }
                                     }
                                     .id(rowID)
@@ -259,6 +274,31 @@ struct IPadTimelineSidebarView: View {
         .background(Color(.systemBackground))
         .onAppear { refreshTripDataCards() }
         .onChange(of: viewModel.crewAccessSchedules) { _, _ in refreshTripDataCards() }
+        .confirmationDialog(
+            deleteTripConfirmPairing.map { "Delete Trip \($0)?" } ?? "Delete Trip?",
+            isPresented: Binding(
+                get: { deleteTripConfirmPairing != nil },
+                set: { if !$0 { deleteTripConfirmPairing = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Trip", role: .destructive) {
+                if let pairing = deleteTripConfirmPairing {
+                    let ids = Set(
+                        viewModel.crewAccessSchedules
+                            .filter { $0.legs.contains { $0.pairing == pairing } }
+                            .map(\.id)
+                    )
+                    Task { await viewModel.deleteCrewAccessTrips(ids: ids) }
+                }
+                deleteTripConfirmPairing = nil
+            }
+            Button("Cancel", role: .cancel) {
+                deleteTripConfirmPairing = nil
+            }
+        } message: {
+            Text("This will remove the trip from Timeline and synced devices.")
+        }
     }
 
     /// Layover中→Layoverカード、Trip先頭（未開始）→Trip summaryカード、
