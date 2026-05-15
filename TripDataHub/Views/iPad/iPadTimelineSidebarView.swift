@@ -4,7 +4,7 @@ struct IPadTimelineSidebarView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @Binding var selectedTripID: String?
     @Environment(\.colorScheme) private var colorScheme
-    @State private var tripDataByTripID: [String: IPadTripDataCardInfo] = [:]
+    @State private var tripDataByTripID: [String: CrewAccessTripSummary] = [:]
     @State private var deleteTripConfirmPairing: String? = nil
     @State private var friendScheduleMatches: FriendScheduleMatches = .empty
     @State private var friendMatchAlert: (title: String, message: String)? = nil
@@ -167,7 +167,7 @@ struct IPadTimelineSidebarView: View {
                                         if shouldShowLayover(leg: leg) {
                                             let station = leg.layoverStation ?? leg.arrAirport
                                             let hotel = leg.layoverHotelName
-                                                ?? tripDataByTripID[tripDataKeyByLegID[leg.id] ?? Self.fileKey(for: leg)]?.hotelByStation[Self.normalizedStationKey(station)]
+                                                ?? tripDataByTripID[tripDataKeyByLegID[leg.id] ?? Self.fileKey(for: leg)]?.hotelByStation[CrewAccessTripSummaryStore.stationKey(station)]
                                                 ?? ""
                                             let restOverlaps = friendScheduleMatches.restOverlapsByArrivalLegID[leg.id] ?? []
                                             let hasRestOverlap = !restOverlaps.isEmpty
@@ -646,9 +646,9 @@ struct IPadTimelineSidebarView: View {
 
     private func refreshTripDataCards() {
         Task.detached(priority: .utility) {
-            let result = Self.loadTripDataFromCrewAccessImports()
+            let result = CrewAccessTripSummaryStore.load()
             await MainActor.run {
-                tripDataByTripID = result
+                tripDataByTripID = result.byFileKey
             }
         }
     }
@@ -668,183 +668,6 @@ struct IPadTimelineSidebarView: View {
         Color(red: 0.95, green: 0.58, blue: 0.12)
     }
 
-    private nonisolated static func loadTripDataFromCrewAccessImports() -> [String: IPadTripDataCardInfo] {
-        let fm = FileManager.default
-        guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            return [:]
-        }
-        let dir = documents.appendingPathComponent("CrewAccessImports", isDirectory: true)
-        guard fm.fileExists(atPath: dir.path) else { return [:] }
-
-        let urls: [URL]
-        do {
-            urls = try fm.contentsOfDirectory(
-                at: dir,
-                includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
-                options: [.skipsHiddenFiles]
-            )
-        } catch {
-            return [:]
-        }
-
-        // Key by the file's base name ("{date}_{tripId}", e.g. "2026-05-14_A70303R")
-        // rather than tripId alone. This gives payPeriod-level disambiguation when
-        // the same pairing appears in multiple pay periods.
-        var latestFileByKey: [String: (date: Date, url: URL)] = [:]
-        for url in urls {
-            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey]),
-                  values.isRegularFile == true,
-                  url.pathExtension.lowercased() == "json"
-            else {
-                continue
-            }
-            let fileKey = url.deletingPathExtension().lastPathComponent.uppercased()
-            guard !fileKey.isEmpty else { continue }
-            let modifiedAt = values.contentModificationDate ?? .distantPast
-            if latestFileByKey[fileKey].map({ modifiedAt > $0.date }) ?? true {
-                latestFileByKey[fileKey] = (modifiedAt, url)
-            }
-        }
-
-        var result: [String: IPadTripDataCardInfo] = [:]
-        for (fileKey, (_, url)) in latestFileByKey {
-            let tripID = fileKey
-            guard let data = try? Data(contentsOf: url),
-                  let decoded = try? JSONDecoder().decode(IPadCrewAccessTripSummaryCardJSON.self, from: data)
-            else {
-                continue
-            }
-            var hotelByStation: [String: String] = [:]
-            for detail in decoded.hotelDetails {
-                let (station, name) = IPadCrewAccessTripSummaryCardJSON.parseHotelDetail(detail)
-                let stationKey = normalizedStationKey(station)
-                if !stationKey.isEmpty && !name.isEmpty {
-                    hotelByStation[stationKey] = name
-                }
-            }
-
-            let legacyHotelDetails = decoded.hotelDetails.filter { $0.hasPrefix("Hotel details ") }
-            if !legacyHotelDetails.isEmpty {
-                var legacyHotelIndex = 0
-                let sortedItems = decoded.items.sorted { $0.sequence < $1.sequence }
-                for index in sortedItems.indices.dropLast() {
-                    guard legacyHotelIndex < legacyHotelDetails.count else { break }
-                    let item = sortedItems[index]
-                    let next = sortedItems[index + 1]
-                    guard let endDate = LegConnectionTextBuilder.parseUTC(item.endUtc),
-                          let nextStartDate = LegConnectionTextBuilder.parseUTC(next.startUtc),
-                          nextStartDate.timeIntervalSince(endDate) >= 180 * 60 else {
-                        continue
-                    }
-                    let station = normalizedStationKey(item.arrAirport)
-                    guard !station.isEmpty, hotelByStation[station] == nil else {
-                        legacyHotelIndex += 1
-                        continue
-                    }
-                    let (_, name) = IPadCrewAccessTripSummaryCardJSON.parseHotelDetail(legacyHotelDetails[legacyHotelIndex])
-                    if !name.isEmpty { hotelByStation[station] = name }
-                    legacyHotelIndex += 1
-                }
-            }
-
-            result[tripID] = IPadTripDataCardInfo(
-                hotelByStation: hotelByStation,
-                creditTime: decoded.creditTime?.trimmingCharacters(in: .whitespacesAndNewlines)
-            )
-        }
-        return result
-    }
-
-    private nonisolated static func normalizedTripKey(_ raw: String) -> String {
-        raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-    }
-
-    private nonisolated static func normalizedStationKey(_ raw: String) -> String {
-        raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-    }
-}
-
-private struct IPadTripDataCardInfo {
-    let hotelByStation: [String: String]
-    let creditTime: String?
-}
-
-private struct IPadCrewAccessTripSummaryCardJSON: Decodable {
-    let tripId: String
-    let creditTime: String?
-    let hotelDetails: [String]
-    let items: [IPadCrewAccessTripSummaryCardItemJSON]
-
-    private enum CodingKeys: String, CodingKey {
-        case tripId
-        case creditTime
-        case hotelDetails
-        case items
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        tripId = try container.decode(String.self, forKey: .tripId)
-        creditTime = try container.decodeIfPresent(String.self, forKey: .creditTime)
-        hotelDetails = try container.decodeIfPresent([String].self, forKey: .hotelDetails) ?? []
-        items = try container.decodeIfPresent([IPadCrewAccessTripSummaryCardItemJSON].self, forKey: .items) ?? []
-    }
-
-    static func parseHotelDetail(_ detail: String) -> (station: String, hotelName: String) {
-        if detail.hasPrefix("Hotel details ") {
-            return parseLegacyHotelDetail(detail)
-        }
-
-        guard let colonRange = detail.range(of: ": ") else {
-            return (detail.trimmingCharacters(in: .whitespaces), "")
-        }
-        let station = String(detail[..<colonRange.lowerBound]).trimmingCharacters(in: .whitespaces)
-        var rest = String(detail[colonRange.upperBound...])
-        if let parenRange = rest.range(of: " (", options: .backwards) {
-            rest = String(rest[..<parenRange.lowerBound])
-        }
-        let words = rest.split(separator: " ").map(String.init)
-        var hotelWords: [String] = []
-        for word in words {
-            let dashCount = word.filter { $0 == "-" }.count
-            if word.hasPrefix("+") || dashCount >= 2 { break }
-            hotelWords.append(word)
-        }
-        return (station, hotelWords.joined(separator: " ").trimmingCharacters(in: .whitespaces))
-    }
-
-    private static func parseLegacyHotelDetail(_ detail: String) -> (station: String, hotelName: String) {
-        guard let hotelRange = detail.range(of: "Hotel: ") else { return ("", "") }
-        let afterHotel = String(detail[hotelRange.upperBound...])
-        let hotelOnly: String
-        if let transportRange = afterHotel.range(of: " Hotel Transport:") {
-            hotelOnly = String(afterHotel[..<transportRange.lowerBound])
-        } else {
-            hotelOnly = afterHotel
-        }
-
-        let cleaned = hotelOnly
-            .replacingOccurrences(of: " UPS Only", with: "")
-            .replacingOccurrences(of: "UPS Only ", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let words = cleaned.split(separator: " ").map(String.init)
-        var hotelWords: [String] = []
-        for word in words {
-            let digitCount = word.filter(\.isNumber).count
-            let dashCount = word.filter { $0 == "-" }.count
-            if word.hasPrefix("+") || digitCount >= 3 || dashCount >= 2 { break }
-            hotelWords.append(word)
-        }
-        return ("", hotelWords.joined(separator: " ").trimmingCharacters(in: .whitespaces))
-    }
-}
-
-private struct IPadCrewAccessTripSummaryCardItemJSON: Decodable {
-    let sequence: Int
-    let arrAirport: String
-    let startUtc: String
-    let endUtc: String
 }
 
 #Preview {

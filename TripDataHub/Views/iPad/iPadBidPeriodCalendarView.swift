@@ -10,6 +10,10 @@ struct IPadBidPeriodCalendarView: View {
     @State private var currentBidPeriod: CalendarBidPeriod? = nil
     @State private var headerBidPeriod: CalendarBidPeriod? = nil
     @State private var scrollTrigger = UUID()
+    // Layout cache: keyed by BP.id. Populated by refreshCalendarLayouts().
+    // selectedTripID changes do NOT invalidate the cache.
+    @State private var bpLayoutCache: [String: CalendarBPLayout] = [:]
+    @State private var cachedAllTrips: [CalendarTrip] = []
 
     // BP date range labels (e.g. "May 17 – Jul 11, 2026") must render the BP's UTC calendar
     // dates verbatim. Without an explicit UTC timezone, the device's local timezone shifts the
@@ -33,12 +37,9 @@ struct IPadBidPeriodCalendarView: View {
 
     // MARK: Derived data
 
-    private var allTrips: [CalendarTrip] {
-        // Match iPhone Timeline semantics: the operational calendar is driven by
-        // CrewAccess imports only. TripBoard/BidPro schedules remain available to
-        // OpenTime/TripBoard flows, but should not appear as imported trips here.
-        normalizeCalendarTrips(from: viewModel.crewAccessSchedules)
-    }
+    // allTrips is cached in cachedAllTrips via refreshCalendarLayouts().
+    // Kept as a private helper only for on-demand fallback in the body.
+    private var allTrips: [CalendarTrip] { cachedAllTrips }
 
     private var domicile: String {
         viewModel.verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
@@ -104,11 +105,16 @@ struct IPadBidPeriodCalendarView: View {
         }
         .background(Color(.secondarySystemBackground).ignoresSafeArea(edges: .top))
         .onAppear { loadBidPeriod(for: Date()) }
-        .onChange(of: viewModel.crewAccessSchedules) { _, _ in /* segments recomputed */ }
-        .onChange(of: viewModel.schedules) { _, _ in /* segments recomputed */ }
+        .onChange(of: viewModel.crewAccessSchedules) { _, _ in refreshCalendarLayouts() }
+        .onChange(of: viewModel.schedules) { _, _ in refreshCalendarLayouts() }
+        .onChange(of: domicile) { _, _ in
+            loadBidPeriod(for: Date())
+            refreshCalendarLayouts()
+        }
         .onChange(of: currentBidPeriod) { _, bp in
             selectedBidPeriodID = bp?.id
             headerBidPeriod = bp
+            refreshCalendarLayouts()
         }
     }
 
@@ -202,11 +208,17 @@ struct IPadBidPeriodCalendarView: View {
                     Rectangle().fill(Color(.separator)).frame(height: 1)
                     ForEach(Array(displayedBidPeriodSections.enumerated()), id: \.element.id) { sectionIndex, section in
                         let bp = section.bidPeriod
-                        let grid = iPadCalendarGrid(for: bp, domicile: domicile)
-                        let days = grid.map(\.calendarDay)
-                        let trips = visibleTrips(in: bp, trips: allTrips)
-                        let segmentsByDayIndex = segmentsByDayIndex(for: trips, days: days)
-                        let tripsByID = Dictionary(uniqueKeysWithValues: trips.map { ($0.id, $0) })
+                        let layout = bpLayoutCache[bp.id]
+                        let grid = layout?.grid ?? iPadCalendarGrid(for: bp, domicile: domicile)
+                        let segsByDay: [Int: [CalendarSegment]] = layout?.segmentsByDayIndex ?? {
+                            let days = grid.map(\.calendarDay)
+                            let trips = visibleTrips(in: bp, trips: allTrips)
+                            return segmentsByDayIndex(for: trips, days: days)
+                        }()
+                        let tripsByID = layout?.tripsByID ?? {
+                            let trips = visibleTrips(in: bp, trips: allTrips)
+                            return Dictionary(uniqueKeysWithValues: trips.map { ($0.id, $0) })
+                        }()
                         // Thick divider between BP sections (thicker than PP boundary).
                         if sectionIndex > 0 {
                             Rectangle()
@@ -221,7 +233,7 @@ struct IPadBidPeriodCalendarView: View {
                             rowView(
                                 bidPeriod: bp,
                                 gridDays: grid,
-                                segmentsByDayIndex: segmentsByDayIndex,
+                                segmentsByDayIndex: segsByDay,
                                 tripsByID: tripsByID,
                                 weekIndex: row,
                                 rowHeight: rowHeight
@@ -411,6 +423,26 @@ struct IPadBidPeriodCalendarView: View {
     private func loadBidPeriod(for date: Date) {
         currentBidPeriod = bidPeriod(for: date, domicile: domicile)
         headerBidPeriod = currentBidPeriod
+        // refreshCalendarLayouts fires via onChange(of: currentBidPeriod)
+    }
+
+    /// Rebuilds layout cache for all displayed BP sections.
+    /// Called on schedule change, BP navigation, or initial load.
+    /// selectedTripID changes do NOT call this — segments are independent of selection.
+    private func refreshCalendarLayouts() {
+        let trips = normalizeCalendarTrips(from: viewModel.crewAccessSchedules)
+        cachedAllTrips = trips
+        var cache: [String: CalendarBPLayout] = [:]
+        for section in displayedBidPeriodSections {
+            let bp = section.bidPeriod
+            let grid = iPadCalendarGrid(for: bp, domicile: domicile)
+            let days = grid.map(\.calendarDay)
+            let bpTrips = visibleTrips(in: bp, trips: trips)
+            let segs = segmentsByDayIndex(for: bpTrips, days: days)
+            let byID = Dictionary(uniqueKeysWithValues: bpTrips.map { ($0.id, $0) })
+            cache[bp.id] = CalendarBPLayout(grid: grid, segmentsByDayIndex: segs, tripsByID: byID)
+        }
+        bpLayoutCache = cache
     }
 
     private func navigateToPreviousBP() {
@@ -643,6 +675,15 @@ private struct CalendarDayCell: View {
             Color.clear
         }
     }
+}
+
+// MARK: - Layout cache type
+
+/// Pre-computed layout for one Bid Period. Independent of selectedTripID.
+private struct CalendarBPLayout {
+    let grid: [IPadCalendarGridDay]
+    let segmentsByDayIndex: [Int: [CalendarSegment]]
+    let tripsByID: [String: CalendarTrip]
 }
 
 #Preview {

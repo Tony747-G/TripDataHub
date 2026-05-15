@@ -16,8 +16,8 @@ struct TimelineTabView: View {
         ?? TimeZone(secondsFromGMT: NextReportWindowBuilder.anchorageFallbackOffsetSeconds)!
     private let tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared
     @State private var legData = TimelineLegData(schedules: [])
-    @State private var tripDataByTripID: [String: TripDataCardInfo] = [:]
-    @State private var importedUTCTimesByTripAndSequence: [String: ImportLegUTCTimes] = [:]
+    @State private var tripDataByTripID: [String: CrewAccessTripSummary] = [:]
+    @State private var importedUTCTimesByTripAndSequence: [String: CrewAccessLegUTCTimes] = [:]
     @State private var friendMatchAlert: FriendMatchAlert?
     @State private var friendScheduleMatches: FriendScheduleMatches = .empty
     @State private var deleteTripConfirmPairing: String? = nil
@@ -374,7 +374,7 @@ struct TimelineTabView: View {
         let station = leg.layoverStation ?? leg.arrAirport
         // TripLeg フィールド → JSON hotelDetails の順でフォールバック
         let hotel = leg.layoverHotelName
-            ?? tripDataByTripID[leg.pairing]?.hotelByStation[station]
+            ?? tripDataByTripID[leg.pairing]?.hotelByStation[CrewAccessTripSummaryStore.stationKey(station)]
             ?? ""
         let restOverlaps = friendScheduleMatches.restOverlapsByArrivalLegID[leg.id] ?? []
         let hasRestOverlap = !restOverlaps.isEmpty
@@ -614,10 +614,10 @@ struct TimelineTabView: View {
 
     private func refreshTripDataCards() {
         Task.detached(priority: .utility) {
-            let result = Self.loadTripDataFromCrewAccessImports()
+            let result = CrewAccessTripSummaryStore.load()
             await MainActor.run {
-                tripDataByTripID = result.summaryByTripID
-                importedUTCTimesByTripAndSequence = result.utcByTripAndSequence
+                tripDataByTripID = result.byTripID
+                importedUTCTimesByTripAndSequence = result.legUTCTimesByKey
                 // dayKey(for:) uses importedUTCTimesByTripAndSequence — re-cache sections
                 // now that UTC import times are available.
                 cachedDaySections = buildDisplayDaySections(
@@ -845,7 +845,7 @@ struct TimelineTabView: View {
     }
 
     private func utcDepartureDate(for leg: TripLeg) -> Date? {
-        let key = tripSequenceKey(tripID: leg.pairing, sequence: leg.leg)
+        let key = CrewAccessTripSummaryStore.legUTCKey(tripID: leg.pairing, sequence: leg.leg)
         if let fromImport = importedUTCTimesByTripAndSequence[key]?.startUtc,
            let parsedImport = LegConnectionTextBuilder.parseUTC(fromImport) {
             return parsedImport
@@ -857,7 +857,7 @@ struct TimelineTabView: View {
     }
 
     private func utcArrivalDate(for leg: TripLeg) -> Date? {
-        let key = tripSequenceKey(tripID: leg.pairing, sequence: leg.leg)
+        let key = CrewAccessTripSummaryStore.legUTCKey(tripID: leg.pairing, sequence: leg.leg)
         if let fromImport = importedUTCTimesByTripAndSequence[key]?.endUtc,
            let parsedImport = LegConnectionTextBuilder.parseUTC(fromImport) {
             return parsedImport
@@ -1016,110 +1016,6 @@ struct TimelineTabView: View {
         return "\(hh)h\(String(format: "%02d", mm))m"
     }
 
-    private nonisolated static func loadTripDataFromCrewAccessImports() -> (
-        summaryByTripID: [String: TripDataCardInfo],
-        utcByTripAndSequence: [String: ImportLegUTCTimes]
-    ) {
-        let fm = FileManager.default
-        guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            return ([:], [:])
-        }
-        let dir = documents.appendingPathComponent("CrewAccessImports", isDirectory: true)
-        guard fm.fileExists(atPath: dir.path) else { return ([:], [:]) }
-
-        let urls: [URL]
-        do {
-            urls = try fm.contentsOfDirectory(
-                at: dir,
-                includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
-                options: [.skipsHiddenFiles]
-            )
-        } catch {
-            return ([:], [:])
-        }
-
-        var latestFileByTripID: [String: (date: Date, url: URL)] = [:]
-
-        for url in urls {
-            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey]),
-                  values.isRegularFile == true,
-                  url.pathExtension.lowercased() == "json"
-            else {
-                continue
-            }
-            guard let data = try? Data(contentsOf: url),
-                  let decoded = try? JSONDecoder().decode(CrewAccessTripSummaryCardJSON.self, from: data)
-            else {
-                continue
-            }
-            let tripID = decoded.tripId.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !tripID.isEmpty else { continue }
-            let modifiedAt = values.contentModificationDate ?? .distantPast
-            let current = latestFileByTripID[tripID]
-            if current.map({ modifiedAt > $0.date }) ?? true {
-                latestFileByTripID[tripID] = (modifiedAt, url)
-            }
-        }
-
-        var summaryByTripID: [String: TripDataCardInfo] = [:]
-        var utcByTripAndSequence: [String: ImportLegUTCTimes] = [:]
-        for (tripID, (_, url)) in latestFileByTripID {
-            guard let data = try? Data(contentsOf: url),
-                  let decoded = try? JSONDecoder().decode(CrewAccessTripSummaryCardJSON.self, from: data)
-            else {
-                continue
-            }
-            var hotelByStation: [String: String] = [:]
-            for detail in decoded.hotelDetails {
-                let (st, name) = CrewAccessTripSummaryCardJSON.parseHotelDetail(detail)
-                if !st.isEmpty && !name.isEmpty { hotelByStation[st] = name }
-            }
-            let legacyHotelDetails = decoded.hotelDetails.filter { $0.hasPrefix("Hotel details ") }
-            if !legacyHotelDetails.isEmpty {
-                var legacyHotelIndex = 0
-                let sortedItems = decoded.items.sorted { $0.sequence < $1.sequence }
-                for index in sortedItems.indices.dropLast() {
-                    guard legacyHotelIndex < legacyHotelDetails.count else { break }
-                    let item = sortedItems[index]
-                    let next = sortedItems[index + 1]
-                    guard let endDate = LegConnectionTextBuilder.parseUTC(item.endUtc),
-                          let nextStartDate = LegConnectionTextBuilder.parseUTC(next.startUtc),
-                          nextStartDate.timeIntervalSince(endDate) >= 180 * 60 else {
-                        continue
-                    }
-                    let station = item.arrAirport.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !station.isEmpty, hotelByStation[station] == nil else {
-                        legacyHotelIndex += 1
-                        continue
-                    }
-                    let (_, name) = CrewAccessTripSummaryCardJSON.parseHotelDetail(legacyHotelDetails[legacyHotelIndex])
-                    if !name.isEmpty { hotelByStation[station] = name }
-                    legacyHotelIndex += 1
-                }
-            }
-            summaryByTripID[tripID] = TripDataCardInfo(
-                creditTime: decoded.creditTime,
-                tripDays: decoded.tripDays,
-                tafb: decoded.tafb,
-                hotelByStation: hotelByStation
-            )
-            for item in decoded.items {
-                let key = tripSequenceKey(tripID: tripID, sequence: item.sequence)
-                utcByTripAndSequence[key] = ImportLegUTCTimes(startUtc: item.startUtc, endUtc: item.endUtc)
-            }
-        }
-
-        return (summaryByTripID, utcByTripAndSequence)
-    }
-
-    private nonisolated static func tripSequenceKey(tripID: String, sequence: Int) -> String {
-        "\(tripID)|\(sequence)"
-    }
-
-    private func tripSequenceKey(tripID: String, sequence: Int) -> String {
-        Self.tripSequenceKey(tripID: tripID, sequence: sequence)
-    }
-
     private var fontScale: CGFloat {
         let option = AppFontSizeOption(rawValue: appFontSizeOptionRawValue) ?? .medium
         return option.scaleFactor
@@ -1145,105 +1041,6 @@ struct TimelineTabView: View {
 private struct NextReportInfo {
     let pairing: String
     let reportTime: Date
-}
-
-private struct TripDataCardInfo {
-    let creditTime: String?
-    let tripDays: String?
-    let tafb: String?
-    let hotelByStation: [String: String]   // station → hotel name（JSON fallback）
-}
-
-private struct CrewAccessTripSummaryCardJSON: Decodable {
-    let tripId: String
-    let creditTime: String?
-    let tripDays: String?
-    let tafb: String?
-    let hotelDetails: [String]
-    let items: [CrewAccessTripSummaryCardItemJSON]
-
-    private enum CodingKeys: String, CodingKey {
-        case tripId
-        case creditTime
-        case tripDays
-        case tafb
-        case hotelDetails
-        case items
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        tripId       = try container.decode(String.self, forKey: .tripId)
-        creditTime   = try container.decodeIfPresent(String.self, forKey: .creditTime)
-        tripDays     = try container.decodeIfPresent(String.self, forKey: .tripDays)
-        tafb         = try container.decodeIfPresent(String.self, forKey: .tafb)
-        hotelDetails = try container.decodeIfPresent([String].self, forKey: .hotelDetails) ?? []
-        items        = try container.decodeIfPresent([CrewAccessTripSummaryCardItemJSON].self, forKey: .items) ?? []
-    }
-
-    /// "SGN: Caravelle Hotel +84-28-3823-4999 (15:30)" → (station:"SGN", hotel:"Caravelle Hotel")
-    static func parseHotelDetail(_ detail: String) -> (station: String, hotelName: String) {
-        if detail.hasPrefix("Hotel details ") {
-            return parseLegacyHotelDetail(detail)
-        }
-
-        guard let colonRange = detail.range(of: ": ") else {
-            return (detail.trimmingCharacters(in: .whitespaces), "")
-        }
-        let station = String(detail[..<colonRange.lowerBound]).trimmingCharacters(in: .whitespaces)
-        var rest    = String(detail[colonRange.upperBound...])
-        // 末尾の "(HH:MM)" を除去
-        if let parenRange = rest.range(of: " (", options: .backwards) {
-            rest = String(rest[..<parenRange.lowerBound])
-        }
-        // 電話番号（+始まり or ダッシュ2つ以上）を除去
-        let words = rest.split(separator: " ").map(String.init)
-        var hotelWords: [String] = []
-        for word in words {
-            let dashCount = word.filter { $0 == "-" }.count
-            if word.hasPrefix("+") || dashCount >= 2 { break }
-            hotelWords.append(word)
-        }
-        return (station, hotelWords.joined(separator: " ").trimmingCharacters(in: .whitespaces))
-    }
-
-    private static func parseLegacyHotelDetail(_ detail: String) -> (station: String, hotelName: String) {
-        guard let hotelRange = detail.range(of: "Hotel: ") else { return ("", "") }
-        let afterHotel = String(detail[hotelRange.upperBound...])
-        let hotelOnly: String
-        if let transportRange = afterHotel.range(of: " Hotel Transport:") {
-            hotelOnly = String(afterHotel[..<transportRange.lowerBound])
-        } else {
-            hotelOnly = afterHotel
-        }
-
-        let cleaned = hotelOnly
-            .replacingOccurrences(of: " UPS Only", with: "")
-            .replacingOccurrences(of: "UPS Only ", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let words = cleaned.split(separator: " ").map(String.init)
-        var hotelWords: [String] = []
-        for word in words {
-            let digitCount = word.filter(\.isNumber).count
-            let dashCount = word.filter { $0 == "-" }.count
-            if word.hasPrefix("+") || digitCount >= 3 || dashCount >= 2 { break }
-            hotelWords.append(word)
-        }
-        return ("", hotelWords.joined(separator: " ").trimmingCharacters(in: .whitespaces))
-    }
-}
-
-private struct CrewAccessTripSummaryCardItemJSON: Decodable {
-    let sequence: Int
-    let arrAirport: String
-    let startUtc: String
-    let endUtc: String
-}
-
-private struct ImportLegUTCTimes {
-    let startUtc: String
-    let endUtc: String
 }
 
 private enum TimelineClockDisplay: String {
