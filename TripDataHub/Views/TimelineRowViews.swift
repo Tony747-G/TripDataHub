@@ -138,9 +138,9 @@ struct TimelineLayoverCard: View {
                         }
                         Spacer()
                         if !remainingText.isEmpty {
-                            Text("Remain: \(remainingText)")
+                            Text("\(remainingText) left")
                                 .appScaledFont(.caption, scale: fontScale)
-                                .foregroundStyle(isPast ? .gray : .primary)
+                                .foregroundStyle(isPast ? .gray : Color(red: 0.95, green: 0.58, blue: 0.12))
                         }
                     }
                 }

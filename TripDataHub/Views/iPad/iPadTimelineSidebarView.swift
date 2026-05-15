@@ -8,6 +8,14 @@ struct IPadTimelineSidebarView: View {
     @State private var deleteTripConfirmPairing: String? = nil
     @State private var friendScheduleMatches: FriendScheduleMatches = .empty
     @State private var friendMatchAlert: (title: String, message: String)? = nil
+    // Cached per-schedule-update data — computed once in refreshLegData(), not on every body eval.
+    @State private var legData = TimelineLegData(schedules: [])
+    @State private var cachedTripStartLegIDs: Set<UUID> = []
+    @State private var tripDataKeyByLegID: [UUID: String] = [:]
+    @State private var firstRowIDByTripID: [String: String] = [:]
+    /// Heavy window computation cached; time-based selection stays computed so it
+    /// reflects current time as the clock advances without re-running the full build.
+    @State private var cachedReportWindows: [NextReportTripWindow] = []
 
     private var dateHeaderTextColor: Color {
         ScheduleColors.timelineDateHeaderText(for: colorScheme)
@@ -50,12 +58,21 @@ struct IPadTimelineSidebarView: View {
         viewModel.crewAccessSchedules
     }
 
-    private var legData: TimelineLegData {
-        TimelineLegData(schedules: sidebarSchedules)
+    /// Selects the active/next report from the pre-built (cached) windows.
+    /// Computed so that as time advances the displayed report updates without
+    /// re-running the expensive NextReportWindowBuilder.build().
+    private var nextReportInfo: (reportTime: Date, tripLabel: String)? {
+        let now = Date()
+        for window in cachedReportWindows {
+            if now < window.reportTime || (now >= window.reportTime && now < window.tripEndANC) {
+                return (window.reportTime, window.pairing)
+            }
+        }
+        return nil
     }
 
     /// Section (day) IDs that contain at least one leg of the selected trip.
-    /// Used to highlight date headers when a trip is selected.
+    /// Depends only on cached `legData` (stable) + `selectedTripID`.
     private var selectedSectionIDs: Set<String> {
         guard let selected = selectedTripID else { return [] }
         return Set(
@@ -63,42 +80,6 @@ struct IPadTimelineSidebarView: View {
                 .filter { section in section.legs.contains { "\($0.payPeriod)|\($0.pairing)" == selected } }
                 .map(\.id)
         )
-    }
-
-    /// IDs of legs that are the first leg of their trip in the visible timeline
-    /// (sorted by depLocal). Used to insert a compact `Trip Id / Credit` summary
-    /// card before the first leg of each trip.
-    private var tripStartLegIDs: Set<UUID> {
-        var seenTrips = Set<String>()
-        var startIDs = Set<UUID>()
-        let sorted = legData.allLegs.sorted { lhs, rhs in
-            if lhs.depLocal == rhs.depLocal { return lhs.flight < rhs.flight }
-            return lhs.depLocal < rhs.depLocal
-        }
-        for leg in sorted {
-            let key = "\(leg.payPeriod)|\(leg.pairing)"
-            if seenTrips.insert(key).inserted {
-                startIDs.insert(leg.id)
-            }
-        }
-        return startIDs
-    }
-
-    private var nextReportInfo: (reportTime: Date, tripLabel: String)? {
-        let windows = NextReportWindowBuilder.build(
-            schedules: sidebarSchedules,
-            anchorageTimeZone: Self.anchorageTimeZone
-        ).sorted { $0.reportTime < $1.reportTime }
-        let nowANC = Date()
-        for window in windows {
-            if nowANC < window.reportTime {
-                return (window.reportTime, window.pairing)
-            }
-            if nowANC >= window.reportTime && nowANC < window.tripEndANC {
-                return (window.reportTime, window.pairing)
-            }
-        }
-        return nil
     }
 
     var body: some View {
@@ -115,7 +96,7 @@ struct IPadTimelineSidebarView: View {
                             // Trip summary cards for trips whose first leg is in
                             // this day section. Rendered OUTSIDE the Section so
                             // they appear above the pinned date header, not below.
-                            let startLegs = section.legs.filter { tripStartLegIDs.contains($0.id) }
+                            let startLegs = section.legs.filter { cachedTripStartLegIDs.contains($0.id) }
                             if !startLegs.isEmpty {
                                 ForEach(startLegs, id: \.id) { startLeg in
                                     let isTripSelected = selectedTripID == "\(startLeg.payPeriod)|\(startLeg.pairing)"
@@ -186,7 +167,7 @@ struct IPadTimelineSidebarView: View {
                                         if shouldShowLayover(leg: leg) {
                                             let station = leg.layoverStation ?? leg.arrAirport
                                             let hotel = leg.layoverHotelName
-                                                ?? tripDataByTripID[tripDataKey(for: leg)]?.hotelByStation[Self.normalizedStationKey(station)]
+                                                ?? tripDataByTripID[tripDataKeyByLegID[leg.id] ?? Self.fileKey(for: leg)]?.hotelByStation[Self.normalizedStationKey(station)]
                                                 ?? ""
                                             let restOverlaps = friendScheduleMatches.restOverlapsByArrivalLegID[leg.id] ?? []
                                             let hasRestOverlap = !restOverlaps.isEmpty
@@ -258,20 +239,20 @@ struct IPadTimelineSidebarView: View {
                 }
                 .onChange(of: selectedTripID) { _, newID in
                     if let id = newID,
-                       let firstRowID = firstRowID(for: id) {
-                        withAnimation { proxy.scrollTo(firstRowID, anchor: .center) }
+                       let rowID = firstRowIDByTripID[id] {
+                        withAnimation { proxy.scrollTo(rowID, anchor: .center) }
                     }
                 }
                 // On appear: if a trip is already selected (portrait sheet opened
                 // from a calendar tap), scroll to that trip first. Otherwise fall
                 // back to the next upcoming event.
                 .task {
-                    let initialTarget: String? = selectedTripID.flatMap { firstRowID(for: $0) }
+                    let initialTarget: String? = selectedTripID.flatMap { firstRowIDByTripID[$0] }
                         ?? nextScrollTargetID()
                     if let rowID = initialTarget { proxy.scrollTo(rowID, anchor: .top) }
                     for delay in [100_000_000, 200_000_000, 400_000_000] as [UInt64] {
                         try? await Task.sleep(nanoseconds: delay)
-                        let target = selectedTripID.flatMap { firstRowID(for: $0) }
+                        let target = selectedTripID.flatMap { firstRowIDByTripID[$0] }
                             ?? nextScrollTargetID()
                         if let rowID = target {
                             withAnimation(.easeInOut(duration: 0.25)) {
@@ -304,10 +285,12 @@ struct IPadTimelineSidebarView: View {
         }
         .background(Color(.systemBackground))
         .onAppear {
+            refreshLegData()
             refreshTripDataCards()
             refreshFriendScheduleMatches()
         }
         .onChange(of: viewModel.crewAccessSchedules) { _, _ in
+            refreshLegData()
             refreshTripDataCards()
             refreshFriendScheduleMatches()
         }
@@ -385,7 +368,7 @@ struct IPadTimelineSidebarView: View {
         guard let target else { return nil }
 
         // 3. そのレグがTrip先頭でsummaryカードがある場合はそちらへ
-        if tripStartLegIDs.contains(target.id) {
+        if cachedTripStartLegIDs.contains(target.id) {
             return "ipad.tripdata.\(target.id.uuidString)"
         }
 
@@ -516,16 +499,6 @@ struct IPadTimelineSidebarView: View {
     /// Aligns tripDataByTripID lookups with the payPeriod|pairing granularity of
     /// the calendar selection key.
     /// Returns the tripDataByTripID lookup key for a given leg.
-    /// Uses the FIRST leg of the same trip so cross-day layover legs (whose
-    /// depLocal differs from the trip's first-leg date) still resolve correctly.
-    private func tripDataKey(for leg: TripLeg) -> String {
-        let firstLeg = legData.allLegs
-            .filter { $0.pairing == leg.pairing && $0.payPeriod == leg.payPeriod }
-            .min { ($0.depUTC ?? $0.depLocal) < ($1.depUTC ?? $1.depLocal) }
-            ?? leg
-        return Self.fileKey(for: firstLeg)
-    }
-
     private static func fileKey(for leg: TripLeg) -> String {
         let datePrefix = String(leg.depLocal.prefix(10))
         return "\(datePrefix)_\(leg.pairing)".uppercased()
@@ -622,13 +595,53 @@ struct IPadTimelineSidebarView: View {
         return f
     }()
 
-    private func firstRowID(for tripID: String) -> String? {
-        for section in legData.daySections {
-            if let leg = section.legs.first(where: { "\($0.payPeriod)|\($0.pairing)" == tripID }) {
-                return "\(tripID)|\(leg.leg)|\(leg.id.uuidString)"
+    /// Recomputes legData and all derived caches in one pass.
+    /// Call this whenever `crewAccessSchedules` changes or on first appear.
+    private func refreshLegData() {
+        let schedules = sidebarSchedules
+        let data = TimelineLegData(schedules: schedules)
+        legData = data
+
+        // Pre-compute first leg of each trip (allLegs is already sorted by depLocal).
+        var firstLegByTripKey: [String: TripLeg] = [:]
+        for leg in data.allLegs {
+            let key = "\(leg.payPeriod)|\(leg.pairing)"
+            if firstLegByTripKey[key] == nil { firstLegByTripKey[key] = leg }
+        }
+
+        // Map every leg to its trip's fileKey (for hotel lookup without per-row O(n) search).
+        tripDataKeyByLegID = data.allLegs.reduce(into: [:]) { map, leg in
+            let key = "\(leg.payPeriod)|\(leg.pairing)"
+            map[leg.id] = firstLegByTripKey[key].map { Self.fileKey(for: $0) }
+                ?? Self.fileKey(for: leg)
+        }
+
+        // Pre-compute trip-start leg IDs (first leg per unique trip, in depLocal order).
+        var seenTrips = Set<String>()
+        var startIDs = Set<UUID>()
+        for leg in data.allLegs {
+            let key = "\(leg.payPeriod)|\(leg.pairing)"
+            if seenTrips.insert(key).inserted { startIDs.insert(leg.id) }
+        }
+        cachedTripStartLegIDs = startIDs
+
+        // Pre-compute first row ID per trip (used for scroll + portrait sheet focus).
+        var rowMap: [String: String] = [:]
+        for section in data.daySections {
+            for leg in section.legs {
+                let tripID = "\(leg.payPeriod)|\(leg.pairing)"
+                if rowMap[tripID] == nil {
+                    rowMap[tripID] = "\(tripID)|\(leg.leg)|\(leg.id.uuidString)"
+                }
             }
         }
-        return nil
+        firstRowIDByTripID = rowMap
+
+        // Cache only the window list; time-based selection stays in computed nextReportInfo.
+        cachedReportWindows = NextReportWindowBuilder.build(
+            schedules: schedules,
+            anchorageTimeZone: Self.anchorageTimeZone
+        ).sorted { $0.reportTime < $1.reportTime }
     }
 
     private func refreshTripDataCards() {
