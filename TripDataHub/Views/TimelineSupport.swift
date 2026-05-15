@@ -52,21 +52,30 @@ struct TimelineLegData {
             grouped[key]?.append(leg)
         }
 
-        let dayStart = Calendar.current.startOfDay(for: now)
-
         return order.map { key in
+            let sectionLegs = grouped[key] ?? []
+            // INV-001: isPast uses UTC source of truth.
+            // Use the latest UTC arrival (or departure) across legs in this section.
+            let latestUTC = sectionLegs.compactMap {
+                LegConnectionTextBuilder.parseUTC($0.arrUTC)
+                    ?? LegConnectionTextBuilder.parseUTC($0.depUTC)
+            }.max()
+
             let isPast: Bool
-            if let day = SharedDateFormatters.localDayInput.date(from: key) {
-                isPast = day < dayStart
+            if let latestUTC {
+                isPast = latestUTC < now
             } else {
-                isPast = false
+                // Fallback when UTC is missing: compare day key as local midnight.
+                // Calendar is created with explicit gregorian identifier per INV-002.
+                let dayStart = Calendar(identifier: .gregorian).startOfDay(for: now)
+                isPast = SharedDateFormatters.localDayInput.date(from: key).map { $0 < dayStart } ?? false
             }
 
             return TimelineDaySection(
                 id: key,
                 label: ScheduleDateText.dayHeaderLabel(from: key),
                 isPast: isPast,
-                legs: grouped[key] ?? []
+                legs: sectionLegs
             )
         }
     }

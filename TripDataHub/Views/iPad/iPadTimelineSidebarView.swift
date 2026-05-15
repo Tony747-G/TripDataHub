@@ -6,6 +6,8 @@ struct IPadTimelineSidebarView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var tripDataByTripID: [String: IPadTripDataCardInfo] = [:]
     @State private var deleteTripConfirmPairing: String? = nil
+    @State private var friendScheduleMatches: FriendScheduleMatches = .empty
+    @State private var friendMatchAlert: (title: String, message: String)? = nil
 
     private var dateHeaderTextColor: Color {
         ScheduleColors.timelineDateHeaderText(for: colorScheme)
@@ -140,6 +142,8 @@ struct IPadTimelineSidebarView: View {
                                     let isSelected = selectedTripID == tripID
 
                                     let isHighlighted = deleteTripConfirmPairing == leg.pairing
+                                    let flightMatches = friendScheduleMatches.flightMatchesByLegID[leg.id] ?? []
+                                    let hasFlightMatch = !flightMatches.isEmpty
                                     Group {
                                         Button {
                                             selectedTripID = selectedTripID == tripID ? nil : tripID
@@ -153,7 +157,15 @@ struct IPadTimelineSidebarView: View {
                                                     from: leg.depLocal,
                                                     to: leg.arrLocal
                                                 ),
-                                                blockText: blockText(for: leg)
+                                                blockText: blockText(for: leg),
+                                                iconColor: hasFlightMatch ? friendMatchAmber : .primary,
+                                                onIconTap: hasFlightMatch ? {
+                                                    let lines = flightMatches.map { "GEMS \($0.friendGEMSID): \($0.departureAirport)-\($0.arrivalAirport)" }
+                                                    friendMatchAlert = (
+                                                        title: "Friends on \(leg.flight)",
+                                                        message: lines.joined(separator: "\n")
+                                                    )
+                                                } : nil
                                             )
                                         }
                                         .buttonStyle(.plain)
@@ -174,8 +186,10 @@ struct IPadTimelineSidebarView: View {
                                         if shouldShowLayover(leg: leg) {
                                             let station = leg.layoverStation ?? leg.arrAirport
                                             let hotel = leg.layoverHotelName
-                                                ?? tripDataByTripID[Self.fileKey(for: leg)]?.hotelByStation[Self.normalizedStationKey(station)]
+                                                ?? tripDataByTripID[tripDataKey(for: leg)]?.hotelByStation[Self.normalizedStationKey(station)]
                                                 ?? ""
+                                            let restOverlaps = friendScheduleMatches.restOverlapsByArrivalLegID[leg.id] ?? []
+                                            let hasRestOverlap = !restOverlaps.isEmpty
                                             TimelineView(.periodic(from: Date(), by: 60)) { context in
                                                 TimelineLayoverCard(
                                                     station: station,
@@ -195,7 +209,15 @@ struct IPadTimelineSidebarView: View {
                                                         arrDate: LegConnectionTextBuilder.parseUTC(leg.arrUTC),
                                                         nextLeg: legData.nextLegByID[leg.id]
                                                     ),
-                                                    fontScale: timelineFontScale
+                                                    fontScale: timelineFontScale,
+                                                    iconColor: hasRestOverlap ? friendMatchAmber : .primary,
+                                                    onIconTap: hasRestOverlap ? {
+                                                        let lines = restOverlaps.map { "GEMS \($0.friendGEMSID) at \($0.station)" }
+                                                        friendMatchAlert = (
+                                                            title: "Friends at \(station)",
+                                                            message: lines.joined(separator: "\n")
+                                                        )
+                                                    } : nil
                                                 )
                                                 .background(isHighlighted ? Color.red.opacity(0.10) : (isSelected ? Color.accentColor.opacity(0.12) : Color.clear))
                                                 .overlay(alignment: .leading) {
@@ -240,16 +262,18 @@ struct IPadTimelineSidebarView: View {
                         withAnimation { proxy.scrollTo(firstRowID, anchor: .center) }
                     }
                 }
-                // Scroll the next upcoming leg (or in-progress leg) to the top
-                // when the sidebar appears. Without this, the sidebar shows the
-                // oldest legs at top, requiring the user to scroll to find what
-                // is actually upcoming.
+                // On appear: if a trip is already selected (portrait sheet opened
+                // from a calendar tap), scroll to that trip first. Otherwise fall
+                // back to the next upcoming event.
                 .task {
-                    // Immediate + retry to handle LazyVStack lazy rendering.
-                    if let rowID = nextScrollTargetID() { proxy.scrollTo(rowID, anchor: .top) }
+                    let initialTarget: String? = selectedTripID.flatMap { firstRowID(for: $0) }
+                        ?? nextScrollTargetID()
+                    if let rowID = initialTarget { proxy.scrollTo(rowID, anchor: .top) }
                     for delay in [100_000_000, 200_000_000, 400_000_000] as [UInt64] {
                         try? await Task.sleep(nanoseconds: delay)
-                        if let rowID = nextScrollTargetID() {
+                        let target = selectedTripID.flatMap { firstRowID(for: $0) }
+                            ?? nextScrollTargetID()
+                        if let rowID = target {
                             withAnimation(.easeInOut(duration: 0.25)) {
                                 proxy.scrollTo(rowID, anchor: .top)
                             }
@@ -279,8 +303,25 @@ struct IPadTimelineSidebarView: View {
             }
         }
         .background(Color(.systemBackground))
-        .onAppear { refreshTripDataCards() }
-        .onChange(of: viewModel.crewAccessSchedules) { _, _ in refreshTripDataCards() }
+        .onAppear {
+            refreshTripDataCards()
+            refreshFriendScheduleMatches()
+        }
+        .onChange(of: viewModel.crewAccessSchedules) { _, _ in
+            refreshTripDataCards()
+            refreshFriendScheduleMatches()
+        }
+        .onChange(of: viewModel.friendConnections) { _, _ in
+            refreshFriendScheduleMatches()
+        }
+        .alert(friendMatchAlert?.title ?? "", isPresented: Binding(
+            get: { friendMatchAlert != nil },
+            set: { if !$0 { friendMatchAlert = nil } }
+        )) {
+            Button("OK") { friendMatchAlert = nil }
+        } message: {
+            Text(friendMatchAlert?.message ?? "")
+        }
         .confirmationDialog(
             deleteTripConfirmPairing.map { "Delete Trip \($0)?" } ?? "Delete Trip?",
             isPresented: Binding(
@@ -474,6 +515,17 @@ struct IPadTimelineSidebarView: View {
     /// Lookup key matching the file format `{depLocalDate}_{pairing}` (upper-cased).
     /// Aligns tripDataByTripID lookups with the payPeriod|pairing granularity of
     /// the calendar selection key.
+    /// Returns the tripDataByTripID lookup key for a given leg.
+    /// Uses the FIRST leg of the same trip so cross-day layover legs (whose
+    /// depLocal differs from the trip's first-leg date) still resolve correctly.
+    private func tripDataKey(for leg: TripLeg) -> String {
+        let firstLeg = legData.allLegs
+            .filter { $0.pairing == leg.pairing && $0.payPeriod == leg.payPeriod }
+            .min { ($0.depUTC ?? $0.depLocal) < ($1.depUTC ?? $1.depLocal) }
+            ?? leg
+        return Self.fileKey(for: firstLeg)
+    }
+
     private static func fileKey(for leg: TripLeg) -> String {
         let datePrefix = String(leg.depLocal.prefix(10))
         return "\(datePrefix)_\(leg.pairing)".uppercased()
@@ -549,13 +601,26 @@ struct IPadTimelineSidebarView: View {
                 nextLeg: legData.nextLegByID[leg.id]
             )
         }
-        guard let reference = LegConnectionTextBuilder.parseUTC(leg.arrUTC)
+        // INV-001: UTC preferred. Local time used as fallback only when UTC is absent.
+        let reference = LegConnectionTextBuilder.parseUTC(leg.arrUTC)
+            ?? Self.parseLocalDateTime(leg.arrLocal)
             ?? LegConnectionTextBuilder.parseUTC(leg.depUTC)
-        else {
-            return false
-        }
-        return reference < Date()
+            ?? Self.parseLocalDateTime(leg.depLocal)
+        return reference.map { $0 < Date() } ?? false
     }
+
+    private static func parseLocalDateTime(_ text: String) -> Date? {
+        localDateTimeFormatter.date(from: text)
+    }
+
+    private static let localDateTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current  // best-effort fallback; UTC preferred via isPastLeg
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f
+    }()
 
     private func firstRowID(for tripID: String) -> String? {
         for section in legData.daySections {
@@ -573,6 +638,21 @@ struct IPadTimelineSidebarView: View {
                 tripDataByTripID = result
             }
         }
+    }
+
+    private func refreshFriendScheduleMatches() {
+        let mySchedules = sidebarSchedules
+        let friendSchedules = viewModel.acceptedFriendConnections.map {
+            (gemsID: $0.employeeID, schedules: $0.sharedSchedules)
+        }
+        friendScheduleMatches = FriendScheduleMatchDetector.detect(
+            mySchedules: mySchedules,
+            friendSchedules: friendSchedules
+        )
+    }
+
+    private var friendMatchAmber: Color {
+        Color(red: 0.95, green: 0.58, blue: 0.12)
     }
 
     private nonisolated static func loadTripDataFromCrewAccessImports() -> [String: IPadTripDataCardInfo] {

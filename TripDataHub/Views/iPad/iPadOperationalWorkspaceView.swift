@@ -5,7 +5,6 @@ import SwiftUI
 private enum IPadSidebarContent {
     case ownTimeline
     case openTime
-    case friendTimeline(friendID: UUID)
 }
 
 // MARK: - Main workspace
@@ -21,30 +20,39 @@ struct IPadOperationalWorkspaceView: View {
 
     @State private var selectedTripID: String?
     @State private var selectedBidPeriodID: String?
-    @State private var isFriendsOverlayEnabled = false
     @State private var sidebarContent: IPadSidebarContent = .ownTimeline
     @State private var menuExpanded = false
     @State private var showingFriends = false
     @State private var showingBrowser = false
     @State private var showingSettings = false
-    @State private var friendForSidebar: FriendConnection?
+    /// ポートレート時にトリップバータップで表示するシートのトリップID
+    @State private var portraitTripSheetID: String? = nil
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             // Main split layout
             GeometryReader { geo in
+                let isPortrait = geo.size.height > geo.size.width
                 let sidebarWidth = geo.size.width * 0.30
-                HStack(spacing: 0) {
-                    sidebarView
-                        .frame(width: sidebarWidth)
-                        .clipped()
-                    Divider()
+                if isPortrait {
+                    // ポートレート: カレンダーのみ全幅、トリップバータップでシート
                     IPadBidPeriodCalendarView(
-                        selectedTripID: $selectedTripID,
-                        selectedBidPeriodID: $selectedBidPeriodID,
-                        isFriendsOverlayEnabled: $isFriendsOverlayEnabled
+                        selectedTripID: $portraitTripSheetID,
+                        selectedBidPeriodID: $selectedBidPeriodID
                     )
-                    .frame(width: geo.size.width - sidebarWidth - 1)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    HStack(spacing: 0) {
+                        sidebarView
+                            .frame(width: sidebarWidth)
+                            .clipped()
+                        Divider()
+                        IPadBidPeriodCalendarView(
+                            selectedTripID: $selectedTripID,
+                            selectedBidPeriodID: $selectedBidPeriodID
+                        )
+                        .frame(width: geo.size.width - sidebarWidth - 1)
+                    }
                 }
             }
 
@@ -75,14 +83,22 @@ struct IPadOperationalWorkspaceView: View {
                 Task { await viewModel.syncFriendCloudKit(reason: "ipad workspace active") }
             }
         }
-        .onChange(of: friendForSidebar?.id) { _, friendID in
-            if let friendID {
-                sidebarContent = .friendTimeline(friendID: friendID)
-                friendForSidebar = nil
+        .sheet(isPresented: Binding(
+            get: { portraitTripSheetID != nil },
+            set: { if !$0 { portraitTripSheetID = nil } }
+        )) {
+            NavigationStack {
+                IPadTimelineSidebarView(selectedTripID: $portraitTripSheetID)
+                    .environmentObject(viewModel)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { portraitTripSheetID = nil }
+                        }
+                    }
             }
         }
         .sheet(isPresented: $showingFriends) {
-            IPadFriendsSheet(friendForSidebar: $friendForSidebar)
+            IPadFriendsSheet()
                 .environmentObject(viewModel)
         }
         .sheet(isPresented: $showingBrowser) {
@@ -118,15 +134,6 @@ struct IPadOperationalWorkspaceView: View {
             IPadTimelineSidebarView(selectedTripID: $selectedTripID)
         case .openTime:
             OpenTimeTabView(sidebarMode: true)
-        case .friendTimeline(let friendID):
-            if let friend = viewModel.acceptedFriendConnections.first(where: { $0.id == friendID }) {
-                IPadFriendTimelineSidebarView(
-                    friend: friend,
-                    selectedTripID: $selectedTripID,
-                    onBack: { sidebarContent = .ownTimeline }
-                )
-                .environmentObject(viewModel)
-            }
         }
     }
 
@@ -235,51 +242,10 @@ struct IPadOperationalWorkspaceView: View {
     }
 }
 
-// MARK: - Friend timeline sidebar
-
-private struct IPadFriendTimelineSidebarView: View {
-    let friend: FriendConnection
-    @Binding var selectedTripID: String?
-    let onBack: () -> Void
-    @EnvironmentObject private var viewModel: AppViewModel
-
-    var body: some View {
-        VStack(spacing: 0) {
-            // Header with back button
-            HStack(spacing: 8) {
-                Button(action: onBack) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 13, weight: .semibold))
-                }
-                .foregroundStyle(Color.accentColor)
-                Text(friend.displayName)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            .frame(height: 44)
-            .background(Color(.secondarySystemBackground))
-            .overlay(alignment: .bottom) { Divider() }
-
-            ScheduleTimelineRendererView(
-                schedules: friend.sharedSchedules,
-                emptyStateMessage: "No shared timeline for \(friend.employeeID)."
-            )
-            .task {
-                await viewModel.syncFriendCloudKit(reason: "ipad friend timeline opened")
-            }
-        }
-        .background(Color(.systemBackground))
-    }
-}
-
 // MARK: - Friends sheet
 
 private struct IPadFriendsSheet: View {
     @EnvironmentObject private var viewModel: AppViewModel
-    @Binding var friendForSidebar: FriendConnection?
     @Environment(\.dismiss) private var dismiss
     @State private var editingFriend: FriendConnection?
     @State private var nicknameInput = ""
@@ -287,46 +253,6 @@ private struct IPadFriendsSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                // View in sidebar section — only for accepted friends
-                if !viewModel.acceptedFriendConnections.isEmpty {
-                    Section("View in Sidebar") {
-                        ForEach(viewModel.acceptedFriendConnections, id: \.id) { friend in
-                            Button {
-                                friendForSidebar = friend
-                                dismiss()
-                            } label: {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        if let nickname = friend.nickname,
-                                           !nickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                            Text("\(nickname)  (\(friend.employeeID))")
-                                                .font(.headline)
-                                                .foregroundStyle(.primary)
-                                        } else {
-                                            Text(friend.employeeID)
-                                                .font(.headline)
-                                                .foregroundStyle(.primary)
-                                        }
-                                        Text("View their timeline in sidebar")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "sidebar.left")
-                                        .foregroundStyle(Color.accentColor)
-                                }
-                            }
-                            .simultaneousGesture(
-                                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                                    editingFriend = friend
-                                    nicknameInput = friend.nickname ?? ""
-                                }
-                            )
-                        }
-                    }
-                }
-
-                // Full friends management
                 FriendsManagementSection()
             }
             .navigationTitle("Friends")
@@ -364,7 +290,7 @@ private struct FriendsManagementSection: View {
     @State private var employeeIDInput = ""
 
     var body: some View {
-        Section("Friends") {
+        Section("View Friend's Schedule") {
             if viewModel.acceptedFriendConnections.isEmpty {
                 Text("No friends yet.")
                     .font(.footnote)

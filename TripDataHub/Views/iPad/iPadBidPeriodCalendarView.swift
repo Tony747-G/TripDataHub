@@ -6,7 +6,6 @@ struct IPadBidPeriodCalendarView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @Binding var selectedTripID: String?
     @Binding var selectedBidPeriodID: String?
-    @Binding var isFriendsOverlayEnabled: Bool
 
     @State private var currentBidPeriod: CalendarBidPeriod? = nil
     @State private var headerBidPeriod: CalendarBidPeriod? = nil
@@ -128,20 +127,6 @@ struct IPadBidPeriodCalendarView: View {
             .lineLimit(1)
 
             Spacer()
-
-            if hasFriendsForOverlay {
-                Button {
-                    isFriendsOverlayEnabled.toggle()
-                } label: {
-                    Label(
-                        isFriendsOverlayEnabled ? "Friends On" : "Friends",
-                        systemImage: isFriendsOverlayEnabled ? "person.2.fill" : "person.2"
-                    )
-                    .font(.system(size: 12))
-                }
-                .buttonStyle(.bordered)
-                .tint(isFriendsOverlayEnabled ? .accentColor : .secondary)
-            }
 
             HStack(spacing: 6) {
                 Button {
@@ -423,10 +408,6 @@ struct IPadBidPeriodCalendarView: View {
         return next.id
     }
 
-    private var hasFriendsForOverlay: Bool {
-        viewModel.friendConnections.contains { $0.status == .accepted }
-    }
-
     private func loadBidPeriod(for date: Date) {
         currentBidPeriod = bidPeriod(for: date, domicile: domicile)
         headerBidPeriod = currentBidPeriod
@@ -667,8 +648,7 @@ private struct CalendarDayCell: View {
 #Preview {
     IPadBidPeriodCalendarView(
         selectedTripID: .constant(nil),
-        selectedBidPeriodID: .constant(nil),
-        isFriendsOverlayEnabled: .constant(false)
+        selectedBidPeriodID: .constant(nil)
     )
     .environmentObject(AppViewModel.shared)
     .frame(height: 600)
