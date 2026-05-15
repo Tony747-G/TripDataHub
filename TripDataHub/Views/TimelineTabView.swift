@@ -21,6 +21,11 @@ struct TimelineTabView: View {
     @State private var friendMatchAlert: FriendMatchAlert?
     @State private var friendScheduleMatches: FriendScheduleMatches = .empty
     @State private var deleteTripConfirmPairing: String? = nil
+    // Caches updated in refreshLegData() — avoids recomputing expensive values on every body eval.
+    @State private var cachedReportWindows: [NextReportTripWindow] = []
+    @State private var cachedDaySections: [TimelineDaySection] = []
+    @State private var cachedTripBoundaryAfterLegIDs: Set<UUID> = []
+    @State private var cachedTripStartLegByBoundaryLegID: [UUID: TripLeg] = [:]
     private static let nextReportTimestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -170,10 +175,10 @@ struct TimelineTabView: View {
     private var timelineContent: some View {
         ScrollViewReader { proxy in
             let connectionMap = legData.nextLegByID
-            let tripBoundaryAfterLegs = tripBoundaryAfterLegIDs
-            let tripStartLegAfterBoundary = tripStartLegByBoundaryLegID
+            let tripBoundaryAfterLegs = cachedTripBoundaryAfterLegIDs
+            let tripStartLegAfterBoundary = cachedTripStartLegByBoundaryLegID
             ScrollView {
-                if daySections.isEmpty {
+                if cachedDaySections.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(emptyStateTitle)
                             .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
@@ -193,7 +198,7 @@ struct TimelineTabView: View {
                     .padding(.top, 20)
                 } else {
                     LazyVStack(spacing: 0) {
-                        ForEach(daySections) { section in
+                        ForEach(cachedDaySections) { section in
                             Text(section.label)
                                 .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
                                 .foregroundStyle(section.isPast ? .gray : dateHeaderTextColor)
@@ -532,7 +537,7 @@ struct TimelineTabView: View {
         guard let targetLeg = currentOrNextLeg else { return nil }
 
         // 3. そのレグがTrip先頭でTripDataカードがある場合はそちらへ
-        let tripStartMap = tripStartLegByBoundaryLegID
+        let tripStartMap = cachedTripStartLegByBoundaryLegID
         if let (boundaryLegID, _) = tripStartMap.first(where: { $0.value.id == targetLeg.id }) {
             return tripDataScrollID(boundaryLegID)
         }
@@ -541,43 +546,29 @@ struct TimelineTabView: View {
         return "\(targetLeg.id.uuidString)|\(selectedClockDisplay.rawValue)"
     }
 
+    /// Lightweight: selects from pre-built cachedReportWindows using current time.
     private var nextReportInfo: NextReportInfo? {
         let nowANC = nowInAnchorage()
-        let windows = tripWindows.sorted { $0.reportTime < $1.reportTime }
-
-        for window in windows {
+        for window in cachedReportWindows {
             if nowANC < window.reportTime {
-                return NextReportInfo(
-                    pairing: window.pairing,
-                    reportTime: window.reportTime
-                )
+                return NextReportInfo(pairing: window.pairing, reportTime: window.reportTime)
             }
-
             if nowANC >= window.reportTime && nowANC < window.tripEndANC {
                 return nil
             }
         }
-
         return nil
     }
 
     private var hasActiveTripWindow: Bool {
         let nowANC = nowInAnchorage()
-        return tripWindows.contains { window in
+        return cachedReportWindows.contains { window in
             nowANC >= window.reportTime && nowANC < window.tripEndANC
         }
     }
 
     private var shouldShowNextReportCardOnTop: Bool {
         nextReportInfo != nil && !hasActiveTripWindow
-    }
-
-    private var tripWindows: [NextReportTripWindow] {
-        NextReportWindowBuilder.build(schedules: currentTimelineSchedules, anchorageTimeZone: anchorageTimeZone)
-    }
-
-    private var daySections: [TimelineDaySection] {
-        buildDisplayDaySections(from: allLegs)
     }
 
     private func refreshFriendScheduleMatches() {
@@ -591,21 +582,34 @@ struct TimelineTabView: View {
     }
 
     private func refreshLegData() {
-        legData = TimelineLegData(schedules: currentTimelineSchedules)
-        NSLog("[Timeline] schedules=%d legs=%d", currentTimelineSchedules.count, legData.allLegs.count)
-        let deviceTZ = TimeZone.current.identifier
-        for leg in legData.allLegs {
-            NSLog(
-                "[Timeline] leg pairing=%@ leg=%d depUTC=%@ depLocal=%@ arrUTC=%@ arrLocal=%@ deviceTZ=%@",
-                leg.pairing,
-                leg.leg,
-                leg.depUTC ?? "nil",
-                leg.depLocal,
-                leg.arrUTC ?? "nil",
-                leg.arrLocal,
-                deviceTZ
-            )
+        let schedules = currentTimelineSchedules
+        let data = TimelineLegData(schedules: schedules)
+        legData = data
+
+        // Cache report windows (expensive build, runs once per schedule change).
+        cachedReportWindows = NextReportWindowBuilder.build(
+            schedules: schedules,
+            anchorageTimeZone: anchorageTimeZone
+        ).sorted { $0.reportTime < $1.reportTime }
+
+        // Cache day sections (depends on selectedClockDisplay via dayKey).
+        cachedDaySections = buildDisplayDaySections(from: data.allLegs, nextLegByID: data.nextLegByID)
+
+        // Cache trip boundaries in one pass over allLegs.
+        let legs = data.allLegs
+        var boundaryIDs = Set<UUID>()
+        var startMap = [UUID: TripLeg]()
+        if legs.count > 1 {
+            for i in 1..<legs.count {
+                let prev = legs[i - 1]; let next = legs[i]
+                if isTripBoundary(current: prev, next: next) {
+                    boundaryIDs.insert(prev.id)
+                    startMap[prev.id] = next
+                }
+            }
         }
+        cachedTripBoundaryAfterLegIDs = boundaryIDs
+        cachedTripStartLegByBoundaryLegID = startMap
     }
 
     private func refreshTripDataCards() {
@@ -614,6 +618,12 @@ struct TimelineTabView: View {
             await MainActor.run {
                 tripDataByTripID = result.summaryByTripID
                 importedUTCTimesByTripAndSequence = result.utcByTripAndSequence
+                // dayKey(for:) uses importedUTCTimesByTripAndSequence — re-cache sections
+                // now that UTC import times are available.
+                cachedDaySections = buildDisplayDaySections(
+                    from: legData.allLegs,
+                    nextLegByID: legData.nextLegByID
+                )
             }
         }
     }
@@ -623,7 +633,7 @@ struct TimelineTabView: View {
     }
 
     private var focusScrollContextKey: String {
-        let dayIDs = daySections.map(\.id).joined(separator: "|")
+        let dayIDs = cachedDaySections.map(\.id).joined(separator: "|")
         let focusKey = focusScrollID ?? "none"
         return "\(selectedClockDisplay.rawValue)|\(focusKey)|\(dayIDs)|\(scrollTrigger)"
     }
@@ -794,7 +804,10 @@ struct TimelineTabView: View {
         return Color(red: 0.16, green: 0.16, blue: 0.18)
     }
 
-    private func buildDisplayDaySections(from legs: [TripLeg]) -> [TimelineDaySection] {
+    private func buildDisplayDaySections(
+        from legs: [TripLeg],
+        nextLegByID: [UUID: TripLeg]
+    ) -> [TimelineDaySection] {
         var order: [String] = []
         var grouped: [String: [TripLeg]] = [:]
         for leg in legs {
@@ -806,11 +819,10 @@ struct TimelineTabView: View {
             grouped[key]?.append(leg)
         }
 
-        let legData = TimelineLegData(schedules: viewModel.crewAccessSchedules)
         return order.map { key in
             let sectionLegs = grouped[key] ?? []
             let isPast = !sectionLegs.isEmpty && sectionLegs.allSatisfy {
-                isPastLeg($0, nextLeg: legData.nextLegByID[$0.id])
+                isPastLeg($0, nextLeg: nextLegByID[$0.id])
             }
             return TimelineDaySection(
                 id: key,
@@ -937,32 +949,6 @@ struct TimelineTabView: View {
         if current.payPeriod != next.payPeriod { return true }
         if current.pairing != next.pairing { return true }
         return false
-    }
-
-    private var tripBoundaryAfterLegIDs: Set<UUID> {
-        let legs = allLegs
-        guard legs.count > 1 else { return [] }
-        var ids: Set<UUID> = []
-        for index in 1..<legs.count {
-            if isTripBoundary(current: legs[index - 1], next: legs[index]) {
-                ids.insert(legs[index - 1].id)
-            }
-        }
-        return ids
-    }
-
-    private var tripStartLegByBoundaryLegID: [UUID: TripLeg] {
-        let legs = allLegs
-        guard legs.count > 1 else { return [:] }
-        var map: [UUID: TripLeg] = [:]
-        for index in 1..<legs.count {
-            let previous = legs[index - 1]
-            let next = legs[index]
-            if isTripBoundary(current: previous, next: next) {
-                map[previous.id] = next
-            }
-        }
-        return map
     }
 
     @ViewBuilder
