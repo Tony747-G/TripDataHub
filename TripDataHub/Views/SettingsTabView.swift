@@ -175,6 +175,8 @@ struct SettingsTabView: View {
             )
 
             logTenExportSection
+
+            SettingsSupportSection()
         }
         .scrollDismissesKeyboard(.interactively)
     }

@@ -284,6 +284,34 @@ struct SettingsNotificationSection: View {
     }
 }
 
+struct SettingsSupportSection: View {
+    @Environment(\.openURL) private var openURL
+
+    private let supportURL = URL(string: "https://buymeacoffee.com/tripdatahub")
+
+    var body: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("TripDataHub is independently developed and maintained.")
+
+                Text("If you find the app useful and would like to support ongoing development, testing, and infrastructure costs, you can support the project here.")
+
+                Text("This is optional and does not unlock any additional features.")
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+
+            Button("Support on Buy Me a Coffee") {
+                guard let supportURL else { return }
+                openURL(supportURL)
+            }
+            .accessibilityIdentifier("settings.supportTripDataHub.buyMeACoffee")
+        } header: {
+            sectionHeader("Support TripDataHub")
+        }
+    }
+}
+
 private func sectionHeader(_ title: String) -> some View {
     Text(title)
         .font(.subheadline.weight(.semibold))

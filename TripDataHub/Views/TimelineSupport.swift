@@ -153,6 +153,22 @@ struct TimelineLegData {
 
 // MARK: - Shared rendering helpers
 
+enum TimelinePastStateSupport {
+    static func isPastFlightRow(
+        arrivalUTC: Date?,
+        departureUTC: Date?,
+        fallbackArrival: Date? = nil,
+        fallbackDeparture: Date? = nil,
+        now: Date = Date()
+    ) -> Bool {
+        let reference = arrivalUTC
+            ?? fallbackArrival
+            ?? departureUTC
+            ?? fallbackDeparture
+        return reference.map { $0 < now } ?? false
+    }
+}
+
 /// Icon rendering helpers shared by TimelineTabView and ScheduleTimelineRendererView.
 enum TimelineLegIconSupport {
     static func codePoint(for status: String) -> Int {

@@ -70,7 +70,7 @@ struct ScheduleTimelineRendererView: View {
     private func legRow(leg: TripLeg, nextLegByID: [UUID: TripLeg]) -> some View {
         TimelineFlightRow(
             leg: leg,
-            isPast: isPastLeg(leg, nextLeg: nextLegByID[leg.id]),
+            isPast: isPastFlightRow(leg),
             fontScale: fontScale,
             timeRangeText: timeRangeText(for: leg),
             dayDiff: dayShift(for: leg),
@@ -174,6 +174,15 @@ struct ScheduleTimelineRendererView: View {
             ?? parseLocalDateTime(leg.depLocal)
         guard let reference else { return false }
         return reference < Date()
+    }
+
+    private func isPastFlightRow(_ leg: TripLeg) -> Bool {
+        TimelinePastStateSupport.isPastFlightRow(
+            arrivalUTC: utcArrivalDate(for: leg),
+            departureUTC: utcDepartureDate(for: leg),
+            fallbackArrival: parseLocalDateTime(leg.arrLocal),
+            fallbackDeparture: parseLocalDateTime(leg.depLocal)
+        )
     }
 
     private func utcDepartureDate(for leg: TripLeg) -> Date? {

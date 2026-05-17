@@ -332,7 +332,7 @@ struct TimelineTabView: View {
         let hasFlightMatch = !flightMatches.isEmpty
         return TimelineFlightRow(
             leg: leg,
-            isPast: isPastLeg(leg, nextLeg: nextLegByID[leg.id]),
+            isPast: isPastFlightRow(leg),
             fontScale: fontScale,
             timeRangeText: timeRangeText(for: leg),
             dayDiff: dayShift(for: leg),
@@ -773,6 +773,15 @@ struct TimelineTabView: View {
             ?? parseLocalDateTime(leg.depLocal)
         guard let reference else { return false }
         return reference < Date()
+    }
+
+    private func isPastFlightRow(_ leg: TripLeg) -> Bool {
+        TimelinePastStateSupport.isPastFlightRow(
+            arrivalUTC: utcArrivalDate(for: leg),
+            departureUTC: utcDepartureDate(for: leg),
+            fallbackArrival: parseLocalDateTime(leg.arrLocal),
+            fallbackDeparture: parseLocalDateTime(leg.depLocal)
+        )
     }
 
     private func isPastTrip(_ tripID: String) -> Bool {

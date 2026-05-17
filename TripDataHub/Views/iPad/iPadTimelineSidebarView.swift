@@ -64,8 +64,11 @@ struct IPadTimelineSidebarView: View {
     private var nextReportInfo: (reportTime: Date, tripLabel: String)? {
         let now = Date()
         for window in cachedReportWindows {
-            if now < window.reportTime || (now >= window.reportTime && now < window.tripEndANC) {
+            if now < window.reportTime {
                 return (window.reportTime, window.pairing)
+            }
+            if now >= window.reportTime && now < window.tripEndANC {
+                return nil
             }
         }
         return nil
@@ -131,7 +134,7 @@ struct IPadTimelineSidebarView: View {
                                         } label: {
                                             TimelineFlightRow(
                                                 leg: leg,
-                                                isPast: isPastLeg(leg),
+                                                isPast: isPastFlightRow(leg),
                                                 fontScale: timelineFontScale,
                                                 timeRangeText: timeRangeText(for: leg),
                                                 dayDiff: ScheduleDateText.dayShift(
@@ -580,6 +583,15 @@ struct IPadTimelineSidebarView: View {
             ?? LegConnectionTextBuilder.parseUTC(leg.depUTC)
             ?? Self.parseLocalDateTime(leg.depLocal)
         return reference.map { $0 < Date() } ?? false
+    }
+
+    private func isPastFlightRow(_ leg: TripLeg) -> Bool {
+        TimelinePastStateSupport.isPastFlightRow(
+            arrivalUTC: LegConnectionTextBuilder.parseUTC(leg.arrUTC),
+            departureUTC: LegConnectionTextBuilder.parseUTC(leg.depUTC),
+            fallbackArrival: Self.parseLocalDateTime(leg.arrLocal),
+            fallbackDeparture: Self.parseLocalDateTime(leg.depLocal)
+        )
     }
 
     private static func parseLocalDateTime(_ text: String) -> Date? {

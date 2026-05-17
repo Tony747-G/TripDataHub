@@ -648,6 +648,38 @@ final class CalendarGeometryTests: XCTestCase {
     }
 }
 
+final class TimelinePastStateSupportTests: XCTestCase {
+    private static let iso = ISO8601DateFormatter()
+
+    func test_flightRowIsPastAfterArrivalEvenDuringFollowingLayover() {
+        let departure = Self.iso.date(from: "2026-05-16T08:48:00Z")!
+        let arrival = Self.iso.date(from: "2026-05-16T18:12:00Z")!
+        let honoluluAfternoonAfterArrival = Self.iso.date(from: "2026-05-17T02:11:00Z")!
+
+        XCTAssertTrue(
+            TimelinePastStateSupport.isPastFlightRow(
+                arrivalUTC: arrival,
+                departureUTC: departure,
+                now: honoluluAfternoonAfterArrival
+            )
+        )
+    }
+
+    func test_flightRowIsNotPastBeforeArrival() {
+        let departure = Self.iso.date(from: "2026-05-16T08:48:00Z")!
+        let arrival = Self.iso.date(from: "2026-05-16T18:12:00Z")!
+        let beforeArrival = Self.iso.date(from: "2026-05-16T17:59:00Z")!
+
+        XCTAssertFalse(
+            TimelinePastStateSupport.isPastFlightRow(
+                arrivalUTC: arrival,
+                departureUTC: departure,
+                now: beforeArrival
+            )
+        )
+    }
+}
+
 private func schedule(
     id: String,
     label: String,
