@@ -63,7 +63,7 @@ struct OpenTimeTabView: View {
                 LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                     Color.clear.frame(height: 0).id(topAnchorID)
                     if ppSections.isEmpty {
-                        Text("No fetched data yet. Pull to refresh or tap Fetch in Settings.")
+                        Text(AppEnvironment.isAppStoreReviewMode ? AppEnvironment.tripBoardUnavailableMessage : "No fetched data yet. Pull to refresh or tap Fetch in Settings.")
                             .appScaledFont(.footnote, scale: effScale)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -149,7 +149,7 @@ struct OpenTimeTabView: View {
                             .id(topAnchorID)
 
                         if ppSections.isEmpty {
-                            Text("No fetched data yet. Pull to refresh or use Settings to fetch from TripBoard.")
+                            Text(AppEnvironment.isAppStoreReviewMode ? AppEnvironment.tripBoardUnavailableMessage : "No fetched data yet. Pull to refresh or use Settings to fetch from TripBoard.")
                                 .appScaledFont(.footnote, scale: fontScale)
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -265,6 +265,13 @@ struct OpenTimeTabView: View {
     }
 
     private func refreshOpenTime(using proxy: ScrollViewProxy) async {
+        if AppEnvironment.isAppStoreReviewMode {
+            await MainActor.run {
+                refreshMessage = AppEnvironment.tripBoardUnavailableMessage
+                refreshMessageIsError = false
+            }
+            return
+        }
         hideUpToDateTask?.cancel()
         hideUpToDateTask = nil
         hideLastFetchTask?.cancel()

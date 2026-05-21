@@ -51,6 +51,28 @@ final class CrewAccessParserRegressionTests: XCTestCase {
         }
     }
 
+    func test_appReviewSamplePDF_importsWithoutCrewIdentity() throws {
+        let service = CrewAccessPDFImportService()
+        let sampleURL = repositoryRootURL()
+            .appendingPathComponent("web")
+            .appendingPathComponent("sample")
+            .appendingPathComponent("TripDataHub_App_Review_Sample_A00001.pdf")
+        let data = try Data(contentsOf: sampleURL)
+        let draft = service.analyzeTrip(pdfData: data, sourceFileName: sampleURL.lastPathComponent)
+        XCTAssertTrue(draft.errors.isEmpty, "App Review sample errors: \(draft.errors.map(\.message).joined(separator: "; "))")
+
+        let payload = try XCTUnwrap(draft.jsonPayload)
+        XCTAssertEqual(payload.tripId, "A00001")
+        XCTAssertEqual(payload.crew.count, 0)
+        XCTAssertEqual(payload.items.count, 3)
+        XCTAssertEqual(payload.items.map(\.flight), ["1", "2", "5X3"])
+        XCTAssertEqual(payload.items.map(\.depAirport), ["ANC", "CVG", "HND"])
+        XCTAssertEqual(payload.items.map(\.arrAirport), ["CVG", "HND", "ANC"])
+        XCTAssertEqual(payload.items.map(\.deadhead), [false, false, true])
+        XCTAssertTrue(payload.hotelDetails.contains { $0.contains("Holiday Inn") })
+        XCTAssertTrue(payload.hotelDetails.contains { $0.contains("Tokyu Haneda") })
+    }
+
     private func parseDraft(pdfName: String, service: CrewAccessPDFImportService) throws -> CrewAccessImportDraft {
         let pdfURL = sampleTripURL(pdfName)
         let data = try Data(contentsOf: pdfURL)
@@ -83,11 +105,14 @@ final class CrewAccessParserRegressionTests: XCTestCase {
     }
 
     private func sampleTripURL(_ name: String) -> URL {
-        let testFile = URL(fileURLWithPath: #filePath)
-        return testFile
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+        repositoryRootURL()
             .appendingPathComponent("sample_trip")
             .appendingPathComponent(name)
+    }
+
+    private func repositoryRootURL() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
     }
 }

@@ -572,6 +572,10 @@ struct TimelineTabView: View {
     }
 
     private func refreshFriendScheduleMatches() {
+        guard !AppEnvironment.isAppStoreReviewMode else {
+            friendScheduleMatches = .empty
+            return
+        }
         let friendSchedules = viewModel.acceptedFriendConnections.map {
             (gemsID: $0.employeeID, schedules: $0.sharedSchedules)
         }

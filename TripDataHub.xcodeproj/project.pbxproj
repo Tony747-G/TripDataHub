@@ -10,6 +10,7 @@
 		014924D1545F5ED7E32BA50D /* NextReportWindowBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC24A3084F1CB77216493907 /* NextReportWindowBuilder.swift */; };
 		060126BA99293293402CEC00 /* ViewShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FDA7EA4639BB0121DD6B803 /* ViewShared.swift */; };
 		0E0B9373BE80E5F6829F98D6 /* ScheduleCacheService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E5301B208661C3E2632FC7 /* ScheduleCacheService.swift */; };
+		0F4A1B2C3D4E5F60718293A4 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F4A1B2C3D4E5F60718293A3 /* AppEnvironment.swift */; };
 		118967E43FF2203DAB98B97C /* TripBoardAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42BF7C6110CAC60779B38CC7 /* TripBoardAuthService.swift */; };
 		1413F694AAE3B23F47C3C436 /* FlightCountdownSharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58C18FF3A67E7E968B09F58E /* FlightCountdownSharedModels.swift */; };
 		27B924E6CA6484B9156032EC /* FlightCountdownCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F6C86491D2E927C2CEC60D5 /* FlightCountdownCoordinator.swift */; };
@@ -97,6 +98,7 @@
 		0280B0ED64CBF38F6C06B873 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		0A05C7A4B4AE482294FEBB55 /* RosterParsingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RosterParsingModels.swift; sourceTree = "<group>"; };
 		0AF942899EBB7E90814E4995 /* CrewAccessPDFImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessPDFImportService.swift; sourceTree = "<group>"; };
+		0F4A1B2C3D4E5F60718293A3 /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
 		104E08AA2FAACD1200A732BF /* TripDataHubRelease.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TripDataHubRelease.entitlements; sourceTree = "<group>"; };
 		13F6EFC17A823450FE7E3210 /* TripDataHubTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TripDataHubTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1BC23D4E5F60718293A4B5C6 /* TripDataHubUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TripDataHubUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -268,6 +270,7 @@
 		AEF8401FA9AEE5505B4A6FA5 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				0F4A1B2C3D4E5F60718293A3 /* AppEnvironment.swift */,
 				9B6FCCCA54583B5E8D70721D /* BidPeriodService.swift */,
 				0AF942899EBB7E90814E4995 /* CrewAccessPDFImportService.swift */,
 				51A7C9D1E2F3456789ABD006 /* DomicileSupport.swift */,
@@ -501,6 +504,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				7DCBF996FF525485AECDAF4C /* AdminSections.swift in Sources */,
+				0F4A1B2C3D4E5F60718293A4 /* AppEnvironment.swift in Sources */,
 				5BF750A9EB06E31DED48688D /* AdminTabView.swift in Sources */,
 				F4130D36B01FE4896582FC2F /* AppViewModel+PreviewData.swift in Sources */,
 				DEA186B6F8256B4A0B01C291 /* AppViewModel.swift in Sources */,

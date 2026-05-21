@@ -493,6 +493,7 @@ final class AppViewModel: ObservableObject {
     }
 
     var isIdentityVerified: Bool {
+        if AppEnvironment.isAppStoreReviewMode { return true }
         guard let verifiedIdentity else { return false }
         guard let currentCloudKitRecordName else { return false }
         return verifiedIdentity.cloudKitRecordName == currentCloudKitRecordName
@@ -565,6 +566,10 @@ final class AppViewModel: ObservableObject {
     }
 
     func submitFriendRequest(employeeID rawEmployeeID: String) async {
+        guard !AppEnvironment.isAppStoreReviewMode else {
+            friendActionMessage = "Schedule sharing is unavailable in Demo Mode."
+            return
+        }
         guard isIdentityVerified else {
             friendActionMessage = "Verify your identity first (GEMS ID + DOB)."
             return
@@ -623,6 +628,10 @@ final class AppViewModel: ObservableObject {
     }
 
     func cancelPendingFriendRequest(_ id: UUID) async {
+        guard !AppEnvironment.isAppStoreReviewMode else {
+            friendActionMessage = "Schedule sharing is unavailable in Demo Mode."
+            return
+        }
         guard let index = friendConnections.firstIndex(where: { $0.id == id }) else { return }
         let connection = friendConnections[index]
         guard connection.status == .pending else { return }
@@ -665,6 +674,12 @@ final class AppViewModel: ObservableObject {
     }
 
     func setScheduleSharingEnabled(_ enabled: Bool) {
+        guard !AppEnvironment.isAppStoreReviewMode else {
+            isScheduleSharingEnabled = false
+            UserDefaults.standard.set(false, forKey: scheduleSharingEnabledKey)
+            friendCloudKitSyncMessage = "Schedule sharing is unavailable in Demo Mode."
+            return
+        }
         isScheduleSharingEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: scheduleSharingEnabledKey)
         if enabled {
@@ -677,12 +692,21 @@ final class AppViewModel: ObservableObject {
     }
 
     private func enableScheduleSharingForFriends() {
+        guard !AppEnvironment.isAppStoreReviewMode else { return }
         guard !isScheduleSharingEnabled else { return }
         isScheduleSharingEnabled = true
         UserDefaults.standard.set(true, forKey: scheduleSharingEnabledKey)
     }
 
     private func updateScheduleSharingAfterFriendListChange() {
+        guard !AppEnvironment.isAppStoreReviewMode else {
+            if isScheduleSharingEnabled {
+                isScheduleSharingEnabled = false
+                UserDefaults.standard.set(false, forKey: scheduleSharingEnabledKey)
+            }
+            friendCloudKitSyncMessage = nil
+            return
+        }
         let hasAcceptedConnection = friendConnections.contains { $0.status == .accepted }
         let hasPendingConnection = friendConnections.contains { $0.status == .pending }
         let shouldShare = hasAcceptedConnection || (isScheduleSharingEnabled && hasPendingConnection)
@@ -710,6 +734,7 @@ final class AppViewModel: ObservableObject {
     }
 
     func handleSchedulesChangedForSharing() {
+        guard !AppEnvironment.isAppStoreReviewMode else { return }
         guard isScheduleSharingEnabled else { return }
         Task { [weak self] in
             await self?.uploadSharedScheduleIfNeeded(reason: "schedule changed")
@@ -717,6 +742,7 @@ final class AppViewModel: ObservableObject {
     }
 
     func syncFriendCloudKit(reason: String = "manual") async {
+        guard !AppEnvironment.isAppStoreReviewMode else { return }
         guard !isSyncingFriendCloudKit else { return }
         isSyncingFriendCloudKit = true
         defer { isSyncingFriendCloudKit = false }
@@ -753,6 +779,7 @@ final class AppViewModel: ObservableObject {
     }
 
     private func performSharedScheduleUploadIfNeeded(reason: String) async {
+        guard !AppEnvironment.isAppStoreReviewMode else { return }
         guard isScheduleSharingEnabled else { return }
         guard isIdentityVerified,
               let verifiedIdentity,
@@ -802,6 +829,7 @@ final class AppViewModel: ObservableObject {
     }
 
     func refreshFriendSchedulesFromCloud() async {
+        guard !AppEnvironment.isAppStoreReviewMode else { return }
         guard isIdentityVerified,
               let verifiedIdentity else {
             return
@@ -1045,6 +1073,12 @@ final class AppViewModel: ObservableObject {
     }
 
     func refreshCloudKitIdentity() {
+        if AppEnvironment.isAppStoreReviewMode {
+            cloudKitIdentityMessage = nil
+            currentCloudKitRecordName = nil
+            updateAdminStatus()
+            return
+        }
         guard !isRefreshingCloudKitIdentity else { return }
         isRefreshingCloudKitIdentity = true
 
@@ -3535,6 +3569,12 @@ final class AppViewModel: ObservableObject {
     }
 
     func syncTapped() async {
+        guard !AppEnvironment.isAppStoreReviewMode else {
+            errorMessage = AppEnvironment.tripBoardUnavailableMessage
+            isShowingLoginSheet = false
+            isSyncing = false
+            return
+        }
         guard isIdentityVerified else {
             errorMessage = verificationRequiredMessage
             return
@@ -3562,6 +3602,7 @@ final class AppViewModel: ObservableObject {
     }
 
     func autoFetchOnAppActiveIfEnabled(_ enabled: Bool) async {
+        guard !AppEnvironment.isAppStoreReviewMode else { return }
         guard enabled else { return }
         guard isIdentityVerified else { return }
         guard !isSyncing else { return }

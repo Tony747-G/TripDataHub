@@ -6,12 +6,17 @@
 
 import SwiftUI
 import WebKit
+import SafariServices
 
 struct BrowserTabView: View {
 
     @EnvironmentObject private var appViewModel: AppViewModel
     @State private var browserViewModel = BrowserViewModel()
     @State private var showingImportPreview = false
+    @State private var showingSafariView = false
+    @State private var browserResetID = UUID()
+    @State private var isResettingBrowser = false
+    @State private var showingResetConfirmation = false
 
     /// When true, this view presents ImportPreviewView itself when pendingImport
     /// is set. iPad workspace uses this because BrowserTabView is presented as a
@@ -33,6 +38,7 @@ struct BrowserTabView: View {
 
                 // WebView 本体
                 BrowserWebView(url: portalURL, viewModel: browserViewModel)
+                    .id(browserResetID)
                     .ignoresSafeArea(edges: .bottom)
 
                 // ステータスバー
@@ -71,9 +77,25 @@ struct BrowserTabView: View {
                 showingImportPreview = true
             }
         }
-        .sheet(isPresented: $showingImportPreview) {
+            .sheet(isPresented: $showingImportPreview) {
             NavigationStack { ImportPreviewView() }
                 .environmentObject(appViewModel)
+        }
+            .sheet(isPresented: $showingSafariView) {
+            SafariView(url: portalURL)
+                .ignoresSafeArea()
+        }
+        .confirmationDialog(
+            "Reset Browser?",
+            isPresented: $showingResetConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Reset Browser", role: .destructive) {
+                resetBrowser()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This clears the in-app browser cookies and cache. You will need to sign in to CrewAccess again.")
         }
     }
 
@@ -92,7 +114,7 @@ struct BrowserTabView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer()
-            if browserViewModel.isLoading {
+            if browserViewModel.isLoading || isResettingBrowser {
                 ProgressView().scaleEffect(0.75)
             }
         }
@@ -138,7 +160,58 @@ struct BrowserTabView: View {
                 Image(systemName: "arrow.clockwise")
             }
         }
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Menu {
+                Button {
+                    showingSafariView = true
+                    browserViewModel.statusMessage = "Opened CrewAccess in Safari view. Use Zscaler Print, then share the PDF to TripData."
+                } label: {
+                    Label("Open Safari View", systemImage: "safari")
+                }
+
+                Button(role: .destructive) {
+                    showingResetConfirmation = true
+                } label: {
+                    Label("Reset Browser", systemImage: "eraser")
+                }
+                .disabled(isResettingBrowser)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .accessibilityLabel("Browser Options")
+        }
     }
+
+    private func resetBrowser() {
+        isResettingBrowser = true
+        browserViewModel.webView?.stopLoading()
+        browserViewModel.popupWebView = nil
+        browserViewModel.webView = nil
+        browserViewModel.currentURL = ""
+        browserViewModel.isLoading = true
+        browserViewModel.errorMessage = nil
+        browserViewModel.statusMessage = "Resetting browser..."
+
+        let dataTypes = WKWebsiteDataStore.allWebsiteDataTypes()
+        WKWebsiteDataStore.default().removeData(ofTypes: dataTypes, modifiedSince: .distantPast) {
+            DispatchQueue.main.async {
+                browserResetID = UUID()
+                isResettingBrowser = false
+                browserViewModel.isLoading = false
+                browserViewModel.statusMessage = "Browser reset. Sign in to CrewAccess again."
+            }
+        }
+    }
+}
+
+private struct SafariView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        SFSafariViewController(url: url)
+    }
+
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
 }
 
 // MARK: - 既存 WKWebView を SwiftUI にラップ

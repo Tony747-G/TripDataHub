@@ -25,6 +25,7 @@ struct IPadOperationalWorkspaceView: View {
     @State private var showingFriends = false
     @State private var showingBrowser = false
     @State private var showingSettings = false
+    @State private var isShowingImportPreviewFromExternalOpen = false
     /// ポートレート時にトリップバータップで表示するシートのトリップID
     @State private var portraitTripSheetID: String? = nil
 
@@ -74,13 +75,21 @@ struct IPadOperationalWorkspaceView: View {
         .background(Color(.secondarySystemBackground).ignoresSafeArea(edges: .top))
         .preferredColorScheme(selectedAppearanceMode.colorScheme)
         .task {
+            viewModel.consumePendingAppGroupImportIfAvailable()
             await viewModel.fetchCrewAccessImportFilesIfNeeded(reason: "ipad workspace")
             await viewModel.fetchDeviceScheduleIfNeeded(reason: "ipad workspace")
-            await viewModel.syncFriendCloudKit(reason: "ipad workspace opened")
+            if !AppEnvironment.isAppStoreReviewMode {
+                await viewModel.syncFriendCloudKit(reason: "ipad workspace opened")
+            }
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
-                Task { await viewModel.syncFriendCloudKit(reason: "ipad workspace active") }
+                viewModel.consumePendingAppGroupImportIfAvailable()
+                Task {
+                    if !AppEnvironment.isAppStoreReviewMode {
+                        await viewModel.syncFriendCloudKit(reason: "ipad workspace active")
+                    }
+                }
             }
         }
         .sheet(isPresented: Binding(
@@ -105,6 +114,12 @@ struct IPadOperationalWorkspaceView: View {
             NavigationStack { BrowserTabView(presentsImportPreview: true) }
                 .environmentObject(viewModel)
         }
+        .sheet(isPresented: $isShowingImportPreviewFromExternalOpen) {
+            NavigationStack {
+                ImportPreviewView()
+            }
+            .environmentObject(viewModel)
+        }
         .sheet(isPresented: $showingSettings) {
             NavigationStack { SettingsTabView() }
                 .environmentObject(viewModel)
@@ -112,7 +127,10 @@ struct IPadOperationalWorkspaceView: View {
                 // SwiftUI only allows one sheet per view at a time, so attaching
                 // it to the workspace (parent) while Settings is already open
                 // produces "only presenting a single sheet is supported".
-                .sheet(isPresented: $viewModel.isShowingLoginSheet) {
+                .sheet(isPresented: Binding(
+                    get: { viewModel.isShowingLoginSheet && !AppEnvironment.isAppStoreReviewMode },
+                    set: { viewModel.isShowingLoginSheet = $0 }
+                )) {
                     TripBoardLoginView(
                         onAuthenticated: { cookies, url in
                             viewModel.handleLoginSucceeded(cookies: cookies, url: url)
@@ -122,6 +140,9 @@ struct IPadOperationalWorkspaceView: View {
                         }
                     )
                 }
+        }
+        .onChange(of: viewModel.pendingImport?.id) { _, newValue in
+            isShowingImportPreviewFromExternalOpen = newValue != nil
         }
     }
 
@@ -158,13 +179,17 @@ struct IPadOperationalWorkspaceView: View {
                 sidebarContent = .ownTimeline
                 withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
             }
-            fanItem(index: 1, icon: "clock", label: "Open Time", isActive: isOpenTime) {
-                sidebarContent = .openTime
-                withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
+            if !AppEnvironment.isAppStoreReviewMode {
+                fanItem(index: 1, icon: "clock", label: "Open Time", isActive: isOpenTime) {
+                    sidebarContent = .openTime
+                    withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
+                }
             }
-            fanItem(index: 2, icon: "person.2", label: "Friends") {
-                showingFriends = true
-                withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
+            if !AppEnvironment.isAppStoreReviewMode {
+                fanItem(index: 2, icon: "person.2", label: "Friends") {
+                    showingFriends = true
+                    withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
+                }
             }
             fanItem(index: 3, icon: "globe", label: "Browser") {
                 showingBrowser = true

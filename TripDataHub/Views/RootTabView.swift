@@ -31,17 +31,21 @@ struct RootTabView: View {
                 }
                 .tag(0)
 
-            OpenTimeTabView()
-                .tabItem {
-                    Label("OpenTime", systemImage: "clock")
-                }
-                .tag(1)
+            if !AppEnvironment.isAppStoreReviewMode {
+                OpenTimeTabView()
+                    .tabItem {
+                        Label("OpenTime", systemImage: "clock")
+                    }
+                    .tag(1)
+            }
 
-            FriendsTabView()
-                .tabItem {
-                    Label("Friends", systemImage: "person.2")
-                }
-                .tag(2)
+            if !AppEnvironment.isAppStoreReviewMode {
+                FriendsTabView()
+                    .tabItem {
+                        Label("Friends", systemImage: "person.2")
+                    }
+                    .tag(2)
+            }
 
             BrowserTabView()
                 .tabItem {
@@ -63,7 +67,10 @@ struct RootTabView: View {
                 }
                 .tag(5)
         }
-        .sheet(isPresented: $viewModel.isShowingLoginSheet) {
+        .sheet(isPresented: Binding(
+            get: { viewModel.isShowingLoginSheet && !AppEnvironment.isAppStoreReviewMode },
+            set: { viewModel.isShowingLoginSheet = $0 }
+        )) {
             TripBoardLoginView(
                 onAuthenticated: { cookies, url in
                     viewModel.handleLoginSucceeded(cookies: cookies, url: url)
@@ -84,7 +91,9 @@ struct RootTabView: View {
             viewModel.refreshFlightCountdownPresentation()
             Task {
                 await viewModel.autoFetchOnAppActiveIfEnabled(autoFetchOnOpen)
-                await viewModel.syncFriendCloudKit(reason: "app opened")
+                if !AppEnvironment.isAppStoreReviewMode {
+                    await viewModel.syncFriendCloudKit(reason: "app opened")
+                }
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -93,7 +102,9 @@ struct RootTabView: View {
                 viewModel.refreshFlightCountdownPresentation()
                 Task {
                     await viewModel.autoFetchOnAppActiveIfEnabled(autoFetchOnOpen)
-                    await viewModel.syncFriendCloudKit(reason: "app active")
+                    if !AppEnvironment.isAppStoreReviewMode {
+                        await viewModel.syncFriendCloudKit(reason: "app active")
+                    }
                 }
             }
         }

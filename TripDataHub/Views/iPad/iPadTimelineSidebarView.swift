@@ -666,6 +666,10 @@ struct IPadTimelineSidebarView: View {
     }
 
     private func refreshFriendScheduleMatches() {
+        guard !AppEnvironment.isAppStoreReviewMode else {
+            friendScheduleMatches = .empty
+            return
+        }
         let mySchedules = sidebarSchedules
         let friendSchedules = viewModel.acceptedFriendConnections.map {
             (gemsID: $0.employeeID, schedules: $0.sharedSchedules)

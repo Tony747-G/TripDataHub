@@ -11,18 +11,26 @@ struct SettingsAccountSection: View {
 
     var body: some View {
         Section {
-            let gemsID = viewModel.isIdentityVerified ? (viewModel.verifiedIdentity?.gemsID ?? "N/A") : "N/A"
+            if AppEnvironment.isAppStoreReviewMode {
+                Label("Demo Mode", systemImage: "checkmark.shield.fill")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.green)
+                Text(AppEnvironment.reviewModeMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            let gemsID = AppEnvironment.isAppStoreReviewMode ? "Demo" : (viewModel.isIdentityVerified ? (viewModel.verifiedIdentity?.gemsID ?? "N/A") : "N/A")
             Text("GEMS ID: \(gemsID)")
                 .font(.footnote)
             Text("Verification Status: \(viewModel.isIdentityVerified ? "Verified" : "Not Verified")")
                 .font(.footnote)
                 .foregroundStyle(viewModel.isIdentityVerified ? .green : .secondary)
-            if viewModel.isIdentityVerified {
+            if viewModel.isIdentityVerified && !AppEnvironment.isAppStoreReviewMode {
                 Label("Identity Verified", systemImage: "checkmark.circle.fill")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.green)
             }
-            if viewModel.isRefreshingCloudKitIdentity {
+            if viewModel.isRefreshingCloudKitIdentity && !AppEnvironment.isAppStoreReviewMode {
                 HStack(spacing: 8) {
                     ProgressView()
                     Text("Checking iCloud identity...")
@@ -30,12 +38,12 @@ struct SettingsAccountSection: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            if let message = viewModel.cloudKitIdentityMessage {
+            if let message = viewModel.cloudKitIdentityMessage, !AppEnvironment.isAppStoreReviewMode {
                 Text(message)
                     .font(.footnote)
                     .foregroundStyle(.orange)
             }
-            if !viewModel.isIdentityVerified {
+            if !viewModel.isIdentityVerified && !AppEnvironment.isAppStoreReviewMode {
                 TextField("GEMS ID", text: $verifyGemsIDInput)
                     .keyboardType(.numberPad)
                     .textContentType(.username)
@@ -79,28 +87,34 @@ struct SettingsTripBoardFetchSection: View {
 
     var body: some View {
         Section {
-            Toggle("Auto Fetch on App Open", isOn: $autoFetchOnOpen)
-
-            Button(viewModel.authStatus == .loggedOut ? "TripBoard Log-in" : "Fetch TripBoard Data") {
-                Task {
-                    await viewModel.syncTapped()
-                }
-            }
-            .disabled(viewModel.isSyncing)
-            .accessibilityIdentifier("settings.tripboardAction")
-
-            if viewModel.isSyncing {
-                ProgressView()
-            }
-
-            if viewModel.isTripBoardServerDown {
-                Text("Auth: TripBoard Server is down")
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-            } else {
-                Text("Auth: \(viewModel.authStatusText)")
+            if AppEnvironment.isAppStoreReviewMode {
+                Label(AppEnvironment.tripBoardUnavailableMessage, systemImage: "lock.slash")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+            } else {
+                Toggle("Auto Fetch on App Open", isOn: $autoFetchOnOpen)
+
+                Button(viewModel.authStatus == .loggedOut ? "TripBoard Log-in" : "Fetch TripBoard Data") {
+                    Task {
+                        await viewModel.syncTapped()
+                    }
+                }
+                .disabled(viewModel.isSyncing)
+                .accessibilityIdentifier("settings.tripboardAction")
+
+                if viewModel.isSyncing {
+                    ProgressView()
+                }
+
+                if viewModel.isTripBoardServerDown {
+                    Text("Auth: TripBoard Server is down")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                } else {
+                    Text("Auth: \(viewModel.authStatusText)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
         } header: {
             sectionHeader("TripBoard Fetch")

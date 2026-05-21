@@ -200,7 +200,9 @@ struct SettingsTabView: View {
             }
             .onAppear {
                 Task {
-                    await viewModel.loadSeniorityRecordsIfNeeded()
+                    if !AppEnvironment.isAppStoreReviewMode {
+                        await viewModel.loadSeniorityRecordsIfNeeded()
+                    }
                     await viewModel.refreshNotificationAuthorizationStatus()
                     await viewModel.applyCrewAccessRetentionPolicy()
                     await loadCrewAccessImportFiles()
