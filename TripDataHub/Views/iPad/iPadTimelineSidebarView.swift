@@ -3,6 +3,7 @@ import SwiftUI
 struct IPadTimelineSidebarView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @Binding var selectedTripID: String?
+    @Binding var scrollToDefaultTrigger: UUID
     @Environment(\.colorScheme) private var colorScheme
     @State private var tripDataByTripID: [String: CrewAccessTripSummary] = [:]
     @State private var deleteTripConfirmPairing: String? = nil
@@ -224,7 +225,7 @@ struct IPadTimelineSidebarView: View {
                                 let isSectionSelected = selectedSectionIDs.contains(section.id)
                                 let headerBg = ScheduleColors.dayHeaderBackground(for: colorScheme)
                                 Text(section.label)
-                                    .appScaledFont(.caption2, weight: .semibold, scale: timelineFontScale)
+                                    .appScaledFont(.subheadline, weight: .bold, scale: timelineFontScale)
                                     .foregroundStyle(ScheduleColors.timelineDateHeaderText(for: colorScheme))
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(.horizontal, 12)
@@ -258,6 +259,16 @@ struct IPadTimelineSidebarView: View {
                         let target = selectedTripID.flatMap { firstRowIDByTripID[$0] }
                             ?? nextScrollTargetID()
                         if let rowID = target {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                proxy.scrollTo(rowID, anchor: .top)
+                            }
+                        }
+                    }
+                }
+                .onChange(of: scrollToDefaultTrigger) { _, _ in
+                    Task {
+                        try? await Task.sleep(nanoseconds: 80_000_000)
+                        if let rowID = nextScrollTargetID() {
                             withAnimation(.easeInOut(duration: 0.25)) {
                                 proxy.scrollTo(rowID, anchor: .top)
                             }
@@ -687,7 +698,7 @@ struct IPadTimelineSidebarView: View {
 }
 
 #Preview {
-    IPadTimelineSidebarView(selectedTripID: .constant(nil))
+    IPadTimelineSidebarView(selectedTripID: .constant(nil), scrollToDefaultTrigger: .constant(UUID()))
         .environmentObject(AppViewModel.shared)
         .frame(width: 420)
 }

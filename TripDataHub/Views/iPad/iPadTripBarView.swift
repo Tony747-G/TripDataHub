@@ -19,7 +19,7 @@ struct IPadTripBarView: View {
                     )
 
                 Text(label)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundStyle(barTextColor)
                     .lineLimit(1)
                     .padding(.horizontal, 4)
@@ -84,7 +84,7 @@ struct IPadTripBarSpanView: View {
                     }
 
                     Text(label)
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
                         .foregroundStyle(barTextColor)
                         .lineLimit(1)
                         .padding(.horizontal, 4)

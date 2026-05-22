@@ -1,5 +1,8 @@
 import Foundation
 import PDFKit
+import os
+
+private let logger = Logger(subsystem: "com.sfune.TripDataHub", category: "Import")
 
 protocol CrewAccessPDFImportServiceProtocol: Sendable {
     func analyzeTrip(pdfData: Data, sourceFileName: String?) -> CrewAccessImportDraft
@@ -267,7 +270,7 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
     }
 
     func analyzeTrip(pdfData: Data, sourceFileName: String?) -> CrewAccessImportDraft {
-        NSLog("[Import] analyzeTrip start file=%@ bytes=%d", sourceFileName ?? "unknown", pdfData.count)
+        logger.info("[Import] analyzeTrip start file=\(sourceFileName ?? "unknown", privacy: .private) bytes=\(pdfData.count, privacy: .public)")
         var warnings: [ImportWarning] = []
         var errors: [ImportErrorItem] = []
 
@@ -308,20 +311,15 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
             lineCount: lines.count
         )
 
-        NSLog("[Parse] rawText chars=%d lines=%d", stats.characterCount, stats.lineCount)
+        logger.info("[Parse] rawText chars=\(stats.characterCount, privacy: .public) lines=\(stats.lineCount, privacy: .public)")
         let dateTokenCount = countRegexMatches(in: extractedText, pattern: #"\b\d{2}[A-Z]{3}\b"#)
         let airportTokenCount = countRegexMatches(in: extractedText, pattern: #"\b[A-Z]{3}\b"#)
         let flightTokenCount = countRegexMatches(in: extractedText, pattern: #"\b\d{3,4}\b"#)
-        NSLog(
-            "[Parse] candidates dateTokens=%d airportTokens=%d flightTokens=%d",
-            dateTokenCount,
-            airportTokenCount,
-            flightTokenCount
-        )
+        logger.info("[Parse] candidates dateTokens=\(dateTokenCount, privacy: .public) airportTokens=\(airportTokenCount, privacy: .public) flightTokens=\(flightTokenCount, privacy: .public)")
         let legAnchorPattern = #"^\d+\s*[A-Za-z]{2}\s*(?:(?:DH)\s+)?[A-Za-z0-9]+\s+[A-Z]{3}\s*[-–—]\s*[A-Z]{3}\b"#
         let anchorLines = lines.filter { $0.range(of: legAnchorPattern, options: .regularExpression) != nil }
         let anchorSample = anchorLines.prefix(3).joined(separator: " || ")
-        NSLog("[Parse] anchorMatches=%d sample=%@", anchorLines.count, anchorSample)
+        logger.info("[Parse] anchorMatches=\(anchorLines.count, privacy: .public) sample=\(anchorSample, privacy: .private)")
 
         if extractedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || extractedText.count < minTextCharacterThreshold {
             errors.append(ImportErrorItem(
@@ -430,22 +428,11 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         }
 
         let parsedSequences = legRows.map(\.sequence).sorted()
-        NSLog("[Parse] parsedSequences=%@", parsedSequences.map(String.init).joined(separator: ","))
+        logger.info("[Parse] parsedSequences=\(parsedSequences.map(String.init).joined(separator: ","), privacy: .public)")
         let unmatchedSample = likelyLegButUnmatchedLines.prefix(3).joined(separator: " || ")
-        NSLog(
-            "[Parse] likelyLegButUnmatched=%d sample=%@",
-            likelyLegButUnmatchedLines.count,
-            unmatchedSample
-        )
+        logger.info("[Parse] likelyLegButUnmatched=\(likelyLegButUnmatchedLines.count, privacy: .public) sample=\(unmatchedSample, privacy: .private)")
         let warningCounts = Dictionary(grouping: warnings, by: \.code).mapValues(\.count)
-        NSLog(
-            "[Parse] warningBreakdown partialLegParseFailed=%d unknownIata=%d unknownTz=%d lowConfidence=%d dstBoundaryCrossing=%d",
-            warningCounts[.partialLegParseFailed] ?? 0,
-            warningCounts[.unknownIata] ?? 0,
-            warningCounts[.unknownTz] ?? 0,
-            warningCounts[.lowConfidence] ?? 0,
-            warningCounts[.dstBoundaryCrossing] ?? 0
-        )
+        logger.info("[Parse] warningBreakdown partialLegParseFailed=\(warningCounts[.partialLegParseFailed] ?? 0, privacy: .public) unknownIata=\(warningCounts[.unknownIata] ?? 0, privacy: .public) unknownTz=\(warningCounts[.unknownTz] ?? 0, privacy: .public) lowConfidence=\(warningCounts[.lowConfidence] ?? 0, privacy: .public) dstBoundaryCrossing=\(warningCounts[.dstBoundaryCrossing] ?? 0, privacy: .public)")
 
         if legRows.isEmpty {
             errors.append(ImportErrorItem(
@@ -672,14 +659,7 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
             errors: errors,
             rawExtractStats: rawExtractStats
         )
-        NSLog(
-            "[Import] analyzeTrip result tripId=%@ tripDate=%@ legs=%d errors=%d warnings=%d",
-            draft.tripId,
-            draft.tripDate,
-            draft.parsedSchedule?.legs.count ?? 0,
-            draft.errors.count,
-            draft.warnings.count
-        )
+        logger.info("[Import] analyzeTrip result tripId=\(draft.tripId, privacy: .private) tripDate=\(draft.tripDate, privacy: .public) legs=\(draft.parsedSchedule?.legs.count ?? 0, privacy: .public) errors=\(draft.errors.count, privacy: .public) warnings=\(draft.warnings.count, privacy: .public)")
         return draft
     }
 
@@ -728,13 +708,9 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         let dep = calendar.date(from: components)
         if let dep, !weekdayToken.isEmpty {
             let parsedWeekday = normalizeWeekdayToken(weekdayToken)
-            if parsedWeekday != utcWeekdayToken(for: dep) {
-                NSLog(
-                    "[Parse] weekdayMismatch tripDay=%d token=%@ computed=%@",
-                    tripDayOffset,
-                    parsedWeekday,
-                    utcWeekdayToken(for: dep)
-                )
+            let computedWeekday = utcWeekdayToken(for: dep)
+            if parsedWeekday != computedWeekday {
+                logger.info("[Parse] weekdayMismatch tripDay=\(tripDayOffset, privacy: .public) token=\(parsedWeekday, privacy: .public) computed=\(computedWeekday, privacy: .public)")
             }
         }
         return dep

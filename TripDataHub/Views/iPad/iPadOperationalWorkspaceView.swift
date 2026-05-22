@@ -4,7 +4,6 @@ import SwiftUI
 
 private enum IPadSidebarContent {
     case ownTimeline
-    case openTime
 }
 
 // MARK: - Main workspace
@@ -21,8 +20,8 @@ struct IPadOperationalWorkspaceView: View {
     @State private var selectedTripID: String?
     @State private var selectedBidPeriodID: String?
     @State private var sidebarContent: IPadSidebarContent = .ownTimeline
+    @State private var timelineScrollTrigger = UUID()
     @State private var menuExpanded = false
-    @State private var showingFriends = false
     @State private var showingBrowser = false
     @State private var showingSettings = false
     @State private var isShowingImportPreviewFromExternalOpen = false
@@ -97,7 +96,7 @@ struct IPadOperationalWorkspaceView: View {
             set: { if !$0 { portraitTripSheetID = nil } }
         )) {
             NavigationStack {
-                IPadTimelineSidebarView(selectedTripID: $portraitTripSheetID)
+                IPadTimelineSidebarView(selectedTripID: $portraitTripSheetID, scrollToDefaultTrigger: $timelineScrollTrigger)
                     .environmentObject(viewModel)
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
@@ -105,10 +104,6 @@ struct IPadOperationalWorkspaceView: View {
                         }
                     }
             }
-        }
-        .sheet(isPresented: $showingFriends) {
-            IPadFriendsSheet()
-                .environmentObject(viewModel)
         }
         .sheet(isPresented: $showingBrowser) {
             NavigationStack { BrowserTabView(presentsImportPreview: true) }
@@ -152,50 +147,27 @@ struct IPadOperationalWorkspaceView: View {
     private var sidebarView: some View {
         switch sidebarContent {
         case .ownTimeline:
-            IPadTimelineSidebarView(selectedTripID: $selectedTripID)
-        case .openTime:
-            OpenTimeTabView(sidebarMode: true)
+            IPadTimelineSidebarView(selectedTripID: $selectedTripID, scrollToDefaultTrigger: $timelineScrollTrigger)
         }
     }
 
     // MARK: Floating menu
 
-    // Fan parameters: quarter-circle arc from straight up (90°) to straight left (180°)
-    // Radius 130pt gives ~51pt arc gap between adjacent 44pt icons — no overlap.
-    private let fanRadius: CGFloat = 130
-    private let fanStartAngle: Double = 90
-    private let fanEndAngle: Double = 180
-    private let fanItemCount = 5
-
-    private func fanOffset(index: Int) -> CGSize {
-        let angle = fanStartAngle + Double(index) * (fanEndAngle - fanStartAngle) / Double(fanItemCount - 1)
-        let rad = angle * .pi / 180
-        return CGSize(width: fanRadius * cos(rad), height: -fanRadius * sin(rad))
-    }
+    private let verticalMenuItemCount = 3
+    private let verticalMenuItemSpacing: CGFloat = 58
 
     private var floatingMenu: some View {
         ZStack {
-            fanItem(index: 0, icon: "calendar", label: "Timeline", isActive: isOwnTimeline) {
+            verticalMenuItem(index: 0, icon: "calendar", label: "Timeline", isActive: isOwnTimeline) {
                 sidebarContent = .ownTimeline
+                timelineScrollTrigger = UUID()
                 withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
             }
-            if !AppEnvironment.isAppStoreReviewMode {
-                fanItem(index: 1, icon: "clock", label: "Open Time", isActive: isOpenTime) {
-                    sidebarContent = .openTime
-                    withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
-                }
-            }
-            if !AppEnvironment.isAppStoreReviewMode {
-                fanItem(index: 2, icon: "person.2", label: "Friends") {
-                    showingFriends = true
-                    withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
-                }
-            }
-            fanItem(index: 3, icon: "globe", label: "Browser") {
+            verticalMenuItem(index: 1, icon: "globe", label: "Browser") {
                 showingBrowser = true
                 withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
             }
-            fanItem(index: 4, icon: "gearshape", label: "Settings") {
+            verticalMenuItem(index: 2, icon: "gearshape", label: "Settings") {
                 showingSettings = true
                 withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
             }
@@ -203,19 +175,19 @@ struct IPadOperationalWorkspaceView: View {
         }
     }
 
-    private func fanItem(
+    private func verticalMenuItem(
         index: Int,
         icon: String,
         label: String,
         isActive: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
-        let offset = fanOffset(index: index)
+        let yOffset = -CGFloat(verticalMenuItemCount - index) * verticalMenuItemSpacing
         let delay = menuExpanded
             ? Double(index) * 0.045
-            : Double(fanItemCount - 1 - index) * 0.03
+            : Double(verticalMenuItemCount - 1 - index) * 0.03
         return menuItem(icon: icon, label: label, isActive: isActive, action: action)
-            .offset(menuExpanded ? offset : .zero)
+            .offset(x: 0, y: menuExpanded ? yOffset : 0)
             .scaleEffect(menuExpanded ? 1 : 0.1)
             .opacity(menuExpanded ? 1 : 0)
             .animation(
@@ -258,11 +230,6 @@ struct IPadOperationalWorkspaceView: View {
 
     private var isOwnTimeline: Bool {
         if case .ownTimeline = sidebarContent { return true }
-        return false
-    }
-
-    private var isOpenTime: Bool {
-        if case .openTime = sidebarContent { return true }
         return false
     }
 }

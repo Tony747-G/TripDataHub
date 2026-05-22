@@ -5,38 +5,19 @@ import UIKit
 
 struct SettingsTabView: View {
     @EnvironmentObject private var viewModel: AppViewModel
-    @AppStorage("auto_fetch_on_open_enabled") private var autoFetchOnOpen = true
-    @AppStorage(AppViewModel.crewAccessRetentionSelectionKey) private var crewAccessRetentionSelection = AppViewModel.defaultCrewAccessRetentionSelection
     @AppStorage("appearance_mode") private var appearanceModeRawValue = AppearanceMode.system.rawValue
     @AppStorage("app_font_size_option") private var appFontSizeOptionRawValue = AppFontSizeOption.medium.rawValue
+    @AppStorage("pilot_qualification") private var pilotQualificationRawValue = PilotQualification.captain.rawValue
+    @AppStorage("bid_transition_timeline_enabled") private var bidTransitionTimelineEnabled = true
     @AppStorage("notification_48h_enabled") private var notify48h = false
     @AppStorage("notification_24h_enabled") private var notify24h = false
     @AppStorage("notification_12h_enabled") private var notify12h = false
+    @AppStorage("faa_medical_expiry_date") private var faaMedicalExpiryDate = ""
+    @AppStorage("passport_expiry_date") private var passportExpiryDate = ""
+    @AppStorage("china_visa_expiry_date") private var chinaVisaExpiryDate = ""
     @State private var showNotificationDeniedAlert = false
     @State private var showLogTenExportWarning = false
-    @State private var verifyGemsIDInput = ""
-    @State private var verifyDOBDate = Date()
-    @State private var crewAccessImportFiles: [CrewAccessImportFile] = []
     @State private var logTenExportOutput: LogTenExportOutput?
-
-    private static let dobFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "MM/dd/yyyy"
-        return formatter
-    }()
-
-    private static let importFileDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "MMM dd, yyyy 'at' HH:mm"
-        return formatter
-    }()
-
-    private static let crewAccessRetentionOptions: [String] = [
-        "1", "2", "3", "4", "5", "6", "7", "ALL"
-    ]
 
     private var appearanceModeBinding: Binding<AppearanceMode> {
         Binding(
@@ -52,25 +33,6 @@ struct SettingsTabView: View {
         )
     }
 
-    private func loadCrewAccessImportFiles(afterDelete: Bool = false) async {
-        await viewModel.fetchCrewAccessImportFilesIfNeeded(reason: afterDelete ? "settings after delete" : "settings")
-        crewAccessImportFiles = await viewModel.listCrewAccessImportFiles()
-        if afterDelete {
-            NSLog("[CrewAccessFiles] reloaded count=%d", crewAccessImportFiles.count)
-        } else {
-            NSLog("[CrewAccessFiles] loaded count=%d", crewAccessImportFiles.count)
-        }
-    }
-
-    private func fileSecondaryText(for file: CrewAccessImportFile) -> String {
-        let modifiedDate = file.modifiedAt ?? file.createdAt
-        let dateString = modifiedDate.map { Self.importFileDateFormatter.string(from: $0) } ?? "Unknown"
-        if let createdAt = file.createdAt, let modifiedAt = file.modifiedAt, abs(modifiedAt.timeIntervalSince(createdAt)) <= 1 {
-            return "Added: \(dateString)"
-        }
-        return "Updated: \(dateString)"
-    }
-
     @ViewBuilder
     private var logTenExportSection: some View {
         Section {
@@ -83,7 +45,7 @@ struct SettingsTabView: View {
                     .foregroundStyle(.secondary)
             }
         } header: {
-            Text("LogTen Pro Export")
+            Text("LogTen Pro Export (Beta)")
         } footer: {
             Text("Exports CrewAccess flights as UTC CSV columns: DATE, Flight Number, FROM, TO, STD, STA, ATD, ATA.")
                 .font(.footnote)
@@ -91,81 +53,25 @@ struct SettingsTabView: View {
     }
 
     @ViewBuilder
-    private var crewAccessRetentionSection: some View {
-        Section {
-            Picker("Trip data retained", selection: $crewAccessRetentionSelection) {
-                ForEach(Self.crewAccessRetentionOptions, id: \.self) { option in
-                    Text(option).tag(option)
-                }
-            }
-
-            Text("Keeps current plus selected number of previous Bid Periods.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        } header: {
-            Text("CrewAccess Retention")
-        }
-    }
-
-    @ViewBuilder
-    private var crewAccessFilesSection: some View {
-        Section {
-            if crewAccessImportFiles.isEmpty {
-                Text("No imported files yet. Export from CrewAccess using Zscaler Print, then import.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            } else {
-                let fileCount = crewAccessImportFiles.count
-                let inTimelineCount = crewAccessImportFiles.filter { !$0.isOrphan }.count
-                Text("Files: \(fileCount) • In Timeline: \(inTimelineCount)")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-                ForEach(crewAccessImportFiles) { file in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(file.displayName)
-                            .font(.subheadline.weight(.semibold))
-                        Text(fileSecondaryText(for: file))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .onDelete { offsets in
-                    let targetURLs = offsets.map { crewAccessImportFiles[$0].url }
-                    guard !targetURLs.isEmpty else { return }
-                    Task {
-                        await viewModel.deleteCrewAccessImportFiles(urls: targetURLs)
-                        await loadCrewAccessImportFiles(afterDelete: true)
-                    }
-                }
-            }
-        } header: {
-            Text("CrewAccess Imports (Files)")
-        }
-    }
-
-    @ViewBuilder
     private var settingsListContent: some View {
         List {
-            SettingsAccountSection(
-                verifyGemsIDInput: $verifyGemsIDInput,
-                verifyDOBDate: $verifyDOBDate,
-                formatDOB: { Self.dobFormatter.string(from: $0) }
+            SettingsSupportSection()
+
+            SettingsQualificationSection(
+                qualificationRawValue: $pilotQualificationRawValue,
+                bidTransitionTimelineEnabled: $bidTransitionTimelineEnabled
             )
-
-            SettingsTripBoardFetchSection(autoFetchOnOpen: $autoFetchOnOpen)
-            crewAccessRetentionSection
-            crewAccessFilesSection
-
-            Section {
-                NavigationLink("CrewAccess Import Help") {
-                    CrewAccessImportHelpView()
-                }
-            }
 
             SettingsDisplaySection(
                 appearanceMode: appearanceModeBinding,
                 fontSizeOption: fontSizeOptionBinding
+            )
+
+            SettingsReadinessExpirySection(
+                faaMedicalExpiryDate: $faaMedicalExpiryDate,
+                passportExpiryDate: $passportExpiryDate,
+                chinaVisaExpiryDate: $chinaVisaExpiryDate,
+                domicileTimeZone: DomicileSupport.timeZone(for: viewModel.verifiedIdentity?.domicile)
             )
 
             SettingsNotificationSection(
@@ -174,9 +80,13 @@ struct SettingsTabView: View {
                 notify12h: $notify12h
             )
 
-            logTenExportSection
+            Section {
+                NavigationLink("CrewAccess Import Help") {
+                    CrewAccessImportHelpView()
+                }
+            }
 
-            SettingsSupportSection()
+            logTenExportSection
         }
         .scrollDismissesKeyboard(.interactively)
     }
@@ -200,12 +110,8 @@ struct SettingsTabView: View {
             }
             .onAppear {
                 Task {
-                    if !AppEnvironment.isAppStoreReviewMode {
-                        await viewModel.loadSeniorityRecordsIfNeeded()
-                    }
                     await viewModel.refreshNotificationAuthorizationStatus()
                     await viewModel.applyCrewAccessRetentionPolicy()
-                    await loadCrewAccessImportFiles()
                     if viewModel.notificationAuthorizationStatus == .denied {
                         notify48h = false
                         notify24h = false
@@ -238,12 +144,6 @@ struct SettingsTabView: View {
                         notify12h = false
                         showNotificationDeniedAlert = true
                     }
-                }
-            }
-            .onChange(of: crewAccessRetentionSelection) { _, _ in
-                Task {
-                    await viewModel.applyCrewAccessRetentionPolicy()
-                    await loadCrewAccessImportFiles()
                 }
             }
             .alert("Notifications Are Disabled", isPresented: $showNotificationDeniedAlert) {

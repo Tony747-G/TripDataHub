@@ -1,5 +1,8 @@
 import CloudKit
 import Foundation
+import os
+
+private let logger = Logger(subsystem: "com.sfune.TripDataHub", category: "FriendLink")
 
 struct FriendScheduleCloudKitLink: Sendable {
     let friendGEMSID: String
@@ -265,16 +268,16 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         // attempt to fetch the friend's shared schedule — the link record lookup
         // may miss due to GEMS ID normalisation differences, but the schedule record
         // name is derived independently and may still resolve correctly.
-        NSLog("[TDHFriendLink] refreshConnection: friend=\(friend) recordFound=\(record != nil) connectionStatus=\(connection.status.rawValue)")
+        logger.info("[TDHFriendLink] refreshConnection: friend=\(friend, privacy: .private) recordFound=\(record != nil, privacy: .public) connectionStatus=\(connection.status.rawValue, privacy: .public)")
 
         guard let record else {
             var fallback = connection
             if connection.status == .accepted {
-                NSLog("[TDHFriendLink] refreshConnection: link record missing, trying fetchSchedule for accepted friend")
+                logger.info("[TDHFriendLink] refreshConnection: link record missing, trying fetchSchedule for accepted friend")
                 do {
                     fallback.sharedSchedules = try await fetchSchedule(gemsID: friend, database: database)
                 } catch {
-                    NSLog("[TDHFriendLink] refreshConnection: fetchSchedule failed (no link record): \(error)")
+                    logger.error("[TDHFriendLink] refreshConnection: fetchSchedule failed (no link record): \(error.localizedDescription, privacy: .public)")
                     fallback.sharedSchedules = connection.sharedSchedules
                 }
             }
@@ -284,11 +287,11 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         do {
             try await backfillAcceptedStatusIfNeeded(record, database: database)
         } catch {
-            NSLog("[TDHFriendLink] accepted-status backfill failed: \(error.localizedDescription)")
+            logger.error("[TDHFriendLink] accepted-status backfill failed: \(error.localizedDescription, privacy: .public)")
         }
 
         let link = self.link(from: record, myGEMSID: myGEMSID, friendGEMSID: friend)
-        NSLog("[TDHFriendLink] refreshConnection: link.isAccepted=\(link.isAccepted) status=\(record["status"] as? String ?? "nil")")
+        logger.info("[TDHFriendLink] refreshConnection: link.isAccepted=\(link.isAccepted, privacy: .public) status=\(record["status"] as? String ?? "nil", privacy: .public)")
         var updated = connection
         if link.isAccepted {
             updated.status = .accepted
@@ -296,7 +299,7 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
             do {
                 updated.sharedSchedules = try await fetchSchedule(gemsID: friend, database: database)
             } catch {
-                NSLog("[TDHFriendLink] refreshConnection: fetchSchedule failed (accepted): \(error)")
+                logger.error("[TDHFriendLink] refreshConnection: fetchSchedule failed (accepted): \(error.localizedDescription, privacy: .public)")
                 updated.sharedSchedules = connection.sharedSchedules
             }
         } else {
@@ -307,9 +310,9 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
                 do {
                     let saved = try await database.save(record)
                     healedLink = self.link(from: saved, myGEMSID: myGEMSID, friendGEMSID: friend)
-                    NSLog("[TDHFriendLink] refreshConnection: re-apply saved, healedLink.isAccepted=\(healedLink?.isAccepted ?? false)")
+                    logger.info("[TDHFriendLink] refreshConnection: re-apply saved, healedLink.isAccepted=\(healedLink?.isAccepted ?? false, privacy: .public)")
                 } catch {
-                    NSLog("[TDHFriendLink] approval re-apply failed: \(error.localizedDescription)")
+                    logger.error("[TDHFriendLink] approval re-apply failed: \(error.localizedDescription, privacy: .public)")
                     healedLink = nil
                 }
                 if healedLink?.isAccepted == true {
@@ -318,14 +321,14 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
                     do {
                         updated.sharedSchedules = try await fetchSchedule(gemsID: friend, database: database)
                     } catch {
-                        NSLog("[TDHFriendLink] refreshConnection: fetchSchedule failed (healed): \(error)")
+                        logger.error("[TDHFriendLink] refreshConnection: fetchSchedule failed (healed): \(error.localizedDescription, privacy: .public)")
                         updated.sharedSchedules = connection.sharedSchedules
                     }
                 } else if connection.status == .accepted {
                     do {
                         updated.sharedSchedules = try await fetchSchedule(gemsID: friend, database: database)
                     } catch {
-                        NSLog("[TDHFriendLink] refreshConnection: fetchSchedule failed (preserved-accepted): \(error)")
+                        logger.error("[TDHFriendLink] refreshConnection: fetchSchedule failed (preserved-accepted): \(error.localizedDescription, privacy: .public)")
                         updated.sharedSchedules = connection.sharedSchedules
                     }
                 } else {
@@ -340,18 +343,18 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
 
     private func fetchSchedule(gemsID: String, database: FriendScheduleCloudKitDatabase) async throws -> [PayPeriodSchedule] {
         let recordID = CKRecord.ID(recordName: Self.scheduleRecordName(for: gemsID))
-        NSLog("[TDHSchedule] fetchSchedule: attempting recordName=\(recordID.recordName)")
+        logger.info("[TDHSchedule] fetchSchedule: attempting recordName=\(recordID.recordName, privacy: .private)")
         do {
             let record = try await database.record(for: recordID)
             guard let data = record[Field.schedulesData] as? Data else {
-                NSLog("[TDHSchedule] fetchSchedule: record found but no schedulesData field")
+                logger.info("[TDHSchedule] fetchSchedule: record found but no schedulesData field")
                 return []
             }
             let schedules = try JSONDecoder().decode([PayPeriodSchedule].self, from: data)
-            NSLog("[TDHSchedule] fetchSchedule: success, \(schedules.count) schedules")
+            logger.info("[TDHSchedule] fetchSchedule: success, \(schedules.count, privacy: .public) schedules")
             return schedules
         } catch {
-            NSLog("[TDHSchedule] fetchSchedule: FAILED error=\(error)")
+            logger.error("[TDHSchedule] fetchSchedule: FAILED error=\(error.localizedDescription, privacy: .public)")
             throw error
         }
     }

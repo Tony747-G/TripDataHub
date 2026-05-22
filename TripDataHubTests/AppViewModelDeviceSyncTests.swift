@@ -199,6 +199,51 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         _ = vm.exportCrewAccessFlightsLogTenCSV()
     }
 
+    // MARK: - CrewAccess deletion
+
+    func test_deleteImportedCrewAccessTrip_removesJSONSoReconciliationDoesNotResurrect() async throws {
+        try removeCrewAccessImportDirectory()
+        defer { try? removeCrewAccessImportDirectory() }
+
+        let deviceService = FakeDeviceScheduleCloudKitService()
+        let vm = AppViewModel(
+            syncService: NoopSyncService(),
+            authService: NoopAuthService(),
+            cacheService: InMemoryCacheService(),
+            notificationService: NoopNotificationService(),
+            crewAccessImportService: CrewAccessPDFImportService(),
+            friendScheduleCloudKitService: NoopFriendCloudKitService(),
+            gemsVerificationCloudKitService: NoopGEMSVerificationService(),
+            deviceScheduleCloudKitService: deviceService
+        )
+
+        let sampleURL = repositoryRootURL()
+            .appendingPathComponent("web")
+            .appendingPathComponent("sample")
+            .appendingPathComponent("TripDataHub_App_Review_Sample_A00001.pdf")
+        let data = try Data(contentsOf: sampleURL)
+
+        let importAccepted = await vm.importCrewAccessPDFData(data, sourceFileName: sampleURL.lastPathComponent)
+        XCTAssertTrue(importAccepted)
+        XCTAssertEqual(vm.pendingImport?.tripId, "A00001")
+        await vm.confirmPendingImport()
+
+        XCTAssertNil(vm.pendingImport)
+        XCTAssertEqual(Set(vm.crewAccessSchedules.flatMap { $0.legs.map(\.pairing) }), ["A00001"])
+        XCTAssertFalse(crewAccessImportJSONFiles().isEmpty)
+
+        await vm.deleteCrewAccessTrips(ids: Set(vm.crewAccessSchedules.map(\.id)))
+
+        XCTAssertTrue(crewAccessImportJSONFiles().isEmpty)
+
+        await vm.applyCrewAccessRetentionPolicy()
+
+        XCTAssertTrue(vm.crewAccessSchedules.isEmpty)
+        XCTAssertTrue(vm.schedules.allSatisfy { schedule in
+            !schedule.legs.contains { $0.pairing == "A00001" }
+        })
+    }
+
     // MARK: - Helpers
 
     private func makeViewModel(deviceService: DeviceScheduleCloudKitServicing) -> AppViewModel {
@@ -265,6 +310,36 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             legs: [leg],
             openTimeTrips: []
         )
+    }
+
+    private func repositoryRootURL() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
+    private func crewAccessImportDirectory() throws -> URL {
+        let documents = try XCTUnwrap(FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first)
+        return documents.appendingPathComponent("CrewAccessImports", isDirectory: true)
+    }
+
+    private func crewAccessImportJSONFiles() -> [URL] {
+        guard let dir = try? crewAccessImportDirectory(),
+              let urls = try? FileManager.default.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+              ) else {
+            return []
+        }
+        return urls.filter { $0.pathExtension.lowercased() == "json" }
+    }
+
+    private func removeCrewAccessImportDirectory() throws {
+        let dir = try crewAccessImportDirectory()
+        if FileManager.default.fileExists(atPath: dir.path) {
+            try FileManager.default.removeItem(at: dir)
+        }
     }
 }
 

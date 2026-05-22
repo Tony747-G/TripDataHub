@@ -3,6 +3,9 @@ import CloudKit
 import UIKit
 import UserNotifications
 import CryptoKit
+import os
+
+private let logger = Logger(subsystem: "com.sfune.TripDataHub", category: "AppViewModel")
 
 enum AuthStatus: String {
     case unknown
@@ -200,6 +203,7 @@ final class AppViewModel: ObservableObject {
     private let deviceScheduleCloudKitService: DeviceScheduleCloudKitServicing
     private let crewAccessImportCloudKitService: CrewAccessImportCloudKitServicing
     private let tzResolver: IATATimeZoneResolving
+    private let keychainService: KeychainServiceProtocol
     private let externalOpenCoordinator: ExternalOpenImportCoordinator
     private let flightCountdownCoordinator = FlightCountdownCoordinator()
     private var sessionCookies: [HTTPCookie] = []
@@ -275,7 +279,8 @@ final class AppViewModel: ObservableObject {
         crewAccessImportCloudKitService: CrewAccessImportCloudKitServicing = CrewAccessImportCloudKitService(
             containerIdentifier: "iCloud.com.sfune.TimelineSchedule"
         ),
-        tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared
+        tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared,
+        keychainService: KeychainServiceProtocol = KeychainService()
     ) {
         self.syncService = syncService
         self.authService = authService
@@ -287,6 +292,7 @@ final class AppViewModel: ObservableObject {
         self.deviceScheduleCloudKitService = deviceScheduleCloudKitService
         self.crewAccessImportCloudKitService = crewAccessImportCloudKitService
         self.tzResolver = tzResolver
+        self.keychainService = keychainService
         self.externalOpenCoordinator = ExternalOpenImportCoordinator.shared
         let loadedAdminPolicy = Self.loadAdminPolicy()
         self.adminPolicy = loadedAdminPolicy
@@ -388,7 +394,7 @@ final class AppViewModel: ObservableObject {
 #if DEBUG
         logNonFatal("Cache restore (v2): crew=\(cachedCrewAccessSchedules.count) bidpro=\(cachedBidproSchedules.count)")
 #endif
-        NSLog("[VM] init vm=%@", String(describing: ObjectIdentifier(self)))
+        logger.info("[VM] init vm=\(String(describing: ObjectIdentifier(self)), privacy: .public)")
     }
 
     deinit {
@@ -398,7 +404,7 @@ final class AppViewModel: ObservableObject {
         if let iCloudKVObserver {
             NotificationCenter.default.removeObserver(iCloudKVObserver)
         }
-        NSLog("[VM] deinit vm=%@", String(describing: ObjectIdentifier(self)))
+        logger.info("[VM] deinit vm=\(String(describing: ObjectIdentifier(self)), privacy: .public)")
     }
 
     func handleIncomingAppDeepLink(_ url: URL) {
@@ -406,7 +412,7 @@ final class AppViewModel: ObservableObject {
         guard scheme == "tripdatahub" else { return }
         let route = url.host?.lowercased() ?? url.path.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard route == "import-crewaccess" else { return }
-        NSLog("[Import] deepLink received url=%@", url.absoluteString)
+        logger.info("[Import] deepLink received url=\(url.absoluteString, privacy: .private)")
         consumePendingAppGroupImportIfAvailable()
     }
 
@@ -428,7 +434,7 @@ final class AppViewModel: ObservableObject {
             }).value
 
             if lastConsumedAppGroupHandoffFileName == handoff.fileName {
-                NSLog("[Import] appGroup handoff skipped (already consumed) file=%@", handoff.fileName)
+                logger.info("[Import] appGroup handoff skipped (already consumed) file=\(handoff.fileName, privacy: .private)")
                 await Task.detached(priority: .utility, operation: {
                     Self.removePendingAppGroupHandoffBestEffort()
                 }).value
@@ -444,7 +450,7 @@ final class AppViewModel: ObservableObject {
                 return
             }
 
-            NSLog("[Import] appGroup handoff queued file=%@", handoff.fileName)
+            logger.info("[Import] appGroup handoff queued file=\(handoff.fileName, privacy: .private)")
             lastConsumedAppGroupHandoffFileName = handoff.fileName
             await Task.detached(priority: .utility, operation: {
                 Self.removePendingAppGroupHandoffBestEffort()
@@ -1011,20 +1017,15 @@ final class AppViewModel: ObservableObject {
     private func uploadCrewAccessImportFile(at url: URL, json: CrewAccessTripJSON) async {
         let fileName = url.lastPathComponent
         guard isIdentityVerified, let verifiedIdentity else {
-            NSLog("[CrewAccessImportUpload] skipped (identity not verified) file=%@", fileName)
+            logger.info("[CrewAccessImportUpload] skipped (identity not verified) file=\(fileName, privacy: .private)")
             return
         }
         guard let jsonData = try? Data(contentsOf: url) else {
-            NSLog("[CrewAccessImportUpload] skipped (cannot read file) path=%@", url.path)
+            logger.info("[CrewAccessImportUpload] skipped (cannot read file) path=\(url.path, privacy: .private)")
             return
         }
         let firstDep = json.items.first?.startUtc
-        NSLog(
-            "[CrewAccessImportUpload] start file=%@ bytes=%d gems=%@",
-            fileName,
-            jsonData.count,
-            verifiedIdentity.gemsID
-        )
+        logger.info("[CrewAccessImportUpload] start file=\(fileName, privacy: .private) bytes=\(jsonData.count, privacy: .public) gems=\(verifiedIdentity.gemsID, privacy: .private)")
         do {
             try await crewAccessImportCloudKitService.uploadImportFile(
                 gemsID: verifiedIdentity.gemsID,
@@ -1033,14 +1034,10 @@ final class AppViewModel: ObservableObject {
                 tripInformationDate: json.tripInformationDate,
                 firstDepartureUTC: firstDep
             )
-            NSLog("[CrewAccessImportUpload] success file=%@", fileName)
+            logger.info("[CrewAccessImportUpload] success file=\(fileName, privacy: .private)")
             logNonFatal("CrewAccess import file uploaded: \(fileName)")
         } catch {
-            NSLog(
-                "[CrewAccessImportUpload] FAILED file=%@ error=%@",
-                fileName,
-                error.localizedDescription
-            )
+            logger.error("[CrewAccessImportUpload] FAILED file=\(fileName, privacy: .private) error=\(error.localizedDescription, privacy: .public)")
             logNonFatal("CrewAccess import file upload failed: \(error.localizedDescription) file=\(fileName)")
         }
     }
@@ -1268,21 +1265,17 @@ final class AppViewModel: ObservableObject {
         let fingerprint = importPayloadFingerprint(data: data, sourceFileName: sourceFileName)
 
         guard pendingImport == nil else {
-            NSLog("[Import] importCrewAccessPDFData skipped (pendingImport already set) file=%@", sourceFileName ?? "unknown")
+            logger.info("[Import] importCrewAccessPDFData skipped (pendingImport already set) file=\(sourceFileName ?? "unknown", privacy: .private)")
             importInProgress = false
             return false
         }
 
         guard Self.claimPersistentFingerprint(fingerprint) else {
-            NSLog("[Import] importCrewAccessPDFData skipped (cross-launch dedup) file=%@", sourceFileName ?? "unknown")
+            logger.info("[Import] importCrewAccessPDFData skipped (cross-launch dedup) file=\(sourceFileName ?? "unknown", privacy: .private)")
             importInProgress = false
             return false
         }
-        NSLog(
-            "[Import] importCrewAccessPDFData called file=%@ bytes=%d",
-            sourceFileName ?? "unknown",
-            data.count
-        )
+        logger.info("[Import] importCrewAccessPDFData called file=\(sourceFileName ?? "unknown", privacy: .private) bytes=\(data.count, privacy: .public)")
         // PDF parsing is CPU-heavy (PDFKit text extraction + regex passes).
         // Run it off the main actor so the UI stays responsive on large trips.
         let service = crewAccessImportService
@@ -1302,13 +1295,8 @@ final class AppViewModel: ObservableObject {
             createdAt: Date(),
             rawExtractStats: draft.rawExtractStats
         )
-        NSLog(
-            "[Import] pendingImport set id=%@ tripId=%@ errors=%d warnings=%d",
-            pendingImport?.id.uuidString ?? "nil",
-            draft.tripId,
-            draft.errors.count,
-            draft.warnings.count
-        )
+        let pendingImportID = pendingImport?.id.uuidString ?? "nil"
+        logger.info("[Import] pendingImport set id=\(pendingImportID, privacy: .public) tripId=\(draft.tripId, privacy: .private) errors=\(draft.errors.count, privacy: .public) warnings=\(draft.warnings.count, privacy: .public)")
 
         if draft.errors.isEmpty {
             crewAccessImportMessage = "Parsed CrewAccess PDF. Review and confirm import."
@@ -1325,17 +1313,17 @@ final class AppViewModel: ObservableObject {
             let accepted = await self.externalOpenCoordinator.enqueue(key: key, url: url, now: Date())
             if accepted {
                 self.pendingExternalOpenURL = url
-                NSLog("[Import] queueExternalOpenURL accepted key=%@", key)
+                logger.info("[Import] queueExternalOpenURL accepted key=\(key, privacy: .private)")
                 self.startExternalConsumerIfNeeded()
             } else {
-                NSLog("[Import] queueExternalOpenURL skipped (duplicate) key=%@", key)
+                logger.info("[Import] queueExternalOpenURL skipped (duplicate) key=\(key, privacy: .private)")
             }
         }
     }
 
     private func startExternalConsumerIfNeeded() {
         guard externalConsumerTask == nil else {
-            NSLog("[Import] consumeExternalOpenURL skipped (already running)")
+            logger.info("[Import] consumeExternalOpenURL skipped (already running)")
             return
         }
         externalConsumerTask = Task { [weak self] in
@@ -1347,14 +1335,14 @@ final class AppViewModel: ObservableObject {
             guard let self else { return }
             await self.externalConsumerLoop()
         }
-        NSLog("[Import] externalConsumer start")
+        logger.info("[Import] externalConsumer start")
     }
 
     private func externalConsumerLoop() async {
         while true {
             guard let nextItem = await externalOpenCoordinator.dequeueNext() else {
                 pendingExternalOpenURL = nil
-                NSLog("[Import] externalConsumer stop")
+                logger.info("[Import] externalConsumer stop")
                 break
             }
             let url = nextItem.url
@@ -1362,21 +1350,21 @@ final class AppViewModel: ObservableObject {
 
             let markedInFlight = await externalOpenCoordinator.markInFlight(key)
             if !markedInFlight {
-                NSLog("[Import] consumeExternalOpenURL skipped (already running)")
+                logger.info("[Import] consumeExternalOpenURL skipped (already running)")
                 continue
             }
 
             var isSuccess = false
-            NSLog("[Import] consumeExternalOpenURL begin key=%@", key)
+            logger.info("[Import] consumeExternalOpenURL begin key=\(key, privacy: .private)")
 
             if pendingImport != nil {
-                NSLog("[Import] consumeExternalOpenURL skipped (pending import exists)")
+                logger.info("[Import] consumeExternalOpenURL skipped (pending import exists)")
                 crewAccessImportMessage = "Another import is waiting for review. Confirm or dismiss the current import first."
                 hasQueuedImport = true
                 await externalOpenCoordinator.finish(key: key, success: false)
                 await externalOpenCoordinator.requeueFront(nextItem)
                 pendingExternalOpenURL = nil
-                NSLog("[Import] consumeExternalOpenURL done key=%@ ok=%@", key, String(isSuccess))
+                logger.info("[Import] consumeExternalOpenURL done key=\(key, privacy: .private) ok=\(isSuccess, privacy: .public)")
                 break
             }
 
@@ -1384,7 +1372,7 @@ final class AppViewModel: ObservableObject {
                 crewAccessImportMessage = "Import failed: shared item is not a file URL."
                 await externalOpenCoordinator.finish(key: key, success: false)
                 pendingExternalOpenURL = nil
-                NSLog("[Import] consumeExternalOpenURL done key=%@ ok=%@", key, String(isSuccess))
+                logger.info("[Import] consumeExternalOpenURL done key=\(key, privacy: .private) ok=\(isSuccess, privacy: .public)")
                 continue
             }
 
@@ -1392,14 +1380,14 @@ final class AppViewModel: ObservableObject {
                 let data = try await Task.detached(priority: .utility) {
                     try await Self.readExternalPDFDataWithFallback(from: url, timeoutSeconds: 3)
                 }.value
-                NSLog("[Import] coordinated read success bytes=%d", data.count)
+                logger.info("[Import] coordinated read success bytes=\(data.count, privacy: .public)")
                 let sniff = Self.sniffPDFSignature(in: data)
-                NSLog("[Import] sniffPDF=%@ header=%@", String(sniff.isPDF), sniff.header)
+                logger.info("[Import] sniffPDF=\(sniff.isPDF, privacy: .public) header=\(sniff.header, privacy: .public)")
                 guard sniff.isPDF else {
                     crewAccessImportMessage = "Selected file is not a PDF. Re-export using Zscaler Print and retry."
                     await externalOpenCoordinator.finish(key: key, success: false)
                     pendingExternalOpenURL = nil
-                    NSLog("[Import] consumeExternalOpenURL done key=%@ ok=false (not PDF)", key)
+                    logger.info("[Import] consumeExternalOpenURL done key=\(key, privacy: .private) ok=false (not PDF)")
                     continue
                 }
                 let importAccepted = await importCrewAccessPDFData(data, sourceFileName: url.lastPathComponent)
@@ -1415,7 +1403,7 @@ final class AppViewModel: ObservableObject {
             }
             await externalOpenCoordinator.finish(key: key, success: isSuccess)
             pendingExternalOpenURL = nil
-            NSLog("[Import] consumeExternalOpenURL done key=%@ ok=%@", key, String(isSuccess))
+            logger.info("[Import] consumeExternalOpenURL done key=\(key, privacy: .private) ok=\(isSuccess, privacy: .public)")
         }
     }
 
@@ -1660,11 +1648,7 @@ final class AppViewModel: ObservableObject {
                 Self.deleteCrewAccessImportFilesOutsideRetainedBidPeriods(retainedOrders: retainedOrders)
             }.value
             if deletedFileCount > 0 {
-                NSLog(
-                    "[CrewAccessRetention] keptPeriods=%@ deletedFiles=%d",
-                    retainedOrders.map(String.init).sorted().joined(separator: ","),
-                    deletedFileCount
-                )
+                logger.info("[CrewAccessRetention] keptPeriods=\(retainedOrders.map(String.init).sorted().joined(separator: ","), privacy: .public) deletedFiles=\(deletedFileCount, privacy: .public)")
             }
         } else {
             deletedFileCount = 0
@@ -1727,7 +1711,7 @@ final class AppViewModel: ObservableObject {
         crewAccessDeleteMessage = nil
         defer { isDeletingCrewAccessTrips = false }
 
-        NSLog("[CrewAccessFileDelete] start files=%d", urls.count)
+        logger.info("[CrewAccessFileDelete] start files=\(urls.count, privacy: .public)")
         let scheduleReferences = crewAccessSchedules.map {
             CrewAccessScheduleReference(
                 id: $0.id,
@@ -1785,7 +1769,7 @@ final class AppViewModel: ObservableObject {
         pruneCrewAccessLegImportReferenceTimes()
         schedules = mergeAndSortSchedules(crew: crewAccessSchedules, bidpro: bidproSchedules)
         handleSchedulesChangedForSharing()
-        NSLog("[CrewAccessFileDelete] removedTrips=%d", removedTripsCount)
+        logger.info("[CrewAccessFileDelete] removedTrips=\(removedTripsCount, privacy: .public)")
 
         var cacheSaved = false
         do {
@@ -1802,10 +1786,10 @@ final class AppViewModel: ObservableObject {
                 lastSyncAt = persistedLastSyncAt
             }
             cacheSaved = true
-            NSLog("[CrewAccessFileDelete] cacheSaved=true error=")
+            logger.info("[CrewAccessFileDelete] cacheSaved=true")
         } catch {
             logNonFatal("Failed to save schedule cache after CrewAccess file delete: \(error.localizedDescription)")
-            NSLog("[CrewAccessFileDelete] cacheSaved=false error=%@", error.localizedDescription)
+            logger.error("[CrewAccessFileDelete] cacheSaved=false error=\(error.localizedDescription, privacy: .public)")
         }
 
         let deletedFileCount = deletionResults.filter(\.deleted).count
@@ -1849,7 +1833,7 @@ final class AppViewModel: ObservableObject {
         isDeletingCrewAccessTrips = true
         crewAccessDeleteMessage = nil
         defer { isDeletingCrewAccessTrips = false }
-        NSLog("[CrewAccessDelete] start ids=%@", ids.sorted().joined(separator: ","))
+        logger.info("[CrewAccessDelete] start ids=\(ids.sorted().joined(separator: ","), privacy: .private)")
 
         let toDelete = crewAccessSchedules.filter { ids.contains($0.id) }
         guard !toDelete.isEmpty else {
@@ -1862,7 +1846,7 @@ final class AppViewModel: ObservableObject {
         pruneCrewAccessLegImportReferenceTimes()
         schedules = mergeAndSortSchedules(crew: crewAccessSchedules, bidpro: bidproSchedules)
         handleSchedulesChangedForSharing()
-        NSLog("[CrewAccessDelete] removedSchedules=%d", toDelete.count)
+        logger.info("[CrewAccessDelete] removedSchedules=\(toDelete.count, privacy: .public)")
 
         do {
             let persistedLastSyncAt = lastSyncAt ?? Date()
@@ -1877,25 +1861,31 @@ final class AppViewModel: ObservableObject {
             if lastSyncAt == nil {
                 lastSyncAt = persistedLastSyncAt
             }
-            NSLog("[CrewAccessDelete] cacheSaved=true error=")
+            logger.info("[CrewAccessDelete] cacheSaved=true")
         } catch {
             logNonFatal("Failed to save schedule cache after CrewAccess delete: \(error.localizedDescription)")
-            NSLog("[CrewAccessDelete] cacheSaved=false error=%@", error.localizedDescription)
+            logger.error("[CrewAccessDelete] cacheSaved=false error=\(error.localizedDescription, privacy: .public)")
         }
 
         let scheduleIDsToDelete = toDelete.map(\.id)
+        let tripIDsToDelete = Array(Set(toDelete.flatMap { $0.legs.map(\.pairing) }))
         let fileDeleteResult = await Task.detached(priority: .utility) {
-            Self.deleteCrewAccessImportFilesBestEffort(scheduleIDs: scheduleIDsToDelete)
+            Self.deleteCrewAccessImportFilesBestEffort(
+                scheduleIDs: scheduleIDsToDelete,
+                tripIDs: tripIDsToDelete
+            )
         }.value
-        NSLog(
-            "[CrewAccessDelete] detached file delete complete deleted=%d failures=%d",
-            fileDeleteResult.deleted,
-            fileDeleteResult.failures
-        )
+        logger.info("[CrewAccessDelete] detached file delete complete deleted=\(fileDeleteResult.deleted, privacy: .public) failures=\(fileDeleteResult.failures, privacy: .public)")
         if fileDeleteResult.failures == 0 {
             crewAccessDeleteMessage = "Deleted \(toDelete.count) trip(s)."
         } else {
             crewAccessDeleteMessage = "Deleted \(toDelete.count) trip(s). Some JSON files could not be removed."
+        }
+        let deletionTime = Date()
+        lastDeviceScheduleFetchAt = deletionTime
+        UserDefaults.standard.set(deletionTime, forKey: deviceScheduleFetchAtKey)
+        if !fileDeleteResult.deletedFileNames.isEmpty {
+            await tombstoneCrewAccessImportFiles(fileNames: fileDeleteResult.deletedFileNames)
         }
         Task { [weak self] in await self?.uploadDeviceScheduleIfNeeded(reason: "trip deleted") }
     }
@@ -1928,7 +1918,7 @@ final class AppViewModel: ObservableObject {
             logTenExportedFingerprints[candidate.key] != candidate.fingerprint
         }
 
-        NSLog("[LogTenExport] start candidates=%d unexported=%d", candidates.count, unexported.count)
+        logger.info("[LogTenExport] start candidates=\(candidates.count, privacy: .public) unexported=\(unexported.count, privacy: .public)")
 
         guard !unexported.isEmpty else {
             logTenExportMessage = "No new CrewAccess flights to export."
@@ -2008,7 +1998,7 @@ final class AppViewModel: ObservableObject {
 
         do {
             try data.write(to: outputURL, options: .atomic)
-            NSLog("[LogTenExport] finished rows=%d bytes=%d", csvRows.count, data.count)
+            logger.info("[LogTenExport] finished rows=\(csvRows.count, privacy: .public) bytes=\(data.count, privacy: .public)")
             logTenExportMessage = "LogTen CSV ready — \(csvRows.count) flights."
             return LogTenExportOutput(
                 url: outputURL,
@@ -2594,7 +2584,7 @@ final class AppViewModel: ObservableObject {
 
     private nonisolated static func readExternalPDFDataDirect(from originalURL: URL) throws -> Data {
         let data = try Data(contentsOf: originalURL, options: [.mappedIfSafe])
-        NSLog("[Import] consume read method=direct success bytes=%d", data.count)
+        logger.info("[Import] consume read method=direct success bytes=\(data.count, privacy: .public)")
         return data
     }
 
@@ -2614,7 +2604,7 @@ final class AppViewModel: ObservableObject {
             do {
                 let data = try Data(contentsOf: coordinatedURL)
                 readData = data
-                NSLog("[Import] coordinated read success bytes=%d", data.count)
+                logger.info("[Import] coordinated read success bytes=\(data.count, privacy: .public)")
             } catch {
                 readError = error
             }
@@ -2644,10 +2634,10 @@ final class AppViewModel: ObservableObject {
                     from: originalURL,
                     timeoutSeconds: timeoutSeconds
                 )
-                NSLog("[Import] consume read method=coordinator success bytes=%d", data.count)
+                logger.info("[Import] consume read method=coordinator success bytes=\(data.count, privacy: .public)")
                 return data
             } catch ExternalOpenReadTimeoutError.timedOut {
-                NSLog("[Import] consume read method=coordinator timeout")
+                logger.info("[Import] consume read method=coordinator timeout")
                 throw ExternalOpenReadTimeoutError.timedOut
             } catch {
                 throw error
@@ -2693,29 +2683,29 @@ final class AppViewModel: ObservableObject {
         let normalizedPath = url.standardizedFileURL.path
         let inboxPathToken = "/Documents/Inbox/"
         if normalizedPath.contains(inboxPathToken) {
-            NSLog("[Import] cleanupInbox start path=%@", normalizedPath)
+            logger.info("[Import] cleanupInbox start path=\(normalizedPath, privacy: .private)")
             do {
                 try FileManager.default.removeItem(at: url)
-                NSLog("[Import] cleanupInbox deleted path=%@", normalizedPath)
+                logger.info("[Import] cleanupInbox deleted path=\(normalizedPath, privacy: .private)")
             } catch {
-                NSLog("[Import] cleanupInbox failed path=%@ error=%@", normalizedPath, error.localizedDescription)
+                logger.error("[Import] cleanupInbox failed path=\(normalizedPath, privacy: .private) error=\(error.localizedDescription, privacy: .public)")
             }
             return
         }
 
         if let appGroupDir = Self.appGroupImportDirectoryURL()?.standardizedFileURL.path,
            normalizedPath.hasPrefix(appGroupDir + "/") || normalizedPath == appGroupDir {
-            NSLog("[Import] cleanupAppGroup start path=%@", normalizedPath)
+            logger.info("[Import] cleanupAppGroup start path=\(normalizedPath, privacy: .private)")
             do {
                 try FileManager.default.removeItem(at: url)
-                NSLog("[Import] cleanupAppGroup deleted path=%@", normalizedPath)
+                logger.info("[Import] cleanupAppGroup deleted path=\(normalizedPath, privacy: .private)")
             } catch {
-                NSLog("[Import] cleanupAppGroup failed path=%@ error=%@", normalizedPath, error.localizedDescription)
+                logger.error("[Import] cleanupAppGroup failed path=\(normalizedPath, privacy: .private) error=\(error.localizedDescription, privacy: .public)")
             }
             return
         }
 
-        NSLog("[Import] cleanupExternalFile skip (not managed path) url=%@", url.absoluteString)
+        logger.info("[Import] cleanupExternalFile skip (not managed path) url=\(url.absoluteString, privacy: .private)")
     }
 
     private struct AppGroupPendingImportHandoff: Codable {
@@ -2745,7 +2735,7 @@ final class AppViewModel: ObservableObject {
             let fileURL = directoryURL.appendingPathComponent(handoff.fileName, isDirectory: false)
             return AppGroupPendingImportReference(fileName: handoff.fileName, fileURL: fileURL)
         } catch {
-            NSLog("[Import] appGroup handoff decode failed error=%@", error.localizedDescription)
+            logger.error("[Import] appGroup handoff decode failed error=\(error.localizedDescription, privacy: .public)")
             removePendingAppGroupHandoffBestEffort()
             return nil
         }
@@ -2886,7 +2876,7 @@ final class AppViewModel: ObservableObject {
                 try fm.removeItem(at: url)
                 deletedCount += 1
             } catch {
-                NSLog("[CrewAccessRetention] failedFileDelete=%@ error=%@", url.path, error.localizedDescription)
+                logger.error("[CrewAccessRetention] failedFileDelete=\(url.path, privacy: .private) error=\(error.localizedDescription, privacy: .public)")
             }
         }
         return deletedCount
@@ -3242,17 +3232,9 @@ final class AppViewModel: ObservableObject {
             let tripId = tripIdRaw.isEmpty ? nil : tripIdRaw
             let tripDate = header?.tripInformationDate
             if let tripId {
-                NSLog(
-                    "[CrewAccessFileDelete] decoded tripId=%@ infoDate=%@",
-                    tripId,
-                    tripDate ?? "nil"
-                )
+                logger.info("[CrewAccessFileDelete] decoded tripId=\(tripId, privacy: .private) infoDate=\(tripDate ?? "nil", privacy: .public)")
             } else {
-                NSLog(
-                    "[CrewAccessFileDelete] decodeFailed file=%@ error=%@",
-                    fileName,
-                    decodeErrorMessage ?? "missing tripId/tripInformationDate"
-                )
+                logger.info("[CrewAccessFileDelete] decodeFailed file=\(fileName, privacy: .private) error=\(decodeErrorMessage ?? "missing tripId/tripInformationDate", privacy: .public)")
             }
 
             let matchedIDs: [String]
@@ -3268,7 +3250,7 @@ final class AppViewModel: ObservableObject {
 
             do {
                 try fm.removeItem(at: url)
-                NSLog("[CrewAccessFileDelete] deletedFile=%@", url.path)
+                logger.info("[CrewAccessFileDelete] deletedFile=\(url.path, privacy: .private)")
                 return CrewAccessFileDeletionResult(
                     deleted: true,
                     tripId: tripId,
@@ -3276,7 +3258,7 @@ final class AppViewModel: ObservableObject {
                     matchedScheduleIDs: matchedIDs
                 )
             } catch {
-                NSLog("[CrewAccessFileDelete] failedFileDelete=%@ error=%@", url.path, error.localizedDescription)
+                logger.error("[CrewAccessFileDelete] failedFileDelete=\(url.path, privacy: .private) error=\(error.localizedDescription, privacy: .public)")
                 return CrewAccessFileDeletionResult(
                     deleted: false,
                     tripId: tripId,
@@ -3287,14 +3269,17 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    private nonisolated static func deleteCrewAccessImportFilesBestEffort(scheduleIDs: [String]) -> (deleted: Int, failures: Int) {
+    private nonisolated static func deleteCrewAccessImportFilesBestEffort(
+        scheduleIDs: [String],
+        tripIDs: [String]
+    ) -> (deleted: Int, failures: Int, deletedFileNames: [String]) {
         let fm = FileManager.default
         guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            return (0, 0)
+            return (0, 0, [])
         }
         let dir = documents.appendingPathComponent("CrewAccessImports", isDirectory: true)
         guard fm.fileExists(atPath: dir.path) else {
-            return (0, 0)
+            return (0, 0, [])
         }
 
         let urls: [URL]
@@ -3305,33 +3290,40 @@ final class AppViewModel: ObservableObject {
                 options: [.skipsHiddenFiles]
             )
         } catch {
-            return (0, 0)
+            return (0, 0, [])
         }
 
         var deletedCount = 0
         var failedCount = 0
+        var deletedFileNames: [String] = []
         for url in urls {
             guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
                   values.isRegularFile == true else {
                 continue
             }
             let name = url.lastPathComponent
-            let shouldDelete = scheduleIDs.contains { scheduleID in
+            let matchesScheduleID = scheduleIDs.contains { scheduleID in
                 let safeID = scheduleID.replacingOccurrences(of: "/", with: "-")
                 return name.hasPrefix("\(safeID)_") || name.contains(scheduleID) || name.contains(safeID)
             }
+            let matchesTripID = tripIDs.contains { tripID in
+                let safeID = tripID.replacingOccurrences(of: "/", with: "-")
+                return name.hasPrefix("\(safeID)_") || name.contains(tripID) || name.contains(safeID)
+            }
+            let shouldDelete = matchesScheduleID || matchesTripID
             guard shouldDelete else { continue }
 
             do {
                 try fm.removeItem(at: url)
                 deletedCount += 1
-                NSLog("[CrewAccessDelete] deletedFile=%@", url.path)
+                deletedFileNames.append(name)
+                logger.info("[CrewAccessDelete] deletedFile=\(url.path, privacy: .private)")
             } catch {
                 failedCount += 1
-                NSLog("[CrewAccessDelete] failedFileDelete=%@ error=%@", url.path, error.localizedDescription)
+                logger.error("[CrewAccessDelete] failedFileDelete=\(url.path, privacy: .private) error=\(error.localizedDescription, privacy: .public)")
             }
         }
-        return (deletedCount, failedCount)
+        return (deletedCount, failedCount, deletedFileNames)
     }
 
     private struct CrewAccessJSONWriteContext {
@@ -3385,9 +3377,9 @@ final class AppViewModel: ObservableObject {
                 guard name.hasSuffix(tripIDSuffix), fileURL.path != finalURL.path else { continue }
                 do {
                     try fm.removeItem(at: fileURL)
-                    NSLog("[Import] Removed stale trip file: %@", name)
+                    logger.info("[Import] Removed stale trip file: \(name, privacy: .private)")
                 } catch {
-                    NSLog("[Import] Failed to remove stale trip file %@: %@", name, error.localizedDescription)
+                    logger.error("[Import] Failed to remove stale trip file \(name, privacy: .private): \(error.localizedDescription, privacy: .public)")
                 }
             }
         }
@@ -3812,7 +3804,7 @@ final class AppViewModel: ObservableObject {
     }
 
     private func logNonFatal(_ message: String) {
-        NSLog("[BidProSchedule] %@", message)
+        logger.info("\(message, privacy: .public)")
     }
 
     private func isServerDownError(_ error: Error) -> Bool {
@@ -3828,20 +3820,31 @@ final class AppViewModel: ObservableObject {
     }
 
     private func loadFriendConnections() -> [FriendConnection] {
-        let defaults = UserDefaults.standard
+        // Keychain を先に読む。なければ UserDefaults から移行する。
         var local: [FriendConnection] = []
-        if let data = defaults.data(forKey: friendConnectionsKey),
-           let decoded = try? JSONDecoder().decode([FriendConnection].self, from: data) {
+        var isFromKeychain = false
+        if let keychainData = try? keychainService.load(account: friendConnectionsKey),
+           let decoded = try? JSONDecoder().decode([FriendConnection].self, from: keychainData) {
             local = decoded
+            isFromKeychain = true
+        } else if let udData = UserDefaults.standard.data(forKey: friendConnectionsKey),
+                  let decoded = try? JSONDecoder().decode([FriendConnection].self, from: udData) {
+            local = decoded
+            isFromKeychain = false
         }
+
         // Merge with iCloud KV lightweight status so accepted connections
         // flow from iPhone to iPad (and vice-versa) without needing CloudKit.
         let kvEntries = iCloudKVFriendConnectionEntries()
         let combined = local + kvEntries.map { friendConnection(from: $0) }
         let normalized = normalizeFriendConnections(combined)
-        if normalized != local,
+        if normalized != local || !isFromKeychain,
            let migratedData = try? JSONEncoder().encode(normalized) {
-            defaults.set(migratedData, forKey: friendConnectionsKey)
+            try? keychainService.save(data: migratedData, account: friendConnectionsKey)
+            if !isFromKeychain {
+                // UserDefaults → Keychain への一回限りの移行
+                UserDefaults.standard.removeObject(forKey: friendConnectionsKey)
+            }
         }
         return normalized
     }
@@ -3936,7 +3939,7 @@ final class AppViewModel: ObservableObject {
     private func saveFriendConnections() {
         do {
             let data = try JSONEncoder().encode(friendConnections)
-            UserDefaults.standard.set(data, forKey: friendConnectionsKey)
+            try keychainService.save(data: data, account: friendConnectionsKey)
         } catch {
             logNonFatal("Failed to save friend connections: \(error.localizedDescription)")
         }
@@ -3979,7 +3982,7 @@ final class AppViewModel: ObservableObject {
         }
         if let syncData = try? encoder.encode(entries) {
             let schedSizes = entries.map { "\($0.employeeID):\($0.sharedSchedulesData?.count ?? 0)B" }.joined(separator: ", ")
-            NSLog("[KVSync] saveFriendConnections: writing \(syncData.count)B total — schedules: [\(schedSizes)]")
+            logger.info("[KVSync] saveFriendConnections: writing \(syncData.count, privacy: .public)B total — schedules: [\(schedSizes, privacy: .private)]")
             NSUbiquitousKeyValueStore.default.set(syncData, forKey: friendConnectionsSyncKey)
             NSUbiquitousKeyValueStore.default.synchronize()
         }
@@ -4065,28 +4068,54 @@ final class AppViewModel: ObservableObject {
     }
 
     private func loadVerifiedIdentity() -> VerifiedIdentityProfile? {
-        guard let data = UserDefaults.standard.data(forKey: verifiedIdentityKey) else { return nil }
+        // Keychain を先に読む。なければ UserDefaults から移行する。
+        let data: Data
+        let isFromKeychain: Bool
+        if let keychainData = try? keychainService.load(account: verifiedIdentityKey) {
+            data = keychainData
+            isFromKeychain = true
+        } else if let udData = UserDefaults.standard.data(forKey: verifiedIdentityKey) {
+            data = udData
+            isFromKeychain = false
+        } else {
+            return nil
+        }
+
         do {
             let profile = try JSONDecoder().decode(VerifiedIdentityProfile.self, from: data)
             let normalizedGEMS = GEMSIDNormalizer.normalize(profile.gemsID)
-            guard normalizedGEMS != profile.gemsID else { return profile }
-            let migrated = VerifiedIdentityProfile(
-                cloudKitRecordName: profile.cloudKitRecordName,
-                name: profile.name,
-                gemsID: normalizedGEMS,
-                domicile: profile.domicile,
-                equipment: profile.equipment,
-                seat: profile.seat,
-                dateOfHire: profile.dateOfHire,
-                isAdminEligible: profile.isAdminEligible,
-                adminPolicyFingerprint: profile.adminPolicyFingerprint,
-                verifiedAt: profile.verifiedAt
-            )
-            saveVerifiedIdentity(migrated)
-            return migrated
+            let result: VerifiedIdentityProfile
+            if normalizedGEMS != profile.gemsID {
+                result = VerifiedIdentityProfile(
+                    cloudKitRecordName: profile.cloudKitRecordName,
+                    name: profile.name,
+                    gemsID: normalizedGEMS,
+                    domicile: profile.domicile,
+                    equipment: profile.equipment,
+                    seat: profile.seat,
+                    dateOfHire: profile.dateOfHire,
+                    isAdminEligible: profile.isAdminEligible,
+                    adminPolicyFingerprint: profile.adminPolicyFingerprint,
+                    verifiedAt: profile.verifiedAt
+                )
+            } else {
+                result = profile
+            }
+            if !isFromKeychain {
+                // UserDefaults → Keychain へ一回限りの移行
+                saveVerifiedIdentity(result)
+                UserDefaults.standard.removeObject(forKey: verifiedIdentityKey)
+            } else if normalizedGEMS != profile.gemsID {
+                saveVerifiedIdentity(result)
+            }
+            return result
         } catch {
             logNonFatal("Failed to decode verified identity: \(error.localizedDescription)")
-            UserDefaults.standard.removeObject(forKey: verifiedIdentityKey)
+            if isFromKeychain {
+                try? keychainService.delete(account: verifiedIdentityKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: verifiedIdentityKey)
+            }
             return nil
         }
     }
@@ -4094,13 +4123,14 @@ final class AppViewModel: ObservableObject {
     private func saveVerifiedIdentity(_ profile: VerifiedIdentityProfile) {
         do {
             let data = try JSONEncoder().encode(profile)
-            UserDefaults.standard.set(data, forKey: verifiedIdentityKey)
+            try keychainService.save(data: data, account: verifiedIdentityKey)
         } catch {
             logNonFatal("Failed to save verified identity: \(error.localizedDescription)")
         }
     }
 
     private func clearVerifiedIdentity() {
+        try? keychainService.delete(account: verifiedIdentityKey)
         UserDefaults.standard.removeObject(forKey: verifiedIdentityKey)
         updateAdminStatus()
     }
@@ -4401,16 +4431,13 @@ final class AppViewModel: ObservableObject {
     }
 
     private func scheduleDisplaySortKey(_ schedule: PayPeriodSchedule) -> String {
-        let key: String
         if let minUTC = schedule.legs.compactMap(\.depUTC).sorted().first {
-            key = minUTC
+            return minUTC
         } else if let minLocal = schedule.legs.map(\.depLocal).sorted().first {
-            key = minLocal
+            return minLocal
         } else {
-            key = schedule.label
+            return schedule.label
         }
-        logNonFatal("[Timeline] scheduleSortKey scheduleId=\(schedule.id) key=\(key)")
-        return key
     }
 
     private func mergeAndSortSchedules(crew: [PayPeriodSchedule], bidpro: [PayPeriodSchedule]) -> [PayPeriodSchedule] {

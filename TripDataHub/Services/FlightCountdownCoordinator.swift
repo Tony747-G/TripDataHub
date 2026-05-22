@@ -1,4 +1,7 @@
 import Foundation
+import os
+
+private let logger = Logger(subsystem: "com.sfune.TripDataHub", category: "FlightCountdown")
 
 #if os(iOS)
 import ActivityKit
@@ -53,7 +56,7 @@ actor FlightCountdownCoordinator {
             let data = try encoder.encode(snapshot)
             try data.write(to: fileURL, options: .atomic)
         } catch {
-            NSLog("[FlightCountdown] snapshot write failed: %@", error.localizedDescription)
+            logger.error("[FlightCountdown] snapshot write failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -134,7 +137,7 @@ actor FlightCountdownCoordinator {
                 content: content
             )
         } catch {
-            NSLog("[FlightCountdown] live activity request failed: %@", error.localizedDescription)
+            logger.error("[FlightCountdown] live activity request failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 }

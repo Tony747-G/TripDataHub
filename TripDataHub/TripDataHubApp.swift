@@ -1,4 +1,7 @@
 import SwiftUI
+import os
+
+private let logger = Logger(subsystem: "com.sfune.TripDataHub", category: "AppLifecycle")
 
 enum ExternalOpenLaunchGate {
     private static let lock = NSLock()
@@ -53,12 +56,12 @@ struct TripDataHubApp: App {
             AppRootView()
                 .environmentObject(viewModel)
                 .onOpenURL { url in
-                    NSLog("[Import] app.onOpenURL received url=%@", url.absoluteString)
+                    logger.info("[Import] app.onOpenURL received url=\(url.absoluteString, privacy: .private)")
                     if url.isFileURL {
                         if ExternalOpenLaunchGate.shouldForward(url: url) {
                             viewModel.queueExternalOpenURL(url)
                         } else {
-                            NSLog("[Import] app.onOpenURL skipped (duplicate) url=%@", url.absoluteString)
+                            logger.info("[Import] app.onOpenURL skipped (duplicate) url=\(url.absoluteString, privacy: .private)")
                         }
                     } else {
                         viewModel.handleIncomingAppDeepLink(url)

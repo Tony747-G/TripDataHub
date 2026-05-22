@@ -18,26 +18,55 @@ struct ScheduleCacheSnapshotV2: Codable {
     let migratedAt: Date?
 }
 
+enum ScheduleCacheError: Error {
+    case directoryUnavailable
+}
+
 final class ScheduleCacheService: ScheduleCacheServiceProtocol {
+    // UserDefaults keys retained only for the one-time migration read path.
     private let defaults: UserDefaults
     private let storageKeyV1 = "tripboard.schedule.cache.v1"
     private let storageKeyV2 = "tripboard.schedule.cache.v2"
 
-    init(defaults: UserDefaults = .standard) {
+    // V3: file-backed storage in Application Support (private to the app).
+    private let fileURL: URL?
+
+    init(defaults: UserDefaults = .standard, directory: URL? = nil) {
         self.defaults = defaults
+        let resolvedDirectory = directory ?? Self.defaultDirectory()
+        self.fileURL = resolvedDirectory?.appendingPathComponent("schedule_cache_v3.json")
+    }
+
+    private static func defaultDirectory() -> URL? {
+        try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
     }
 
     func load() -> ScheduleCacheSnapshotV2? {
+        // 1. Primary: read from file (V3).
+        if let url = fileURL,
+           let data = try? Data(contentsOf: url),
+           let decoded = try? JSONDecoder().decode(ScheduleCacheSnapshotV2.self, from: data) {
+            return decoded
+        }
+
+        // 2. Migration: UserDefaults V2 → file.
         if let dataV2 = defaults.data(forKey: storageKeyV2),
            let decodedV2 = try? JSONDecoder().decode(ScheduleCacheSnapshotV2.self, from: dataV2) {
+            try? save(decodedV2)
+            defaults.removeObject(forKey: storageKeyV2)
             return decodedV2
         }
 
+        // 3. Migration: UserDefaults V1 → split → file.
         guard let dataV1 = defaults.data(forKey: storageKeyV1),
               let decodedV1 = try? JSONDecoder().decode(ScheduleCacheSnapshot.self, from: dataV1) else {
             return nil
         }
-
         let split = Self.splitLegacySchedules(decodedV1.schedules)
         let migratedSnapshot = ScheduleCacheSnapshotV2(
             crewAccessSchedules: split.crew,
@@ -46,15 +75,23 @@ final class ScheduleCacheService: ScheduleCacheServiceProtocol {
             migratedAt: Date()
         )
         try? save(migratedSnapshot)
+        defaults.removeObject(forKey: storageKeyV1)
+        defaults.removeObject(forKey: storageKeyV2)
         return migratedSnapshot
     }
 
     func save(_ snapshot: ScheduleCacheSnapshotV2) throws {
+        guard let url = fileURL else {
+            throw ScheduleCacheError.directoryUnavailable
+        }
         let data = try JSONEncoder().encode(snapshot)
-        defaults.set(data, forKey: storageKeyV2)
+        try data.write(to: url, options: .atomic)
     }
 
     func clear() {
+        if let url = fileURL {
+            try? FileManager.default.removeItem(at: url)
+        }
         defaults.removeObject(forKey: storageKeyV2)
         defaults.removeObject(forKey: storageKeyV1)
     }

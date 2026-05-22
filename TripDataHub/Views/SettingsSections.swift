@@ -275,6 +275,49 @@ struct SettingsDisplaySection: View {
     }
 }
 
+enum PilotQualification: String, CaseIterable, Identifiable {
+    case captain
+    case firstOfficer
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .captain:
+            return "Captain"
+        case .firstOfficer:
+            return "First Officer"
+        }
+    }
+}
+
+struct SettingsQualificationSection: View {
+    @Binding var qualificationRawValue: String
+    @Binding var bidTransitionTimelineEnabled: Bool
+
+    private var qualificationBinding: Binding<PilotQualification> {
+        Binding(
+            get: { PilotQualification(rawValue: qualificationRawValue) ?? .captain },
+            set: { qualificationRawValue = $0.rawValue }
+        )
+    }
+
+    var body: some View {
+        Section {
+            Picker("Qualification", selection: qualificationBinding) {
+                ForEach(PilotQualification.allCases) { qualification in
+                    Text(qualification.label).tag(qualification)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Toggle("Bid Transition Timeline", isOn: $bidTransitionTimelineEnabled)
+        } header: {
+            sectionHeader("Qualification")
+        }
+    }
+}
+
 struct SettingsNotificationSection: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @Binding var notify48h: Bool
@@ -296,6 +339,226 @@ struct SettingsNotificationSection: View {
             sectionHeader("Notification Setting")
         }
     }
+}
+
+struct SettingsReadinessExpirySection: View {
+    @Binding var faaMedicalExpiryDate: String
+    @Binding var passportExpiryDate: String
+    @Binding var chinaVisaExpiryDate: String
+    let domicileTimeZone: TimeZone
+    @State private var expandedField: ExpiryField?
+
+    private enum ExpiryField {
+        case faaMedical
+        case passport
+        case chinaVisa
+    }
+
+    var body: some View {
+        Section {
+            expiryDatePicker("FAA Medical Expiry Date", field: .faaMedical, value: $faaMedicalExpiryDate)
+            expiryDatePicker("Passport Expiry Date", field: .passport, value: $passportExpiryDate)
+            expiryDatePicker("China Visa Expiry Date", field: .chinaVisa, value: $chinaVisaExpiryDate)
+        } header: {
+            sectionHeader("Readiness Expiry Dates")
+        } footer: {
+            Text("These dates appear on the iPad calendar as personal readiness indicators.")
+                .font(.footnote)
+        }
+    }
+
+    private func expiryDatePicker(_ title: String, field: ExpiryField, value: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    expandedField = expandedField == field ? nil : field
+                }
+            } label: {
+                HStack {
+                    Text(title)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Text(displayText(for: field, value: value.wrappedValue))
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(minWidth: 86, alignment: .trailing)
+                    Image(systemName: expandedField == field ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .buttonStyle(.plain)
+
+            if expandedField == field {
+                if field == .faaMedical {
+                    faaMedicalMonthYearPicker(value: value)
+                } else {
+                    DatePicker(
+                        title,
+                        selection: dateBinding(for: value),
+                        displayedComponents: .date
+                    )
+                    .datePickerStyle(.wheel)
+                    .labelsHidden()
+                    .environment(\.calendar, domicileCalendar)
+                    .environment(\.timeZone, domicileTimeZone)
+                }
+
+                if !value.wrappedValue.isEmpty {
+                    Button("Clear") {
+                        value.wrappedValue = ""
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            expandedField = nil
+                        }
+                    }
+                    .font(.caption)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func faaMedicalMonthYearPicker(value: Binding<String>) -> some View {
+        HStack(spacing: 0) {
+            Picker("Month", selection: faaMedicalMonthBinding(for: value)) {
+                ForEach(1...12, id: \.self) { month in
+                    Text(Self.monthSymbols[month - 1]).tag(month)
+                }
+            }
+            .pickerStyle(.wheel)
+
+            Picker("Year", selection: faaMedicalYearBinding(for: value)) {
+                ForEach(Self.yearRange, id: \.self) { year in
+                    Text(String(year)).tag(year)
+                }
+            }
+            .pickerStyle(.wheel)
+        }
+        .frame(height: 170)
+    }
+
+    private func faaMedicalMonthBinding(for value: Binding<String>) -> Binding<Int> {
+        Binding(
+            get: { components(from: value.wrappedValue).month },
+            set: { month in
+                let current = components(from: value.wrappedValue)
+                value.wrappedValue = lastDayString(year: current.year, month: month)
+            }
+        )
+    }
+
+    private func faaMedicalYearBinding(for value: Binding<String>) -> Binding<Int> {
+        Binding(
+            get: { components(from: value.wrappedValue).year },
+            set: { year in
+                let current = components(from: value.wrappedValue)
+                value.wrappedValue = lastDayString(year: year, month: current.month)
+            }
+        )
+    }
+
+    private func dateBinding(for value: Binding<String>) -> Binding<Date> {
+        Binding(
+            get: {
+                domicileNoonDate(from: value.wrappedValue) ?? Date()
+            },
+            set: { newValue in
+                value.wrappedValue = domicileDateString(from: newValue)
+            }
+        )
+    }
+
+    private var domicileCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = domicileTimeZone
+        return calendar
+    }
+
+    private func domicileNoonDate(from value: String) -> Date? {
+        let parts = value.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        var components = DateComponents()
+        components.calendar = domicileCalendar
+        components.timeZone = domicileTimeZone
+        components.year = parts[0]
+        components.month = parts[1]
+        components.day = parts[2]
+        components.hour = 12
+        return domicileCalendar.date(from: components)
+    }
+
+    private func domicileDateString(from date: Date) -> String {
+        let components = domicileCalendar.dateComponents([.year, .month, .day], from: date)
+        let year = components.year ?? Self.currentYear
+        let month = components.month ?? 1
+        let day = components.day ?? 1
+        return String(format: "%04d-%02d-%02d", year, month, day)
+    }
+
+    private func displayText(for field: ExpiryField, value: String) -> String {
+        guard !value.isEmpty else { return "" }
+        if field == .faaMedical, let date = Self.dateFormatter.date(from: value) {
+            return Self.monthYearFormatter.string(from: date)
+        }
+        return value
+    }
+
+    private func components(from value: String) -> (year: Int, month: Int) {
+        let date = Self.dateFormatter.date(from: value) ?? Date()
+        let components = Self.calendar.dateComponents([.year, .month], from: date)
+        return (components.year ?? Self.currentYear, components.month ?? 1)
+    }
+
+    private func lastDayString(year: Int, month: Int) -> String {
+        let nextMonth = month == 12 ? 1 : month + 1
+        let nextYear = month == 12 ? year + 1 : year
+        var components = DateComponents()
+        components.calendar = Self.calendar
+        components.timeZone = TimeZone(secondsFromGMT: 0)
+        components.year = nextYear
+        components.month = nextMonth
+        components.day = 0
+        let date = Self.calendar.date(from: components) ?? Date()
+        return Self.dateFormatter.string(from: date)
+    }
+
+    private static let calendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        return calendar
+    }()
+
+    private static var currentYear: Int {
+        calendar.component(.year, from: Date())
+    }
+
+    private static var yearRange: [Int] {
+        Array((currentYear - 1)...(currentYear + 15))
+    }
+
+    private static let monthSymbols: [String] = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter.monthSymbols
+    }()
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    private static let monthYearFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "MMM yyyy"
+        return formatter
+    }()
 }
 
 struct SettingsSupportSection: View {

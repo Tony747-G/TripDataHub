@@ -56,3 +56,22 @@ Qwen should not implement features or redesign architecture unless explicitly in
 ## Phase
 
 This is Phase 0. Only the files listed in this index exist. Do not create additional doc folders (`Architecture/`, `Rendering/`, `EdgeCases/`, `Testing/`, etc.) without an explicit instruction — empty placeholders confuse readers more than they help.
+
+# Agent Authority Matrix
+
+| Role | Agent | Authority |
+|---|---|---|
+| PM | Codex | Product direction, orchestration, task decomposition |
+| SWE | Claude | Implementation authority, scoped refactor authority, integration decisions |
+| QA | Qwen | Validation authority, invariant enforcement, regression detection |
+
+## Authority Rules
+
+- Codex defines scope and acceptance criteria.
+- Claude owns implementation decisions.
+- Qwen validates implementation correctness against invariants.
+- Qwen must not redesign architecture unless explicitly instructed by Codex.
+- Invariant definitions are authoritative over agent opinions.
+- ADRs override undocumented assumptions.
+- No agent may silently override documented invariants or ADR decisions.
+
