@@ -214,7 +214,8 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             crewAccessImportService: CrewAccessPDFImportService(),
             friendScheduleCloudKitService: NoopFriendCloudKitService(),
             gemsVerificationCloudKitService: NoopGEMSVerificationService(),
-            deviceScheduleCloudKitService: deviceService
+            deviceScheduleCloudKitService: deviceService,
+            crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService()
         )
 
         let sampleURL = repositoryRootURL()
@@ -244,6 +245,181 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         })
     }
 
+    func test_deleteImportedCrewAccessTrip_removesLegacyNamedJSONByPayloadTripID() async throws {
+        try removeCrewAccessImportDirectory()
+        defer { try? removeCrewAccessImportDirectory() }
+
+        let deviceService = FakeDeviceScheduleCloudKitService()
+        let vm = AppViewModel(
+            syncService: NoopSyncService(),
+            authService: NoopAuthService(),
+            cacheService: InMemoryCacheService(),
+            notificationService: NoopNotificationService(),
+            crewAccessImportService: CrewAccessPDFImportService(),
+            friendScheduleCloudKitService: NoopFriendCloudKitService(),
+            gemsVerificationCloudKitService: NoopGEMSVerificationService(),
+            deviceScheduleCloudKitService: deviceService,
+            crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService()
+        )
+
+        let payload = makeCrewAccessJSON(
+            tripId: "B00001",
+            tripInformationDate: "01Jun2026",
+            startUtc: "2026-06-01T08:00:00Z",
+            endUtc: "2026-06-01T10:00:00Z"
+        )
+        try writeCrewAccessJSON(payload, fileName: "legacy-import-\(UUID().uuidString).json")
+        vm.crewAccessSchedules = [
+            makeSchedule(
+                id: "CA26-06-B00001",
+                pairing: "B00001",
+                depUTC: "2026-06-01T08:00:00Z",
+                arrUTC: "2026-06-01T10:00:00Z"
+            )
+        ]
+
+        await vm.deleteCrewAccessTrips(ids: Set(vm.crewAccessSchedules.map(\.id)))
+
+        XCTAssertFalse(crewAccessImportJSONFilesContainTripID("B00001"))
+
+        await vm.applyCrewAccessRetentionPolicy()
+
+        XCTAssertFalse(vm.crewAccessSchedules.contains { schedule in
+            schedule.legs.contains { $0.pairing == "B00001" }
+        })
+    }
+
+    func test_confirmImport_removesExistingTripWhenBaseLocalDatesOverlapWithoutUTCIntersection() async throws {
+        try removeCrewAccessImportDirectory()
+        defer { try? removeCrewAccessImportDirectory() }
+
+        let deviceService = FakeDeviceScheduleCloudKitService()
+        let vm = AppViewModel(
+            syncService: NoopSyncService(),
+            authService: NoopAuthService(),
+            cacheService: InMemoryCacheService(),
+            notificationService: NoopNotificationService(),
+            crewAccessImportService: CrewAccessPDFImportService(),
+            friendScheduleCloudKitService: NoopFriendCloudKitService(),
+            gemsVerificationCloudKitService: NoopGEMSVerificationService(),
+            deviceScheduleCloudKitService: deviceService,
+            crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService()
+        )
+        setVerifiedIdentity(on: vm)
+
+        let existingJSON = makeCrewAccessJSON(
+            tripId: "B00001",
+            tripInformationDate: "01Jun2026",
+            startUtc: "2026-06-01T08:00:00Z",
+            endUtc: "2026-06-01T10:00:00Z"
+        )
+        try writeCrewAccessJSON(existingJSON)
+        vm.crewAccessSchedules = [
+            makeSchedule(
+                id: "CA26-06-B00001",
+                pairing: "B00001",
+                depUTC: "2026-06-01T08:00:00Z",
+                arrUTC: "2026-06-01T10:00:00Z"
+            )
+        ]
+
+        let sampleURL = repositoryRootURL()
+            .appendingPathComponent("web")
+            .appendingPathComponent("sample")
+            .appendingPathComponent("TripDataHub_App_Review_Sample_A00001.pdf")
+        let data = try Data(contentsOf: sampleURL)
+
+        let importAccepted = await vm.importCrewAccessPDFData(data, sourceFileName: sampleURL.lastPathComponent)
+        XCTAssertTrue(importAccepted)
+        XCTAssertTrue(vm.pendingImportReplacementCandidates.contains { candidate in
+            candidate.tripId == "B00001" && candidate.reason == .timeOverlap
+        })
+
+        await vm.confirmPendingImport()
+
+        XCTAssertEqual(Set(vm.crewAccessSchedules.flatMap { $0.legs.map(\.pairing) }), ["A00001"])
+        XCTAssertTrue(crewAccessImportJSONFiles().allSatisfy { !$0.lastPathComponent.contains("B00001") })
+    }
+
+    func test_confirmImport_replacesSameTripIDWithinBidPeriodButPreservesDifferentBidPeriod() async throws {
+        try removeCrewAccessImportDirectory()
+        defer { try? removeCrewAccessImportDirectory() }
+
+        let previousBPJSON = makeCrewAccessJSON(
+            tripId: "B00001",
+            tripInformationDate: "01Dec2025",
+            startUtc: "2025-12-01T08:00:00Z",
+            endUtc: "2025-12-01T10:00:00Z"
+        )
+        let existingSameBPJSON = makeCrewAccessJSON(
+            tripId: "B00001",
+            tripInformationDate: "01Jun2026",
+            startUtc: "2026-06-01T08:00:00Z",
+            endUtc: "2026-06-01T10:00:00Z"
+        )
+        let incomingJSON = makeCrewAccessJSON(
+            tripId: "B00001",
+            tripInformationDate: "02Jun2026",
+            startUtc: "2026-06-02T08:00:00Z",
+            endUtc: "2026-06-02T10:00:00Z"
+        )
+        try writeCrewAccessJSON(previousBPJSON, fileName: "2025-12-01_B00001.json")
+        try writeCrewAccessJSON(existingSameBPJSON, fileName: "2026-06-01_B00001.json")
+
+        let incomingSchedule = makeSchedule(
+            id: "CA26-06-B00001",
+            pairing: "B00001",
+            depUTC: "2026-06-02T08:00:00Z",
+            arrUTC: "2026-06-02T10:00:00Z"
+        )
+        let importService = FixedImportService(draft: CrewAccessImportDraft(
+            sourceFileName: "B00001.pdf",
+            tripId: "B00001",
+            tripDate: "02Jun2026",
+            parsedSchedule: incomingSchedule,
+            jsonPayload: incomingJSON,
+            warnings: [],
+            errors: [],
+            rawExtractStats: RawExtractStats(pageCount: 1, characterCount: 1, lineCount: 1)
+        ))
+        let vm = AppViewModel(
+            syncService: NoopSyncService(),
+            authService: NoopAuthService(),
+            cacheService: InMemoryCacheService(),
+            notificationService: NoopNotificationService(),
+            crewAccessImportService: importService,
+            friendScheduleCloudKitService: NoopFriendCloudKitService(),
+            gemsVerificationCloudKitService: NoopGEMSVerificationService(),
+            deviceScheduleCloudKitService: FakeDeviceScheduleCloudKitService(),
+            crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService()
+        )
+        setVerifiedIdentity(on: vm)
+        vm.crewAccessSchedules = [
+            makeSchedule(
+                id: "CA25-12-B00001",
+                pairing: "B00001",
+                depUTC: "2025-12-01T08:00:00Z",
+                arrUTC: "2025-12-01T10:00:00Z"
+            ),
+            makeSchedule(
+                id: "CA26-06-B00001",
+                pairing: "B00001",
+                depUTC: "2026-06-01T08:00:00Z",
+                arrUTC: "2026-06-01T10:00:00Z"
+            )
+        ]
+
+        let importAccepted = await vm.importCrewAccessPDFData(Data([0x25, 0x50, 0x44, 0x46]), sourceFileName: "B00001.pdf")
+        XCTAssertTrue(importAccepted)
+        await vm.confirmPendingImport()
+
+        let starts = Set(vm.crewAccessSchedules.flatMap { $0.legs.compactMap(\.depUTC) })
+        XCTAssertEqual(starts, ["2025-12-01T08:00:00Z", "2026-06-02T08:00:00Z"])
+        XCTAssertTrue(crewAccessImportJSONFilesContainTripID("B00001", tripInformationDate: "01Dec2025"))
+        XCTAssertTrue(crewAccessImportJSONFilesContainTripID("B00001", tripInformationDate: "02Jun2026"))
+        XCTAssertFalse(crewAccessImportJSONFilesContainTripID("B00001", tripInformationDate: "01Jun2026"))
+    }
+
     // MARK: - Helpers
 
     private func makeViewModel(deviceService: DeviceScheduleCloudKitServicing) -> AppViewModel {
@@ -255,7 +431,8 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             crewAccessImportService: NoopImportService(),
             friendScheduleCloudKitService: NoopFriendCloudKitService(),
             gemsVerificationCloudKitService: NoopGEMSVerificationService(),
-            deviceScheduleCloudKitService: deviceService
+            deviceScheduleCloudKitService: deviceService,
+            crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService()
         )
     }
 
@@ -278,18 +455,27 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
     }
 
     private func makeSchedule(id: String) -> PayPeriodSchedule {
+        makeSchedule(
+            id: id,
+            pairing: id,
+            depUTC: "2026-03-22T06:00:00Z",
+            arrUTC: "2026-03-22T10:00:00Z"
+        )
+    }
+
+    private func makeSchedule(id: String, pairing: String, depUTC: String, arrUTC: String) -> PayPeriodSchedule {
         let leg = TripLeg(
             id: UUID(),
             payPeriod: "PP26-01",
-            pairing: id,
+            pairing: pairing,
             leg: 1,
             flight: "100",
             depAirport: "ANC",
             depLocal: "2026-03-21T22:00:00",
             arrAirport: "SDF",
             arrLocal: "2026-03-22T06:00:00",
-            depUTC: "2026-03-22T06:00:00Z",
-            arrUTC: "2026-03-22T10:00:00Z",
+            depUTC: depUTC,
+            arrUTC: arrUTC,
             status: "SCH",
             block: "4:00",
             layoverStation: nil,
@@ -310,6 +496,60 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             legs: [leg],
             openTimeTrips: []
         )
+    }
+
+    private func makeCrewAccessJSON(
+        tripId: String,
+        tripInformationDate: String,
+        startUtc: String,
+        endUtc: String
+    ) -> CrewAccessTripJSON {
+        CrewAccessTripJSON(
+            schemaVersion: 1,
+            source: "crewaccess-pdf",
+            sourceVersion: "test",
+            mappingVersion: "test",
+            generatedAt: "2026-05-22T00:00:00Z",
+            tripId: tripId,
+            tripInformationDate: tripInformationDate,
+            creditTime: nil,
+            tripDays: nil,
+            tafb: nil,
+            dutyTotals: [],
+            hotelDetails: [],
+            crew: [],
+            items: [
+                CrewAccessTripItemJSON(
+                    sequence: 1,
+                    depAirport: "ANC",
+                    arrAirport: "SDF",
+                    deadhead: false,
+                    flight: "100",
+                    startUtc: startUtc,
+                    endUtc: endUtc,
+                    startLocalDisplay: "2026-06-01 00:00",
+                    endLocalDisplay: "2026-06-01 02:00",
+                    originTz: "America/Anchorage",
+                    destinationTz: "America/Kentucky/Louisville",
+                    timeDerivation: "test",
+                    aircraft: "747",
+                    block: "2:00",
+                    stdUtc: startUtc,
+                    staUtc: endUtc,
+                    atdUtc: nil,
+                    ataUtc: nil,
+                    tailNumber: nil
+                )
+            ]
+        )
+    }
+
+    private func writeCrewAccessJSON(_ payload: CrewAccessTripJSON, fileName: String? = nil) throws {
+        let dir = try crewAccessImportDirectory()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent(fileName ?? "2026-06-01_\(payload.tripId).json")
+        let data = try JSONEncoder().encode(payload)
+        try data.write(to: url, options: .atomic)
     }
 
     private func repositoryRootURL() -> URL {
@@ -333,6 +573,22 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             return []
         }
         return urls.filter { $0.pathExtension.lowercased() == "json" }
+    }
+
+    private func crewAccessImportJSONFilesContainTripID(
+        _ tripID: String,
+        tripInformationDate: String? = nil
+    ) -> Bool {
+        crewAccessImportJSONFiles().contains { url in
+            guard let data = try? Data(contentsOf: url),
+                  let payload = try? JSONDecoder().decode(CrewAccessTripJSON.self, from: data)
+            else {
+                return false
+            }
+            let tripMatches = payload.tripId.caseInsensitiveCompare(tripID) == .orderedSame
+            let dateMatches = tripInformationDate.map { payload.tripInformationDate == $0 } ?? true
+            return tripMatches && dateMatches
+        }
     }
 
     private func removeCrewAccessImportDirectory() throws {
@@ -418,6 +674,14 @@ private struct NoopImportService: CrewAccessPDFImportServiceProtocol {
     }
 }
 
+private struct FixedImportService: CrewAccessPDFImportServiceProtocol {
+    let draft: CrewAccessImportDraft
+
+    func analyzeTrip(pdfData: Data, sourceFileName: String?) -> CrewAccessImportDraft {
+        draft
+    }
+}
+
 private struct NoopFriendCloudKitService: FriendScheduleCloudKitServicing {
     func uploadSchedule(gemsID: String, cloudKitRecordName: String, schedules: [PayPeriodSchedule]) async throws {}
     func uploadScheduleSnapshot(gemsID: String, ownerDisplayName: String, crewAccessTrips: [CrewAccessTripJSON]) async throws {}
@@ -436,4 +700,18 @@ private struct NoopGEMSVerificationService: GEMSVerificationCloudKitServicing {
     func verify(gemsID: String, dateOfBirth: String) async throws -> GEMSVerificationResult? { nil }
     func recordVerifiedUser(gemsID: String) async throws {}
     func fetchVerifiedUsers() async throws -> [VerifiedAppUser] { [] }
+}
+
+private struct NoopCrewAccessImportCloudKitService: CrewAccessImportCloudKitServicing {
+    func uploadImportFile(
+        gemsID: String,
+        fileName: String,
+        jsonData: Data,
+        tripInformationDate: String?,
+        firstDepartureUTC: String?
+    ) async throws {}
+
+    func fetchImportFiles(gemsID: String) async throws -> [CrewAccessImportCloudKitRecord] { [] }
+
+    func tombstoneImportFile(gemsID: String, fileName: String) async throws {}
 }

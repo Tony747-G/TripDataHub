@@ -1423,16 +1423,22 @@ final class AppViewModel: ObservableObject {
         do {
             // Compute overlap IDs before any writes so we can roll back cleanly.
             // Deletion happens AFTER the new import is committed (see below).
+            let overlapCandidates = importReplacementCandidates(incomingScheduleID: schedule.id, incomingJSON: json)
+                .filter { $0.reason == .timeOverlap }
             let overlapIDs = Set(
-                importReplacementCandidates(incomingScheduleID: schedule.id, incomingJSON: json)
-                    .filter { $0.reason == .timeOverlap }
+                overlapCandidates
                     .map(\.id)
+            )
+            let overlapPairings = Set(
+                overlapCandidates
+                    .flatMap(\.pairings)
             )
 
             let replacing = crewAccessSchedules.contains(where: { $0.id == schedule.id })
             let jsonWriteContext = try persistCrewAccessJSON(json)
             do {
                 try mergeImportedCrewAccessSchedule(schedule)
+                removeStaleCrewAccessJSONFilesBestEffort(jsonWriteContext.staleSameBidPeriodTripURLs)
                 await applyCrewAccessRetentionPolicy()
             } catch {
                 do {
@@ -1444,8 +1450,24 @@ final class AppViewModel: ObservableObject {
             }
 
             // New import committed successfully — safe to tombstone overlapping trips.
-            if !overlapIDs.isEmpty {
-                await deleteCrewAccessTrips(ids: overlapIDs)
+            if !overlapIDs.isEmpty || !overlapPairings.isEmpty {
+                // Merge/reconcile can remove or reshape the original overlap schedule IDs before
+                // this cleanup runs. Re-resolve from the post-merge schedule list by the captured
+                // IDs and pairings so we tombstone only the previously detected time-overlap files.
+                // The newly imported schedule is not included because same-Trip-ID candidates are
+                // filtered out above; these pairings come only from time-overlap candidates.
+                let resolvedOverlapIDs = Set(
+                    crewAccessSchedules
+                        .filter { existing in
+                            let existingPairings = Set(existing.legs.map(\.pairing))
+                            return overlapIDs.contains(existing.id)
+                                || !existingPairings.isDisjoint(with: overlapPairings)
+                        }
+                        .map(\.id)
+                )
+                if !resolvedOverlapIDs.isEmpty {
+                    await deleteCrewAccessTrips(ids: resolvedOverlapIDs)
+                }
             }
 
             lastImportDidReplaceExistingTrip = replacing
@@ -1462,9 +1484,13 @@ final class AppViewModel: ObservableObject {
             crewAccessImportMessage = "CrewAccess import complete: \(json.tripId) (\(schedule.legCount) legs)."
             errorMessage = nil
             let uploadURL = jsonWriteContext.finalURL
+            let staleFileNames = jsonWriteContext.staleSameBidPeriodTripURLs.map(\.lastPathComponent)
             Task { [weak self] in
                 await self?.uploadDeviceScheduleIfNeeded(reason: "import confirmed")
                 await self?.uploadCrewAccessImportFile(at: uploadURL, json: json)
+                if !staleFileNames.isEmpty {
+                    await self?.tombstoneCrewAccessImportFiles(fileNames: staleFileNames)
+                }
             }
         } catch {
             crewAccessImportMessage = "Import failed: unable to write CrewAccess JSON. No changes were applied."
@@ -1497,6 +1523,7 @@ final class AppViewModel: ObservableObject {
     struct TripImportReplacementCandidate: Identifiable {
         let id: String          // existing schedule.id
         let tripId: String      // pairing(s) for display
+        let pairings: Set<String>
         let reason: TripReplacementReason
     }
 
@@ -1515,11 +1542,13 @@ final class AppViewModel: ObservableObject {
         incomingJSON: CrewAccessTripJSON
     ) -> [TripImportReplacementCandidate] {
         let incomingPairing = incomingJSON.tripId
+        let domicile = verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
         let newStart = incomingJSON.items
             .compactMap { LegConnectionTextBuilder.parseUTC($0.startUtc) }.min()
         let newEnd = incomingJSON.items
             .compactMap { LegConnectionTextBuilder.parseUTC($0.endUtc) }.max()
         let reportWindowStart = newStart.map { $0.addingTimeInterval(-90 * 60) }
+        let incomingDayKeys = Self.baseLocalDayKeys(startUTC: newStart, endUTC: newEnd, domicile: domicile)
 
         var candidates: [TripImportReplacementCandidate] = []
         for existing in crewAccessSchedules {
@@ -1529,15 +1558,24 @@ final class AppViewModel: ObservableObject {
                 candidates.append(TripImportReplacementCandidate(
                     id: existing.id,
                     tripId: existingPairings.sorted().joined(separator: ", "),
+                    pairings: existingPairings,
                     reason: .sameTripID
                 ))
                 continue
             }
-            if existingPairings.contains(incomingPairing) {
-                // Different schedule but overlapping pairing.
+            if existingPairings.contains(incomingPairing),
+               let incomingKey = Self.crewAccessTripKey(
+                tripID: incomingPairing,
+                startUTC: newStart,
+                endUTC: newEnd,
+                domicile: domicile
+               ),
+               Self.crewAccessTripKeys(for: existing, domicile: domicile).contains(incomingKey) {
+                // Same Trip ID inside the same Bid Period. Different BPs can reuse Trip IDs.
                 candidates.append(TripImportReplacementCandidate(
                     id: existing.id,
                     tripId: existingPairings.sorted().joined(separator: ", "),
+                    pairings: existingPairings,
                     reason: .sameTripID
                 ))
                 continue
@@ -1549,18 +1587,58 @@ final class AppViewModel: ObservableObject {
                     candidates.append(TripImportReplacementCandidate(
                         id: existing.id,
                         tripId: existingPairings.sorted().joined(separator: ", "),
+                        pairings: existingPairings,
                         reason: .timeOverlap
                     ))
+                    continue
                 }
+            }
+            let existingDayKeys = Self.baseLocalDayKeys(
+                startUTC: existing.legs.compactMap { LegConnectionTextBuilder.parseUTC($0.depUTC) }.min(),
+                endUTC: existing.legs.compactMap { LegConnectionTextBuilder.parseUTC($0.arrUTC) }.max(),
+                domicile: domicile
+            )
+            if !incomingDayKeys.isEmpty,
+               !existingDayKeys.isEmpty,
+               !incomingDayKeys.isDisjoint(with: existingDayKeys) {
+                candidates.append(TripImportReplacementCandidate(
+                    id: existing.id,
+                    tripId: existingPairings.sorted().joined(separator: ", "),
+                    pairings: existingPairings,
+                    reason: .timeOverlap
+                ))
             }
         }
         return candidates
+    }
+
+    private nonisolated static func baseLocalDayKeys(startUTC: Date?, endUTC: Date?, domicile: String) -> Set<String> {
+        guard let startUTC, let endUTC else { return [] }
+        let zone = DomicileSupport.timeZone(for: domicile)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+
+        var keys = Set<String>()
+        var cursor = calendar.startOfDay(for: min(startUTC, endUTC))
+        let endDay = calendar.startOfDay(for: max(startUTC, endUTC))
+        var guardCount = 0
+        while cursor <= endDay, guardCount < 90 {
+            let components = calendar.dateComponents([.year, .month, .day], from: cursor)
+            if let year = components.year, let month = components.month, let day = components.day {
+                keys.insert(String(format: "%04d-%02d-%02d", year, month, day))
+            }
+            guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+            cursor = next
+            guardCount += 1
+        }
+        return keys
     }
 
     private struct CrewAccessScheduleReference: Hashable {
         let id: String
         let label: String
         let pairings: Set<String>
+        let tripKeys: Set<String>
     }
 
     private struct CrewAccessFileDeletionResult {
@@ -1575,7 +1653,11 @@ final class AppViewModel: ObservableObject {
             CrewAccessScheduleReference(
                 id: $0.id,
                 label: $0.label,
-                pairings: Set($0.legs.map(\.pairing))
+                pairings: Set($0.legs.map(\.pairing)),
+                tripKeys: Self.crewAccessTripKeys(
+                    for: $0,
+                    domicile: verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
+                )
             )
         }
         return await Task.detached(priority: .utility) { () -> [CrewAccessImportFile] in
@@ -1612,6 +1694,7 @@ final class AppViewModel: ObservableObject {
                     let displayName = "\(displayDateResult.dateString)_\(tripId)"
                     let matchedScheduleId = Self.matchScheduleID(
                         tripId: tripId,
+                        tripInformationDate: header?.tripInformationDate,
                         scheduleReferences: scheduleReferences
                     )
                     return CrewAccessImportFile(
@@ -1716,7 +1799,11 @@ final class AppViewModel: ObservableObject {
             CrewAccessScheduleReference(
                 id: $0.id,
                 label: $0.label,
-                pairings: Set($0.legs.map(\.pairing))
+                pairings: Set($0.legs.map(\.pairing)),
+                tripKeys: Self.crewAccessTripKeys(
+                    for: $0,
+                    domicile: verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
+                )
             )
         }
 
@@ -1727,28 +1814,16 @@ final class AppViewModel: ObservableObject {
             )
         }.value
 
-        let tripIDsToRemove = Set(deletionResults.compactMap(\.tripId))
+        let scheduleIDsToRemove = Set(deletionResults.flatMap(\.matchedScheduleIDs))
         let beforePairings = Set(crewAccessSchedules.flatMap { $0.legs.map(\.pairing) })
         let schedulesBeforeDeletion = crewAccessSchedules
-        if !tripIDsToRemove.isEmpty {
+        if !scheduleIDsToRemove.isEmpty {
             crewAccessSchedules = crewAccessSchedules.compactMap { schedule in
-                let remainingLegs = schedule.legs.filter { !tripIDsToRemove.contains($0.pairing) }
-                guard !remainingLegs.isEmpty else { return nil }
-                guard remainingLegs.count != schedule.legs.count else { return schedule }
-                return PayPeriodSchedule(
-                    id: schedule.id,
-                    label: schedule.label,
-                    tripCount: Set(remainingLegs.map(\.pairing)).count,
-                    legCount: remainingLegs.count,
-                    openTimeCount: schedule.openTimeCount,
-                    updatedAt: Date(),
-                    legs: remainingLegs,
-                    openTimeTrips: schedule.openTimeTrips
-                )
+                scheduleIDsToRemove.contains(schedule.id) ? nil : schedule
             }
         }
         let removedForLogTen = schedulesBeforeDeletion.compactMap { schedule -> PayPeriodSchedule? in
-            let removedLegs = schedule.legs.filter { tripIDsToRemove.contains($0.pairing) }
+            let removedLegs = scheduleIDsToRemove.contains(schedule.id) ? schedule.legs : []
             guard !removedLegs.isEmpty else { return nil }
             return PayPeriodSchedule(
                 id: schedule.id,
@@ -1764,7 +1839,6 @@ final class AppViewModel: ObservableObject {
         preservePastLogTenRecords(from: removedForLogTen)
         let afterPairings = Set(crewAccessSchedules.flatMap { $0.legs.map(\.pairing) })
         let removedTripsCount = beforePairings.subtracting(afterPairings)
-            .intersection(tripIDsToRemove)
             .count
         pruneCrewAccessLegImportReferenceTimes()
         schedules = mergeAndSortSchedules(crew: crewAccessSchedules, bidpro: bidproSchedules)
@@ -1868,11 +1942,12 @@ final class AppViewModel: ObservableObject {
         }
 
         let scheduleIDsToDelete = toDelete.map(\.id)
-        let tripIDsToDelete = Array(Set(toDelete.flatMap { $0.legs.map(\.pairing) }))
+        let domicile = verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
+        let tripKeysToDelete = Array(Set(toDelete.flatMap { Self.crewAccessTripKeys(for: $0, domicile: domicile) }))
         let fileDeleteResult = await Task.detached(priority: .utility) {
             Self.deleteCrewAccessImportFilesBestEffort(
                 scheduleIDs: scheduleIDsToDelete,
-                tripIDs: tripIDsToDelete
+                tripKeys: tripKeysToDelete
             )
         }.value
         logger.info("[CrewAccessDelete] detached file delete complete deleted=\(fileDeleteResult.deleted, privacy: .public) failures=\(fileDeleteResult.failures, privacy: .public)")
@@ -2069,9 +2144,15 @@ final class AppViewModel: ObservableObject {
             crewAccessLegImportReferenceTimes[key] = importConfirmedAt
         }
 
-        let importedPairings = Set(imported.legs.map(\.pairing))
+        let domicile = verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
+        let importedTripKeys = Self.crewAccessTripKeys(for: imported, domicile: domicile)
         updatedCrewAccess = updatedCrewAccess.compactMap { schedule in
-            let remainingLegs = schedule.legs.filter { !importedPairings.contains($0.pairing) }
+            let remainingLegs = schedule.legs.filter { leg in
+                guard let key = Self.crewAccessTripKey(for: leg, domicile: domicile) else {
+                    return true
+                }
+                return !importedTripKeys.contains(key)
+            }
             guard !remainingLegs.isEmpty else { return nil }
             return PayPeriodSchedule(
                 id: schedule.id,
@@ -2841,6 +2922,59 @@ final class AppViewModel: ObservableObject {
         return bidPeriodOrder(for: period.id)
     }
 
+    private nonisolated static func normalizedCrewAccessTripID(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+
+    private nonisolated static func crewAccessTripKey(
+        tripID: String,
+        startUTC: Date?,
+        endUTC: Date?,
+        domicile: String
+    ) -> String? {
+        let normalizedTripID = normalizedCrewAccessTripID(tripID)
+        guard !normalizedTripID.isEmpty else { return nil }
+        let referenceDate = startUTC ?? endUTC
+        guard let referenceDate,
+              let period = bidPeriod(for: referenceDate, domicile: domicile),
+              let order = bidPeriodOrder(for: period.id) else {
+            return nil
+        }
+        return "\(order):\(normalizedTripID)"
+    }
+
+    private nonisolated static func crewAccessTripKey(
+        tripID: String,
+        tripInformationDate: String?,
+        fallbackDate: Date?
+    ) -> String? {
+        let normalizedTripID = normalizedCrewAccessTripID(tripID)
+        guard !normalizedTripID.isEmpty,
+              let order = crewAccessBidPeriodOrder(
+                tripInformationDate: tripInformationDate,
+                fallbackDate: fallbackDate
+              ) else {
+            return nil
+        }
+        return "\(order):\(normalizedTripID)"
+    }
+
+    private nonisolated static func crewAccessTripKey(for leg: TripLeg, domicile: String) -> String? {
+        crewAccessTripKey(
+            tripID: leg.pairing,
+            startUTC: LegConnectionTextBuilder.parseUTC(leg.depUTC),
+            endUTC: LegConnectionTextBuilder.parseUTC(leg.arrUTC),
+            domicile: domicile
+        )
+    }
+
+    private nonisolated static func crewAccessTripKeys(
+        for schedule: PayPeriodSchedule,
+        domicile: String
+    ) -> Set<String> {
+        Set(schedule.legs.compactMap { crewAccessTripKey(for: $0, domicile: domicile) })
+    }
+
     private nonisolated static func deleteCrewAccessImportFilesOutsideRetainedBidPeriods(retainedOrders: Set<Int>) -> Int {
         let fm = FileManager.default
         guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
@@ -3204,8 +3338,17 @@ final class AppViewModel: ObservableObject {
 
     private nonisolated static func matchScheduleID(
         tripId: String,
+        tripInformationDate: String?,
         scheduleReferences: [CrewAccessScheduleReference]
     ) -> String? {
+        if let key = crewAccessTripKey(
+            tripID: tripId,
+            tripInformationDate: tripInformationDate,
+            fallbackDate: nil
+        ),
+           let matched = scheduleReferences.first(where: { $0.tripKeys.contains(key) }) {
+            return matched.id
+        }
         return scheduleReferences.first { ref in
             ref.id == tripId || ref.label.contains(tripId) || ref.pairings.contains(tripId)
         }?.id
@@ -3238,11 +3381,14 @@ final class AppViewModel: ObservableObject {
             }
 
             let matchedIDs: [String]
-            if let tripId {
+            if let tripId,
+               let key = crewAccessTripKey(
+                tripID: tripId,
+                tripInformationDate: tripDate,
+                fallbackDate: nil
+               ) {
                 matchedIDs = scheduleReferences
-                    .filter { ref in
-                        ref.id == tripId || ref.label.contains(tripId) || ref.pairings.contains(tripId)
-                    }
+                    .filter { $0.tripKeys.contains(key) }
                     .map(\.id)
             } else {
                 matchedIDs = []
@@ -3271,8 +3417,14 @@ final class AppViewModel: ObservableObject {
 
     private nonisolated static func deleteCrewAccessImportFilesBestEffort(
         scheduleIDs: [String],
-        tripIDs: [String]
+        tripKeys: [String]
     ) -> (deleted: Int, failures: Int, deletedFileNames: [String]) {
+        struct ImportFileHeader {
+            let url: URL
+            let name: String
+            let tripKey: String?
+        }
+
         let fm = FileManager.default
         guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
             return (0, 0, [])
@@ -3293,34 +3445,49 @@ final class AppViewModel: ObservableObject {
             return (0, 0, [])
         }
 
+        let tripKeySet = Set(tripKeys)
+        let files = urls.compactMap { url -> ImportFileHeader? in
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
+                  values.isRegularFile == true else {
+                return nil
+            }
+            let headerTripKey: String?
+            if let data = try? Data(contentsOf: url),
+               let header = try? JSONDecoder().decode(CrewAccessTripHeader.self, from: data),
+               let payloadTripID = header.tripId?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !payloadTripID.isEmpty {
+                headerTripKey = crewAccessTripKey(
+                    tripID: payloadTripID,
+                    tripInformationDate: header.tripInformationDate,
+                    fallbackDate: nil
+                )
+            } else {
+                headerTripKey = nil
+            }
+            return ImportFileHeader(url: url, name: url.lastPathComponent, tripKey: headerTripKey)
+        }
+
         var deletedCount = 0
         var failedCount = 0
         var deletedFileNames: [String] = []
-        for url in urls {
-            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
-                  values.isRegularFile == true else {
-                continue
-            }
-            let name = url.lastPathComponent
+        for file in files {
+            let name = file.name
             let matchesScheduleID = scheduleIDs.contains { scheduleID in
                 let safeID = scheduleID.replacingOccurrences(of: "/", with: "-")
                 return name.hasPrefix("\(safeID)_") || name.contains(scheduleID) || name.contains(safeID)
             }
-            let matchesTripID = tripIDs.contains { tripID in
-                let safeID = tripID.replacingOccurrences(of: "/", with: "-")
-                return name.hasPrefix("\(safeID)_") || name.contains(tripID) || name.contains(safeID)
-            }
-            let shouldDelete = matchesScheduleID || matchesTripID
+            let matchesPayloadTripKey = file.tripKey.map { tripKeySet.contains($0) } ?? false
+            let shouldDelete = matchesScheduleID || matchesPayloadTripKey
             guard shouldDelete else { continue }
 
             do {
-                try fm.removeItem(at: url)
+                try fm.removeItem(at: file.url)
                 deletedCount += 1
                 deletedFileNames.append(name)
-                logger.info("[CrewAccessDelete] deletedFile=\(url.path, privacy: .private)")
+                logger.info("[CrewAccessDelete] deletedFile=\(file.url.path, privacy: .private)")
             } catch {
                 failedCount += 1
-                logger.error("[CrewAccessDelete] failedFileDelete=\(url.path, privacy: .private) error=\(error.localizedDescription, privacy: .public)")
+                logger.error("[CrewAccessDelete] failedFileDelete=\(file.url.path, privacy: .private) error=\(error.localizedDescription, privacy: .public)")
             }
         }
         return (deletedCount, failedCount, deletedFileNames)
@@ -3330,6 +3497,7 @@ final class AppViewModel: ObservableObject {
         let finalURL: URL
         let backupURL: URL?
         let createdNewFile: Bool
+        let staleSameBidPeriodTripURLs: [URL]
     }
 
     private func persistCrewAccessJSON(_ payload: CrewAccessTripJSON) throws -> CrewAccessJSONWriteContext {
@@ -3365,22 +3533,33 @@ final class AppViewModel: ObservableObject {
             )
         }
 
-        // Remove any existing files for the same Trip Id with a different date prefix
-        let tripIDSuffix = "_\(safeTripID).json"
+        // Defer stale deletion until after both JSON write and schedule cache save succeed.
+        let incomingTripKey = Self.crewAccessTripKey(
+            tripID: payload.tripId,
+            tripInformationDate: payload.tripInformationDate,
+            fallbackDate: Date()
+        )
+        var staleSameBidPeriodTripURLs: [URL] = []
         if let existingFiles = try? fm.contentsOfDirectory(
             at: dir,
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
         ) {
             for fileURL in existingFiles {
-                let name = fileURL.lastPathComponent
-                guard name.hasSuffix(tripIDSuffix), fileURL.path != finalURL.path else { continue }
-                do {
-                    try fm.removeItem(at: fileURL)
-                    logger.info("[Import] Removed stale trip file: \(name, privacy: .private)")
-                } catch {
-                    logger.error("[Import] Failed to remove stale trip file \(name, privacy: .private): \(error.localizedDescription, privacy: .public)")
+                guard fileURL.path != finalURL.path,
+                      fileURL.pathExtension.lowercased() == "json",
+                      let incomingTripKey,
+                      let data = try? Data(contentsOf: fileURL),
+                      let header = try? JSONDecoder().decode(CrewAccessTripHeader.self, from: data),
+                      let existingTripID = header.tripId,
+                      Self.crewAccessTripKey(
+                        tripID: existingTripID,
+                        tripInformationDate: header.tripInformationDate,
+                        fallbackDate: nil
+                      ) == incomingTripKey else {
+                    continue
                 }
+                staleSameBidPeriodTripURLs.append(fileURL)
             }
         }
 
@@ -3401,7 +3580,8 @@ final class AppViewModel: ObservableObject {
             return CrewAccessJSONWriteContext(
                 finalURL: finalURL,
                 backupURL: hadExistingFile ? backupURL : nil,
-                createdNewFile: !hadExistingFile
+                createdNewFile: !hadExistingFile,
+                staleSameBidPeriodTripURLs: staleSameBidPeriodTripURLs
             )
         } catch {
             if fm.fileExists(atPath: tempURL.path) {
@@ -3437,6 +3617,20 @@ final class AppViewModel: ObservableObject {
 
         if context.createdNewFile, fm.fileExists(atPath: context.finalURL.path) {
             try fm.removeItem(at: context.finalURL)
+        }
+    }
+
+    private func removeStaleCrewAccessJSONFilesBestEffort(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        let fm = FileManager.default
+        for url in urls {
+            guard fm.fileExists(atPath: url.path) else { continue }
+            do {
+                try fm.removeItem(at: url)
+                logger.info("[Import] Removed stale trip file: \(url.lastPathComponent, privacy: .private)")
+            } catch {
+                logger.error("[Import] Failed to remove stale trip file \(url.lastPathComponent, privacy: .private): \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 
