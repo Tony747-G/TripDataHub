@@ -318,6 +318,30 @@ struct SettingsQualificationSection: View {
     }
 }
 
+struct SettingsCrewBaseSection: View {
+    @Binding var crewBaseRawValue: String
+
+    private var crewBaseBinding: Binding<CrewBase> {
+        Binding(
+            get: { CrewBase(rawValue: crewBaseRawValue) ?? OperationalSettings.defaultCrewBase },
+            set: { crewBaseRawValue = $0.rawValue }
+        )
+    }
+
+    var body: some View {
+        Section {
+            Picker("Crew Domicile", selection: crewBaseBinding) {
+                ForEach(CrewBase.allCases) { base in
+                    Text(base.displayName).tag(base)
+                }
+            }
+            .pickerStyle(.segmented)
+        } header: {
+            sectionHeader("Crew Domicile")
+        }
+    }
+}
+
 struct SettingsNotificationSection: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @Binding var notify48h: Bool
@@ -337,6 +361,474 @@ struct SettingsNotificationSection: View {
             }
         } header: {
             sectionHeader("Notification Setting")
+        }
+    }
+}
+
+private enum ManualEventDraftLayer: String, CaseIterable, Identifiable {
+    case operational = "Operational"
+    case personal = "Personal"
+
+    var id: String { rawValue }
+}
+
+private enum ManualEventClockDisplay: String, CaseIterable, Identifiable {
+    case ldt = "LDT"
+    case utc = "UTC"
+
+    var id: String { rawValue }
+}
+
+struct ManualEventAddSheet: View {
+    @EnvironmentObject private var viewModel: AppViewModel
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage(OperationalSettings.crewBaseKey) private var crewBaseRawValue = OperationalSettings.defaultCrewBase.rawValue
+    @AppStorage("manual_event_clock_display") private var manualEventClockDisplayRawValue = ManualEventClockDisplay.ldt.rawValue
+
+    private let editingOperationalEvent: ManualOperationalEvent?
+    private let editingPersonalEvent: ManualPersonalEvent?
+    private let onSaved: (() -> Void)?
+
+    @State private var draftLayer: ManualEventDraftLayer = .operational
+    @State private var operationalCode: ManualOperationalCode = .reserveA
+    @State private var personalCode: ManualPersonalCode = .commute
+    @State private var startDate = Date()
+    @State private var endDate = Date().addingTimeInterval(60 * 60)
+    @State private var notes = ""
+    @State private var saveError: String?
+    @State private var hasSyncedInitialAutoEndDate = false
+
+    init(
+        editingOperationalEvent: ManualOperationalEvent? = nil,
+        editingPersonalEvent: ManualPersonalEvent? = nil,
+        onSaved: (() -> Void)? = nil
+    ) {
+        self.editingOperationalEvent = editingOperationalEvent
+        self.editingPersonalEvent = editingPersonalEvent
+        self.onSaved = onSaved
+
+        let initialLayer: ManualEventDraftLayer = editingPersonalEvent == nil ? .operational : .personal
+        _draftLayer = State(initialValue: initialLayer)
+        _operationalCode = State(initialValue: editingOperationalEvent?.code ?? .reserveA)
+        _personalCode = State(initialValue: editingPersonalEvent?.code ?? .commute)
+        _startDate = State(initialValue: editingOperationalEvent?.startUTC ?? editingPersonalEvent?.startUTC ?? Date())
+        _endDate = State(initialValue: editingOperationalEvent?.endUTC ?? editingPersonalEvent?.endUTC ?? Date().addingTimeInterval(60 * 60))
+        _notes = State(initialValue: editingOperationalEvent?.notes ?? editingPersonalEvent?.notes ?? "")
+    }
+
+    private var isEditing: Bool {
+        editingOperationalEvent != nil || editingPersonalEvent != nil
+    }
+
+    private var selectedCrewBase: CrewBase {
+        if let editingOperationalEvent {
+            return editingOperationalEvent.crewBase
+        }
+        return CrewBase(rawValue: crewBaseRawValue) ?? OperationalSettings.defaultCrewBase
+    }
+
+    private var selectedBaseTimeZone: TimeZone {
+        selectedCrewBase.timeZone
+    }
+
+    private var selectedManualEventClockDisplay: ManualEventClockDisplay {
+        ManualEventClockDisplay(rawValue: manualEventClockDisplayRawValue) ?? .ldt
+    }
+
+    private var selectedInputTimeZone: TimeZone {
+        selectedManualEventClockDisplay == .utc ? (TimeZone(secondsFromGMT: 0) ?? .gmt) : selectedBaseTimeZone
+    }
+
+    private var selectedBaseCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = selectedBaseTimeZone
+        return calendar
+    }
+
+    private var defaultOperationalRange: TimeRangeRule? {
+        CrewBaseRule.rule(for: selectedCrewBase).defaultTimeRange(for: operationalCode)
+    }
+
+    private var localStartDateComponents: DateComponents {
+        selectedBaseCalendar.dateComponents([.year, .month, .day], from: startDate)
+    }
+
+    private var localEndDateComponents: DateComponents {
+        selectedBaseCalendar.dateComponents([.year, .month, .day], from: endDate)
+    }
+
+    private var autoFilledOperationalEvent: ManualOperationalEvent? {
+        guard defaultOperationalRange != nil else { return nil }
+        return try? ManualOperationalEvent(
+            id: editingOperationalEvent?.id ?? UUID(),
+            code: operationalCode,
+            crewBase: selectedCrewBase,
+            localStartDate: localStartDateComponents,
+            notes: normalizedNotes,
+            createdAt: editingOperationalEvent?.createdAt ?? Date(),
+            updatedAt: isEditing ? Date() : nil
+        )
+    }
+
+    private var autoFilledOperationalEvents: [ManualOperationalEvent]? {
+        guard defaultOperationalRange != nil else { return nil }
+        return try? ManualOperationalEvent.dailyAutoFilledEvents(
+            code: operationalCode,
+            crewBase: selectedCrewBase,
+            localStartDate: localStartDateComponents,
+            localEndDate: localEndDateComponents,
+            notes: normalizedNotes,
+            createdAt: Date()
+        )
+    }
+
+    private var normalizedNotes: String? {
+        let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static let baseDateTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm'Z'"
+        return formatter
+    }()
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("Event Type", selection: $draftLayer) {
+                        ForEach(ManualEventDraftLayer.allCases) { layer in
+                            Text(layer.rawValue).tag(layer)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(isEditing)
+                }
+
+                switch draftLayer {
+                case .operational:
+                    operationalSection
+                case .personal:
+                    personalSection
+                }
+
+                Section {
+                    TextField("Notes", text: $notes, axis: .vertical)
+                        .lineLimit(1...3)
+                }
+
+                if let saveError {
+                    Section {
+                        Text(saveError)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle(isEditing ? "Edit Event" : "Add Event")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { save() }
+                }
+            }
+        }
+        .environment(\.timeZone, selectedBaseTimeZone)
+        .onAppear {
+            syncAutoEndDateIfNeeded(force: !isEditing)
+        }
+        .onChange(of: startDate) { _, newValue in
+            if defaultOperationalRange != nil {
+                syncAutoEndDateIfNeeded(force: true)
+            } else if endDate <= newValue {
+                endDate = newValue.addingTimeInterval(60 * 60)
+            }
+        }
+        .onChange(of: operationalCode) { _, _ in
+            syncAutoEndDateIfNeeded(force: true)
+        }
+    }
+
+    private var operationalSection: some View {
+        Section {
+            Picker("Operational Code", selection: $operationalCode) {
+                ForEach(ManualOperationalCode.allCases) { code in
+                    Text(code.rawValue).tag(code)
+                }
+            }
+
+            LabeledContent("Crew Domicile", value: selectedCrewBase.displayName)
+
+            if let range = defaultOperationalRange, let autoEvent = autoFilledOperationalEvent {
+                DatePicker("Start Date", selection: $startDate, displayedComponents: .date)
+                LabeledContent("Auto Fill") {
+                    Text("\(range.start.displayHHMM) - \(range.end.displayHHMM) LDT")
+                }
+                DatePicker(
+                    "End Date",
+                    selection: $endDate,
+                    displayedComponents: .date
+                )
+                LabeledContent("UTC") {
+                    Text("\(Self.utcText(autoEvent.startUTC)) - \(Self.utcText(autoEvent.endUTC))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let autoEvents = autoFilledOperationalEvents, autoEvents.count > 1, !isEditing {
+                    LabeledContent("Events", value: "\(autoEvents.count)")
+                }
+            } else {
+                DatePicker("Start", selection: $startDate, displayedComponents: [.date, .hourAndMinute])
+                DatePicker("End", selection: $endDate, displayedComponents: [.date, .hourAndMinute])
+                Text("No default time range is defined for \(selectedCrewBase.rawValue) + \(operationalCode.rawValue). Enter start and end time in LDT.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            sectionHeader("Operational")
+        }
+    }
+
+    private var personalSection: some View {
+        Section {
+            Picker("Personal Event", selection: $personalCode) {
+                ForEach(ManualPersonalCode.allCases) { code in
+                    Text(code.rawValue).tag(code)
+                }
+            }
+            Picker("Time Display", selection: Binding(
+                get: { selectedManualEventClockDisplay },
+                set: { manualEventClockDisplayRawValue = $0.rawValue }
+            )) {
+                ForEach(ManualEventClockDisplay.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            DatePicker("Start", selection: $startDate, displayedComponents: [.date, .hourAndMinute])
+                .environment(\.timeZone, selectedInputTimeZone)
+            DatePicker("End", selection: $endDate, displayedComponents: [.date, .hourAndMinute])
+                .environment(\.timeZone, selectedInputTimeZone)
+            Text(selectedManualEventClockDisplay == .utc ? "Times are entered in UTC." : "Times are entered in Crew Domicile LDT.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        } header: {
+            sectionHeader("Personal")
+        }
+    }
+
+    private func save() {
+        do {
+            switch draftLayer {
+            case .operational:
+                if isEditing, let autoEvent = autoFilledOperationalEvent {
+                    try viewModel.updateManualOperationalEvent(autoEvent)
+                } else if let autoEvents = autoFilledOperationalEvents {
+                    try viewModel.saveManualOperationalEventsReplacingOverlaps(autoEvents)
+                } else {
+                    let event = try ManualOperationalEvent(
+                        id: editingOperationalEvent?.id ?? UUID(),
+                        code: operationalCode,
+                        crewBase: selectedCrewBase,
+                        startUTC: startDate,
+                        endUTC: endDate,
+                        notes: normalizedNotes,
+                        createdAt: editingOperationalEvent?.createdAt ?? Date(),
+                        updatedAt: isEditing ? Date() : nil
+                    )
+                    if isEditing {
+                        try viewModel.updateManualOperationalEvent(event)
+                    } else {
+                        try viewModel.saveManualOperationalEvent(event)
+                    }
+                }
+            case .personal:
+                let event = try ManualPersonalEvent(
+                    id: editingPersonalEvent?.id ?? UUID(),
+                    code: personalCode,
+                    startUTC: startDate,
+                    endUTC: endDate,
+                    notes: normalizedNotes,
+                    createdAt: editingPersonalEvent?.createdAt ?? Date(),
+                    updatedAt: isEditing ? Date() : nil
+                )
+                if isEditing {
+                    try viewModel.updateManualPersonalEvent(event)
+                } else {
+                    try viewModel.saveManualPersonalEvent(event)
+                }
+            }
+            onSaved?()
+            dismiss()
+        } catch {
+            saveError = "Unable to save event: \(error.localizedDescription)"
+        }
+    }
+
+    private static func utcText(_ date: Date) -> String {
+        baseDateTimeFormatter.string(from: date)
+    }
+
+    private func syncAutoEndDateIfNeeded(force: Bool = false) {
+        guard let range = defaultOperationalRange else { return }
+        guard force || !hasSyncedInitialAutoEndDate else { return }
+        endDate = defaultEndDate(for: startDate, range: range)
+        hasSyncedInitialAutoEndDate = true
+    }
+
+    private func defaultEndDate(for start: Date, range: TimeRangeRule) -> Date {
+        selectedBaseCalendar.startOfDay(for: start)
+    }
+}
+
+struct ManualEventDetailSheet: View {
+    @EnvironmentObject private var viewModel: AppViewModel
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage(OperationalSettings.crewBaseKey) private var crewBaseRawValue = OperationalSettings.defaultCrewBase.rawValue
+    @AppStorage("manual_event_clock_display") private var manualEventClockDisplayRawValue = ManualEventClockDisplay.ldt.rawValue
+
+    let operationalEvent: ManualOperationalEvent?
+    let personalEvent: ManualPersonalEvent?
+
+    @State private var showingEdit = false
+    @State private var showingDeleteConfirm = false
+    @State private var actionError: String?
+
+    init(operationalEvent: ManualOperationalEvent) {
+        self.operationalEvent = operationalEvent
+        self.personalEvent = nil
+    }
+
+    init(personalEvent: ManualPersonalEvent) {
+        self.operationalEvent = nil
+        self.personalEvent = personalEvent
+    }
+
+    private var title: String {
+        operationalEvent?.code.rawValue ?? personalEvent?.code.rawValue ?? "Event"
+    }
+
+    private var selectedManualEventClockDisplay: ManualEventClockDisplay {
+        ManualEventClockDisplay(rawValue: manualEventClockDisplayRawValue) ?? .ldt
+    }
+
+    private var selectedCrewBase: CrewBase {
+        CrewBase(rawValue: crewBaseRawValue) ?? OperationalSettings.defaultCrewBase
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 10) {
+                    detailRow("Type", operationalEvent == nil ? "Personal" : "Operational")
+                    detailRow("Code", title)
+                    if let operationalEvent {
+                        detailRow("Crew Domicile", operationalEvent.crewBase.displayName)
+                        detailRow("Time", timeRangeText(start: operationalEvent.startUTC, end: operationalEvent.endUTC, timeZone: operationalEvent.crewBase.timeZone))
+                    } else if let personalEvent {
+                        detailRow("Time", timeRangeText(start: personalEvent.startUTC, end: personalEvent.endUTC, timeZone: selectedCrewBase.timeZone))
+                    }
+                    if let notes = operationalEvent?.notes ?? personalEvent?.notes, !notes.isEmpty {
+                        detailRow("Notes", notes)
+                    }
+                }
+                .padding(14)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+
+                HStack(spacing: 10) {
+                    Button("Edit") { showingEdit = true }
+                        .buttonStyle(.bordered)
+                    Button("Delete", role: .destructive) { showingDeleteConfirm = true }
+                        .buttonStyle(.bordered)
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+
+                if let actionError {
+                    Text(actionError)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding()
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .sheet(isPresented: $showingEdit) {
+            if let operationalEvent {
+                ManualEventAddSheet(editingOperationalEvent: operationalEvent) {
+                    dismiss()
+                }
+                .environmentObject(viewModel)
+            } else if let personalEvent {
+                ManualEventAddSheet(editingPersonalEvent: personalEvent) {
+                    dismiss()
+                }
+                .environmentObject(viewModel)
+            }
+        }
+        .confirmationDialog(
+            "Delete \(title)?",
+            isPresented: $showingDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                deleteEvent()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the manual event from Calendar and Timeline. This cannot be undone.")
+        }
+    }
+
+    private func deleteEvent() {
+        do {
+            if let operationalEvent {
+                try viewModel.deleteManualOperationalEvent(id: operationalEvent.id)
+            } else if let personalEvent {
+                try viewModel.deleteManualPersonalEvent(id: personalEvent.id)
+            }
+            dismiss()
+        } catch {
+            actionError = "Unable to delete event: \(error.localizedDescription)"
+        }
+    }
+
+    private func timeRangeText(start: Date, end: Date, timeZone: TimeZone) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = selectedManualEventClockDisplay == .utc ? (TimeZone(secondsFromGMT: 0) ?? .gmt) : timeZone
+        formatter.dateFormat = "MMM d HH:mm"
+        return "\(formatter.string(from: start)) - \(formatter.string(from: end)) \(selectedManualEventClockDisplay.rawValue)"
+    }
+
+    private func detailRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 78, alignment: .leading)
+            Text(value)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

@@ -7,6 +7,7 @@ struct SettingsTabView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @AppStorage("appearance_mode") private var appearanceModeRawValue = AppearanceMode.system.rawValue
     @AppStorage("app_font_size_option") private var appFontSizeOptionRawValue = AppFontSizeOption.medium.rawValue
+    @AppStorage(OperationalSettings.crewBaseKey) private var crewBaseRawValue = OperationalSettings.defaultCrewBase.rawValue
     @AppStorage("pilot_qualification") private var pilotQualificationRawValue = PilotQualification.captain.rawValue
     @AppStorage("bid_transition_timeline_enabled") private var bidTransitionTimelineEnabled = true
     @AppStorage("notification_48h_enabled") private var notify48h = false
@@ -57,6 +58,8 @@ struct SettingsTabView: View {
         List {
             SettingsSupportSection()
 
+            SettingsCrewBaseSection(crewBaseRawValue: $crewBaseRawValue)
+
             SettingsQualificationSection(
                 qualificationRawValue: $pilotQualificationRawValue,
                 bidTransitionTimelineEnabled: $bidTransitionTimelineEnabled
@@ -71,7 +74,7 @@ struct SettingsTabView: View {
                 faaMedicalExpiryDate: $faaMedicalExpiryDate,
                 passportExpiryDate: $passportExpiryDate,
                 chinaVisaExpiryDate: $chinaVisaExpiryDate,
-                domicileTimeZone: DomicileSupport.timeZone(for: viewModel.verifiedIdentity?.domicile)
+                domicileTimeZone: DomicileSupport.timeZone(for: crewBaseRawValue)
             )
 
             SettingsNotificationSection(

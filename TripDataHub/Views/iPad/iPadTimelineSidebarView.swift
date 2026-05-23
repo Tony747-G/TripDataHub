@@ -9,11 +9,13 @@ struct IPadTimelineSidebarView: View {
     @State private var deleteTripConfirmPairing: String? = nil
     @State private var friendScheduleMatches: FriendScheduleMatches = .empty
     @State private var friendMatchAlert: (title: String, message: String)? = nil
+    @State private var selectedManualOperationalEvent: ManualOperationalEvent?
     // Cached per-schedule-update data — computed once in refreshLegData(), not on every body eval.
     @State private var legData = TimelineLegData(schedules: [])
     @State private var cachedTripStartLegIDs: Set<UUID> = []
     @State private var tripDataKeyByLegID: [UUID: String] = [:]
     @State private var firstRowIDByTripID: [String: String] = [:]
+    @State private var firstTripSummaryIDByTripID: [String: String] = [:]
     /// Heavy window computation cached; time-based selection stays computed so it
     /// reflects current time as the clock advances without re-running the full build.
     @State private var cachedReportWindows: [NextReportTripWindow] = []
@@ -30,19 +32,20 @@ struct IPadTimelineSidebarView: View {
     }
 
     @AppStorage("app_font_size_option") private var appFontSizeOptionRawValue = AppFontSizeOption.medium.rawValue
+    @AppStorage("timeline_clock_display") private var timelineClockDisplayRawValue = TimelineClockDisplay.lcl.rawValue
+    @AppStorage(OperationalSettings.crewBaseKey) private var crewDomicileRawValue = OperationalSettings.defaultCrewBase.rawValue
 
-    private static let anchorageTimeZone: TimeZone =
-        IATATimeZoneResolver.shared.resolve("ANC").flatMap { TimeZone(identifier: $0) }
-        ?? TimeZone(secondsFromGMT: NextReportWindowBuilder.anchorageFallbackOffsetSeconds)!
+    private var selectedClockDisplay: TimelineClockDisplay {
+        TimelineClockDisplay(rawValue: timelineClockDisplayRawValue) ?? .lcl
+    }
 
-    private static let reportTimeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.calendar = Calendar(identifier: .gregorian)
-        f.locale = Locale(identifier: "en_US")
-        f.timeZone = anchorageTimeZone
-        f.dateFormat = "EEE, MMM d yyyy  HH:mm"
-        return f
-    }()
+    private var selectedCrewDomicile: CrewBase {
+        CrewBase(rawValue: crewDomicileRawValue) ?? OperationalSettings.defaultCrewBase
+    }
+
+    private var selectedDomicileTimeZone: TimeZone {
+        selectedCrewDomicile.timeZone
+    }
 
     private var fontScale: CGFloat {
         (AppFontSizeOption(rawValue: appFontSizeOptionRawValue) ?? .medium).scaleFactor
@@ -68,7 +71,7 @@ struct IPadTimelineSidebarView: View {
             if now < window.reportTime {
                 return (window.reportTime, window.pairing)
             }
-            if now >= window.reportTime && now < window.tripEndANC {
+            if now >= window.reportTime && now < window.tripEndDomicile {
                 return nil
             }
         }
@@ -121,105 +124,123 @@ struct IPadTimelineSidebarView: View {
                                 }
                             }
                             Section {
-                                ForEach(section.legs) { leg in
-                                    let tripID = "\(leg.payPeriod)|\(leg.pairing)"
-                                    let rowID = "\(tripID)|\(leg.leg)|\(leg.id.uuidString)"
-                                    let isSelected = selectedTripID == tripID
+                                ForEach(section.entries) { entry in
+                                    switch entry {
+                                    case .leg(let leg):
+                                        let tripID = "\(leg.payPeriod)|\(leg.pairing)"
+                                        let rowID = "\(tripID)|\(leg.leg)|\(leg.id.uuidString)"
+                                        let isSelected = selectedTripID == tripID
 
-                                    let isHighlighted = deleteTripConfirmPairing == leg.pairing
-                                    let flightMatches = friendScheduleMatches.flightMatchesByLegID[leg.id] ?? []
-                                    let hasFlightMatch = !flightMatches.isEmpty
-                                    Group {
-                                        Button {
-                                            selectedTripID = selectedTripID == tripID ? nil : tripID
-                                        } label: {
-                                            TimelineFlightRow(
-                                                leg: leg,
-                                                isPast: isPastFlightRow(leg),
-                                                fontScale: timelineFontScale,
-                                                timeRangeText: timeRangeText(for: leg),
-                                                dayDiff: ScheduleDateText.dayShift(
-                                                    from: leg.depLocal,
-                                                    to: leg.arrLocal
-                                                ),
-                                                blockText: blockText(for: leg),
-                                                iconColor: hasFlightMatch ? friendMatchAmber : .primary,
-                                                onIconTap: hasFlightMatch ? {
-                                                    let lines = flightMatches.map { "GEMS \($0.friendGEMSID): \($0.departureAirport)-\($0.arrivalAirport)" }
-                                                    friendMatchAlert = (
-                                                        title: "Friends on \(leg.flight)",
-                                                        message: lines.joined(separator: "\n")
-                                                    )
-                                                } : nil
-                                            )
-                                        }
-                                        .buttonStyle(.plain)
-                                        .background(isHighlighted ? Color.red.opacity(0.10) : (isSelected ? Color.accentColor.opacity(0.12) : Color.clear))
-                                        .overlay(alignment: .leading) {
-                                            if isSelected {
-                                                Rectangle()
-                                                    .fill(Color.accentColor)
-                                                    .frame(width: 3)
-                                            }
-                                        }
-                                        .simultaneousGesture(
-                                            LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                                                deleteTripConfirmPairing = leg.pairing
-                                            }
-                                        )
-
-                                        if shouldShowLayover(leg: leg) {
-                                            let station = leg.layoverStation ?? leg.arrAirport
-                                            let hotel = leg.layoverHotelName
-                                                ?? tripDataByTripID[tripDataKeyByLegID[leg.id] ?? Self.fileKey(for: leg)]?.hotelByStation[CrewAccessTripSummaryStore.stationKey(station)]
-                                                ?? ""
-                                            let restOverlaps = friendScheduleMatches.restOverlapsByArrivalLegID[leg.id] ?? []
-                                            let hasRestOverlap = !restOverlaps.isEmpty
-                                            TimelineView(.periodic(from: Date(), by: 60)) { context in
-                                                TimelineLayoverCard(
-                                                    station: station,
-                                                    hotel: hotel,
-                                                    durationText: TimelineLayoverSupport.durationText(
-                                                        arrDate: LegConnectionTextBuilder.parseUTC(leg.arrUTC),
-                                                        nextLeg: legData.nextLegByID[leg.id],
-                                                        fallbackDuration: leg.layoverDuration
-                                                    ),
-                                                    remainingText: TimelineLayoverSupport.remainingText(
-                                                        arrDate: LegConnectionTextBuilder.parseUTC(leg.arrUTC),
-                                                        nextLeg: legData.nextLegByID[leg.id],
-                                                        now: context.date
-                                                    ),
-                                                    arrLocalDateLabel: arrivalLocalDateLabel(for: leg),
-                                                    isPast: TimelineLayoverSupport.isPastLayover(
-                                                        arrDate: LegConnectionTextBuilder.parseUTC(leg.arrUTC),
-                                                        nextLeg: legData.nextLegByID[leg.id]
-                                                    ),
+                                        let isHighlighted = deleteTripConfirmPairing == leg.pairing
+                                        let flightMatches = friendScheduleMatches.flightMatchesByLegID[leg.id] ?? []
+                                        let hasFlightMatch = !flightMatches.isEmpty
+                                        Group {
+                                            Button {
+                                                selectedTripID = selectedTripID == tripID ? nil : tripID
+                                            } label: {
+                                                TimelineFlightRow(
+                                                    leg: leg,
+                                                    isPast: isPastFlightRow(leg),
                                                     fontScale: timelineFontScale,
-                                                    iconColor: hasRestOverlap ? friendMatchAmber : .primary,
-                                                    onIconTap: hasRestOverlap ? {
-                                                        let lines = restOverlaps.map { "GEMS \($0.friendGEMSID) at \($0.station)" }
+                                                    timeRangeText: timeRangeText(for: leg),
+                                                    dayDiff: dayShift(for: leg),
+                                                    blockText: blockText(for: leg),
+                                                    iconColor: hasFlightMatch ? friendMatchAmber : .primary,
+                                                    onIconTap: hasFlightMatch ? {
+                                                        let lines = flightMatches.map { "GEMS \($0.friendGEMSID): \($0.departureAirport)-\($0.arrivalAirport)" }
                                                         friendMatchAlert = (
-                                                            title: "Friends at \(station)",
+                                                            title: "Friends on \(leg.flight)",
                                                             message: lines.joined(separator: "\n")
                                                         )
                                                     } : nil
                                                 )
-                                                .background(isHighlighted ? Color.red.opacity(0.10) : (isSelected ? Color.accentColor.opacity(0.12) : Color.clear))
-                                                .overlay(alignment: .leading) {
-                                                    if isSelected {
-                                                        Rectangle().fill(Color.accentColor).frame(width: 3)
-                                                    }
+                                            }
+                                            .buttonStyle(.plain)
+                                            .background(isHighlighted ? Color.red.opacity(0.10) : (isSelected ? Color.accentColor.opacity(0.12) : Color.clear))
+                                            .overlay(alignment: .leading) {
+                                                if isSelected {
+                                                    Rectangle()
+                                                        .fill(Color.accentColor)
+                                                        .frame(width: 3)
                                                 }
                                             }
-                                            .id("ipad.layover.\(leg.id.uuidString)")
                                             .simultaneousGesture(
                                                 LongPressGesture(minimumDuration: 0.5).onEnded { _ in
                                                     deleteTripConfirmPairing = leg.pairing
                                                 }
                                             )
+
+                                            if shouldShowLayover(leg: leg) {
+                                                let station = leg.layoverStation ?? leg.arrAirport
+                                                let hotel = leg.layoverHotelName
+                                                    ?? tripDataByTripID[tripDataKeyByLegID[leg.id] ?? Self.fileKey(for: leg)]?.hotelByStation[CrewAccessTripSummaryStore.stationKey(station)]
+                                                    ?? ""
+                                                let restOverlaps = friendScheduleMatches.restOverlapsByArrivalLegID[leg.id] ?? []
+                                                let hasRestOverlap = !restOverlaps.isEmpty
+                                                TimelineView(.periodic(from: Date(), by: 60)) { context in
+                                                    TimelineLayoverCard(
+                                                        station: station,
+                                                        hotel: hotel,
+                                                        durationText: TimelineLayoverSupport.durationText(
+                                                            arrDate: LegConnectionTextBuilder.parseUTC(leg.arrUTC),
+                                                            nextLeg: legData.nextLegByID[leg.id],
+                                                            fallbackDuration: leg.layoverDuration
+                                                        ),
+                                                        remainingText: TimelineLayoverSupport.remainingText(
+                                                            arrDate: LegConnectionTextBuilder.parseUTC(leg.arrUTC),
+                                                            nextLeg: legData.nextLegByID[leg.id],
+                                                            now: context.date
+                                                        ),
+                                                        arrLocalDateLabel: arrivalLocalDateLabel(for: leg),
+                                                        isPast: TimelineLayoverSupport.isPastLayover(
+                                                            arrDate: LegConnectionTextBuilder.parseUTC(leg.arrUTC),
+                                                            nextLeg: legData.nextLegByID[leg.id]
+                                                        ),
+                                                        fontScale: timelineFontScale,
+                                                        iconColor: hasRestOverlap ? friendMatchAmber : .primary,
+                                                        onIconTap: hasRestOverlap ? {
+                                                            let lines = restOverlaps.map { "GEMS \($0.friendGEMSID) at \($0.station)" }
+                                                            friendMatchAlert = (
+                                                                title: "Friends at \(station)",
+                                                                message: lines.joined(separator: "\n")
+                                                            )
+                                                        } : nil
+                                                    )
+                                                    .background(isHighlighted ? Color.red.opacity(0.10) : (isSelected ? Color.accentColor.opacity(0.12) : Color.clear))
+                                                    .overlay(alignment: .leading) {
+                                                        if isSelected {
+                                                            Rectangle().fill(Color.accentColor).frame(width: 3)
+                                                        }
+                                                    }
+                                                }
+                                                .id("ipad.layover.\(leg.id.uuidString)")
+                                                .simultaneousGesture(
+                                                    LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                                        deleteTripConfirmPairing = leg.pairing
+                                                    }
+                                                )
+                                            }
                                         }
+                                        .id(rowID)
+                                    case .manualOperational(let event):
+                                        TimelineManualOperationalRow(
+                                            event: event,
+                                            isPast: event.endUTC < Date(),
+                                            fontScale: timelineFontScale,
+                                            timeRangeText: manualOperationalTimeRangeText(for: event),
+                                            dayDiff: manualOperationalDayShift(for: event)
+                                        )
+                                        .id("ipad.manual-operational.\(event.id.uuidString)")
+                                        .contentShape(Rectangle())
+                                        .onTapGesture {
+                                            selectedManualOperationalEvent = event
+                                        }
+                                        .simultaneousGesture(
+                                            LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                                selectedManualOperationalEvent = event
+                                            }
+                                        )
                                     }
-                                    .id(rowID)
                                 }
                             } header: {
                                 let isSectionSelected = selectedSectionIDs.contains(section.id)
@@ -243,20 +264,22 @@ struct IPadTimelineSidebarView: View {
                 }
                 .onChange(of: selectedTripID) { _, newID in
                     if let id = newID,
-                       let rowID = firstRowIDByTripID[id] {
-                        withAnimation { proxy.scrollTo(rowID, anchor: .center) }
+                       let targetID = selectedTripScrollTargetID(for: id) {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            proxy.scrollTo(targetID, anchor: .top)
+                        }
                     }
                 }
                 // On appear: if a trip is already selected (portrait sheet opened
                 // from a calendar tap), scroll to that trip first. Otherwise fall
                 // back to the next upcoming event.
                 .task {
-                    let initialTarget: String? = selectedTripID.flatMap { firstRowIDByTripID[$0] }
+                    let initialTarget: String? = selectedTripID.flatMap { selectedTripScrollTargetID(for: $0) }
                         ?? nextScrollTargetID()
                     if let rowID = initialTarget { proxy.scrollTo(rowID, anchor: .top) }
                     for delay in [100_000_000, 200_000_000, 400_000_000] as [UInt64] {
                         try? await Task.sleep(nanoseconds: delay)
-                        let target = selectedTripID.flatMap { firstRowIDByTripID[$0] }
+                        let target = selectedTripID.flatMap { selectedTripScrollTargetID(for: $0) }
                             ?? nextScrollTargetID()
                         if let rowID = target {
                             withAnimation(.easeInOut(duration: 0.25)) {
@@ -295,6 +318,17 @@ struct IPadTimelineSidebarView: View {
                         }
                     }
                 }
+                .onChange(of: viewModel.manualOperationalEvents) { _, _ in
+                    refreshLegData()
+                    Task {
+                        try? await Task.sleep(nanoseconds: 120_000_000)
+                        if let rowID = nextScrollTargetID() {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                proxy.scrollTo(rowID, anchor: .top)
+                            }
+                        }
+                    }
+                }
             }
         }
         .background(Color(.systemBackground))
@@ -307,6 +341,12 @@ struct IPadTimelineSidebarView: View {
             refreshLegData()
             refreshTripDataCards()
             refreshFriendScheduleMatches()
+        }
+        .onChange(of: selectedClockDisplay) { _, _ in
+            refreshLegData()
+        }
+        .onChange(of: crewDomicileRawValue) { _, _ in
+            refreshLegData()
         }
         .onChange(of: viewModel.friendConnections) { _, _ in
             refreshFriendScheduleMatches()
@@ -343,6 +383,10 @@ struct IPadTimelineSidebarView: View {
             }
         } message: {
             Text("This will remove the trip from Timeline and synced devices.")
+        }
+        .sheet(item: $selectedManualOperationalEvent) { event in
+            ManualEventDetailSheet(operationalEvent: event)
+                .environmentObject(viewModel)
         }
     }
 
@@ -391,6 +435,10 @@ struct IPadTimelineSidebarView: View {
         return "\(tripID)|\(target.leg)|\(target.id.uuidString)"
     }
 
+    private func selectedTripScrollTargetID(for tripID: String) -> String? {
+        firstTripSummaryIDByTripID[tripID] ?? firstRowIDByTripID[tripID]
+    }
+
     // MARK: Header
 
     private var sidebarHeader: some View {
@@ -423,7 +471,7 @@ struct IPadTimelineSidebarView: View {
                         .minimumScaleFactor(0.8)
                 }
                 HStack {
-                    Text(Self.reportTimeFormatter.string(from: report.reportTime) + " ANC")
+                    Text(Self.reportTimeFormatter(for: selectedDomicileTimeZone.identifier).string(from: report.reportTime) + " \(selectedCrewDomicile.displayName)")
                         .appScaledFont(.subheadline, weight: .bold, scale: timelineFontScale)
                         .foregroundStyle(dateHeaderTextColor)
                         .lineLimit(1)
@@ -543,10 +591,121 @@ struct IPadTimelineSidebarView: View {
     // MARK: Helpers
 
     private func timeRangeText(for leg: TripLeg) -> String {
-        let dep = ScheduleDateText.timePart(from: leg.depLocal)
-        let arr = ScheduleDateText.timePart(from: leg.arrLocal)
-        return "\(dep) - \(arr)"
+        if selectedClockDisplay == .utc {
+            guard let depUTC = LegConnectionTextBuilder.parseUTC(leg.depUTC),
+                  let arrUTC = LegConnectionTextBuilder.parseUTC(leg.arrUTC) else {
+                return "UTC MISSING"
+            }
+            return "\(Self.utcTimeFormatter.string(from: depUTC)) - \(Self.utcTimeFormatter.string(from: arrUTC))"
+        }
+        guard let depUTC = LegConnectionTextBuilder.parseUTC(leg.depUTC),
+              let arrUTC = LegConnectionTextBuilder.parseUTC(leg.arrUTC) else {
+            return "LCL MISSING"
+        }
+        guard let depTimeZoneID = IATATimeZoneResolver.shared.resolve(leg.depAirport),
+              let arrTimeZoneID = IATATimeZoneResolver.shared.resolve(leg.arrAirport) else {
+            return "LCL MISSING"
+        }
+        return "\(Self.localTimeFormatter(for: depTimeZoneID).string(from: depUTC)) - \(Self.localTimeFormatter(for: arrTimeZoneID).string(from: arrUTC))"
     }
+
+    private func dayShift(for leg: TripLeg) -> Int {
+        if selectedClockDisplay == .utc {
+            guard let depUTC = LegConnectionTextBuilder.parseUTC(leg.depUTC),
+                  let arrUTC = LegConnectionTextBuilder.parseUTC(leg.arrUTC) else {
+                return 0
+            }
+            let depDayKey = SharedDateFormatters.utcDayOnly.string(from: depUTC)
+            let arrDayKey = SharedDateFormatters.utcDayOnly.string(from: arrUTC)
+            guard let depDay = SharedDateFormatters.utcDayOnly.date(from: depDayKey),
+                  let arrDay = SharedDateFormatters.utcDayOnly.date(from: arrDayKey) else {
+                return 0
+            }
+            return Calendar(identifier: .gregorian).dateComponents([.day], from: depDay, to: arrDay).day ?? 0
+        }
+
+        guard let depUTC = LegConnectionTextBuilder.parseUTC(leg.depUTC),
+              let arrUTC = LegConnectionTextBuilder.parseUTC(leg.arrUTC),
+              let depTimeZoneID = IATATimeZoneResolver.shared.resolve(leg.depAirport),
+              let arrTimeZoneID = IATATimeZoneResolver.shared.resolve(leg.arrAirport),
+              let depDay = SharedDateFormatters.utcDayOnly.date(from: Self.localDayKeyFormatter(for: depTimeZoneID).string(from: depUTC)),
+              let arrDay = SharedDateFormatters.utcDayOnly.date(from: Self.localDayKeyFormatter(for: arrTimeZoneID).string(from: arrUTC)) else {
+            return 0
+        }
+        return Calendar(identifier: .gregorian).dateComponents([.day], from: depDay, to: arrDay).day ?? 0
+    }
+
+    private func manualOperationalTimeRangeText(for event: ManualOperationalEvent) -> String {
+        if selectedClockDisplay == .utc {
+            return "\(Self.utcTimeFormatter.string(from: event.startUTC)) - \(Self.utcTimeFormatter.string(from: event.endUTC))"
+        }
+        let formatter = Self.localTimeFormatter(for: selectedDomicileTimeZone.identifier)
+        return "\(formatter.string(from: event.startUTC)) - \(formatter.string(from: event.endUTC))"
+    }
+
+    private func manualOperationalDayShift(for event: ManualOperationalEvent) -> Int {
+        if selectedClockDisplay == .utc {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+            let startDay = calendar.startOfDay(for: event.startUTC)
+            let endDay = calendar.startOfDay(for: event.endUTC)
+            return calendar.dateComponents([.day], from: startDay, to: endDay).day ?? 0
+        }
+        let formatter = Self.localDayKeyFormatter(for: selectedDomicileTimeZone.identifier)
+        guard let startDay = SharedDateFormatters.utcDayOnly.date(from: formatter.string(from: event.startUTC)),
+              let endDay = SharedDateFormatters.utcDayOnly.date(from: formatter.string(from: event.endUTC))
+        else {
+            return 0
+        }
+        return Calendar(identifier: .gregorian).dateComponents([.day], from: startDay, to: endDay).day ?? 0
+    }
+
+    private static func localTimeFormatter(for tzID: String) -> DateFormatter {
+        if let cached = localTimeFormatters[tzID] { return cached }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: tzID)
+        formatter.dateFormat = "HH:mm"
+        localTimeFormatters[tzID] = formatter
+        return formatter
+    }
+
+    private static func localDayKeyFormatter(for tzID: String) -> DateFormatter {
+        if let cached = localDayKeyFormatters[tzID] { return cached }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: tzID)
+        formatter.dateFormat = "yyyy-MM-dd"
+        localDayKeyFormatters[tzID] = formatter
+        return formatter
+    }
+
+    private static var localTimeFormatters: [String: DateFormatter] = [:]
+    private static var localDayKeyFormatters: [String: DateFormatter] = [:]
+
+    private static func reportTimeFormatter(for tzID: String) -> DateFormatter {
+        if let cached = reportTimeFormatters[tzID] { return cached }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US")
+        formatter.timeZone = TimeZone(identifier: tzID)
+        formatter.dateFormat = "EEE, MMM d yyyy  HH:mm"
+        reportTimeFormatters[tzID] = formatter
+        return formatter
+    }
+
+    private static var reportTimeFormatters: [String: DateFormatter] = [:]
+
+    private static let utcTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
 
     private func blockText(for leg: TripLeg) -> String {
         let text = LegConnectionTextBuilder.blockAndConnectionText(for: leg, nextLegByID: legData.nextLegByID)
@@ -622,7 +781,11 @@ struct IPadTimelineSidebarView: View {
     /// Call this whenever `crewAccessSchedules` changes or on first appear.
     private func refreshLegData() {
         let schedules = sidebarSchedules
-        let data = TimelineLegData(schedules: schedules)
+        let data = TimelineLegData(
+            schedules: schedules,
+            manualOperationalEvents: viewModel.manualOperationalEvents,
+            displayTimeZone: selectedClockDisplay == .utc ? (TimeZone(secondsFromGMT: 0) ?? .gmt) : selectedDomicileTimeZone
+        )
         legData = data
 
         // Pre-compute first leg of each trip (allLegs is already sorted by depLocal).
@@ -650,20 +813,26 @@ struct IPadTimelineSidebarView: View {
 
         // Pre-compute first row ID per trip (used for scroll + portrait sheet focus).
         var rowMap: [String: String] = [:]
+        var summaryMap: [String: String] = [:]
         for section in data.daySections {
             for leg in section.legs {
                 let tripID = "\(leg.payPeriod)|\(leg.pairing)"
+                if summaryMap[tripID] == nil, startIDs.contains(leg.id) {
+                    summaryMap[tripID] = "ipad.tripdata.\(leg.id.uuidString)"
+                }
                 if rowMap[tripID] == nil {
                     rowMap[tripID] = "\(tripID)|\(leg.leg)|\(leg.id.uuidString)"
                 }
             }
         }
         firstRowIDByTripID = rowMap
+        firstTripSummaryIDByTripID = summaryMap
 
         // Cache only the window list; time-based selection stays in computed nextReportInfo.
         cachedReportWindows = NextReportWindowBuilder.build(
             schedules: schedules,
-            anchorageTimeZone: Self.anchorageTimeZone
+            domicileAirportCode: selectedCrewDomicile.reportAirportCode,
+            domicileTimeZone: selectedDomicileTimeZone
         ).sorted { $0.reportTime < $1.reportTime }
     }
 

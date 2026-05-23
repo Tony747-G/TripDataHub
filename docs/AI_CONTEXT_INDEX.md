@@ -17,6 +17,14 @@ This is the routing layer for AI sessions working on TripDataHub. It tells you w
 
 - `docs/INVARIANTS.md`
 - `docs/BID_PERIODS.md`
+- `docs/MANUAL_EVENTS_LAYER_ARCHITECTURE.md`
+- `docs/ADR/ADR-002-utc-source-of-truth.md`
+
+## If Touching Manual Operational / Personal Events
+
+- `docs/MANUAL_EVENTS_LAYER_ARCHITECTURE.md`
+- `docs/CREW_CALLOUT_PERIODS.md`
+- `docs/INVARIANTS.md`
 - `docs/ADR/ADR-002-utc-source-of-truth.md`
 
 ## If Touching Schedule Arrays or Model Ownership
@@ -74,4 +82,3 @@ This is Phase 0. Only the files listed in this index exist. Do not create additi
 - Invariant definitions are authoritative over agent opinions.
 - ADRs override undocumented assumptions.
 - No agent may silently override documented invariants or ADR decisions.
-

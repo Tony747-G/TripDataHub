@@ -86,7 +86,7 @@ Names that have repeatedly caused bugs. When you write code that touches any of 
 
 ## "Timeline"
 
-The user's own schedule view. Driven by `viewModel.schedules`. iOS shows it in a tab; iPad shows it in the left sidebar of the operational workspace.
+The user's own Crew Duty Chronology. Driven by imported schedule data plus Manual Operational Events. iOS shows it in a tab; iPad shows it in the left sidebar of the operational workspace. Timeline includes Trips, Flights, imported DH, and Manual Operational Events. Timeline excludes Bid Layer and Personal Layer events.
 
 ## "Friends Timeline"
 
@@ -99,6 +99,18 @@ The pilot's home base. Determines LDT for BP/PP membership and BP grid timezone.
 ## "LDT"
 
 Local Domicile Time. The wall-clock time at the pilot's home base. Used for the 03:00 day boundary that defines BP/PP membership.
+
+## "Crew Base"
+
+The user-selected base used for Manual Operational Event time rules. Supported values: `ANC`, `SDF`, `SDFZ`, `ONT`, `MIA`. Default: `ANC`. Crew Base affects new manual event creation and must not silently recalculate existing events.
+
+## "Manual Operational Event"
+
+A user-created duty event such as `RSV-A`, `RSV-B`, `RSV-C`, `RSV-D`, `LCO`, `HOT`, `RCID`, `CQ12`, or `CQ6`. It belongs to the Operational Layer and Timeline. It must not appear in the Bid/Personal stack.
+
+## "Manual Personal Event"
+
+A user-created Personal Layer event such as `Commute`, `Medical`, `Appointment`, or `Other`. It belongs in the calendar's lower Bid/Personal stack area. It must not appear in Timeline or render as a Trip Bar.
 
 ## "BP" — Bid Period
 

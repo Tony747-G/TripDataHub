@@ -3,9 +3,9 @@ import Foundation
 struct NextReportTripWindow {
     let key: String
     let pairing: String
-    let tripStartANC: Date
+    let tripStartDomicile: Date
     let reportTime: Date
-    let tripEndANC: Date
+    let tripEndDomicile: Date
 }
 
 enum NextReportWindowBuilder {
@@ -14,12 +14,14 @@ enum NextReportWindowBuilder {
 
     static func build(
         schedules: [PayPeriodSchedule],
-        anchorageTimeZone: TimeZone
+        domicileAirportCode: String,
+        domicileTimeZone: TimeZone
     ) -> [NextReportTripWindow] {
+        let domicileAirport = domicileAirportCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         let parseFormatter = DateFormatter()
         parseFormatter.calendar = Calendar(identifier: .gregorian)
         parseFormatter.locale = Locale(identifier: "en_US_POSIX")
-        parseFormatter.timeZone = anchorageTimeZone
+        parseFormatter.timeZone = domicileTimeZone
         parseFormatter.dateFormat = "yyyy-MM-dd HH:mm"
 
         let allLegs = schedules
@@ -56,19 +58,19 @@ enum NextReportWindowBuilder {
                 return lhs.depLocal < rhs.depLocal
             }
 
-            guard let firstANCDep = sorted.first(where: { $0.depAirport.uppercased() == "ANC" }),
-                  let tripStartANC = parseUTC(firstANCDep.depUTC)
+            guard let firstDomicileDeparture = sorted.first(where: { $0.depAirport.uppercased() == domicileAirport }),
+                  let tripStartDomicile = parseUTC(firstDomicileDeparture.depUTC)
             else {
                 continue
             }
 
-            let reportTime = tripStartANC.addingTimeInterval(-reportLeadTimeSeconds)
+            let reportTime = tripStartDomicile.addingTimeInterval(-reportLeadTimeSeconds)
 
-            let ancArrivals = sorted
-                .filter { $0.arrAirport.uppercased() == "ANC" }
+            let domicileArrivals = sorted
+                .filter { $0.arrAirport.uppercased() == domicileAirport }
                 .compactMap { parseUTC($0.arrUTC) }
 
-            guard let tripEndANC = ancArrivals.max() else {
+            guard let tripEndDomicile = domicileArrivals.max() else {
                 continue
             }
 
@@ -76,10 +78,10 @@ enum NextReportWindowBuilder {
             results.append(
                 NextReportTripWindow(
                     key: key,
-                    pairing: firstANCDep.pairing,
-                    tripStartANC: tripStartANC,
+                    pairing: firstDomicileDeparture.pairing,
+                    tripStartDomicile: tripStartDomicile,
                     reportTime: reportTime,
-                    tripEndANC: tripEndANC
+                    tripEndDomicile: tripEndDomicile
                 )
             )
         }

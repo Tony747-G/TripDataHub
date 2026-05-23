@@ -24,6 +24,7 @@ struct IPadOperationalWorkspaceView: View {
     @State private var menuExpanded = false
     @State private var showingBrowser = false
     @State private var showingSettings = false
+    @State private var showingAddEvent = false
     @State private var isShowingImportPreviewFromExternalOpen = false
     /// ポートレート時にトリップバータップで表示するシートのトリップID
     @State private var portraitTripSheetID: String? = nil
@@ -136,6 +137,10 @@ struct IPadOperationalWorkspaceView: View {
                     )
                 }
         }
+        .sheet(isPresented: $showingAddEvent) {
+            ManualEventAddSheet()
+                .environmentObject(viewModel)
+        }
         .onChange(of: viewModel.pendingImport?.id) { _, newValue in
             isShowingImportPreviewFromExternalOpen = newValue != nil
         }
@@ -153,7 +158,7 @@ struct IPadOperationalWorkspaceView: View {
 
     // MARK: Floating menu
 
-    private let verticalMenuItemCount = 3
+    private let verticalMenuItemCount = 4
     private let verticalMenuItemSpacing: CGFloat = 58
 
     private var floatingMenu: some View {
@@ -167,7 +172,11 @@ struct IPadOperationalWorkspaceView: View {
                 showingBrowser = true
                 withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
             }
-            verticalMenuItem(index: 2, icon: "gearshape", label: "Settings") {
+            verticalMenuItem(index: 2, icon: "plus", label: "Add Event") {
+                showingAddEvent = true
+                withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
+            }
+            verticalMenuItem(index: 3, icon: "gearshape", label: "Settings") {
                 showingSettings = true
                 withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
             }

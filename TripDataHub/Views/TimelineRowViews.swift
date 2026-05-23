@@ -65,6 +65,73 @@ struct TimelineFlightRow: View {
     }
 }
 
+struct TimelineManualOperationalRow: View {
+    let event: ManualOperationalEvent
+    let isPast: Bool
+    let fontScale: CGFloat
+    let timeRangeText: String
+    let dayDiff: Int
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: iconName)
+                .font(.system(size: 17 * fontScale, weight: .semibold))
+                .foregroundStyle(iconForegroundColor)
+                .frame(width: 28 * fontScale, alignment: .center)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(event.code.rawValue)
+                        .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
+                        .foregroundStyle(isPast ? .gray : .primary)
+                    Spacer()
+                    HStack(spacing: 0) {
+                        Text(timeRangeText)
+                            .foregroundStyle(isPast ? .gray : .primary)
+                        Text(timelineDiffLabel(dayDiff))
+                            .foregroundStyle(isPast ? .gray : (dayDiff == 0 ? .primary : .red))
+                    }
+                    .appScaledFont(.subheadline, scale: fontScale)
+                }
+                HStack {
+                    Text(event.crewBase.displayName)
+                        .appScaledFont(.footnote, scale: fontScale)
+                        .foregroundStyle(isPast ? .gray : .primary)
+                    Spacer()
+                    Text("Operational")
+                        .appScaledFont(.caption, scale: fontScale)
+                        .foregroundStyle(isPast ? .gray : .primary)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 7)
+    }
+
+    private var iconName: String {
+        switch event.code {
+        case .reserveA, .reserveB, .reserveC, .reserveD:
+            return "phone.fill"
+        case .lco, .rcid:
+            return "phone.fill"
+        case .hot:
+            return "flame.fill"
+        case .cq12, .cq6:
+            return "display"
+        }
+    }
+
+    private var iconForegroundColor: Color {
+        if isPast { return .gray }
+        switch event.code {
+        case .hot:
+            return Color.accentColor
+        case .reserveA, .reserveB, .reserveC, .reserveD, .lco, .rcid, .cq12, .cq6:
+            return .primary
+        }
+    }
+}
+
 /// Shared layover card used by TimelineTabView and ScheduleTimelineRendererView.
 ///
 /// Hotel name, duration, and arrival date label are pre-computed by the caller.

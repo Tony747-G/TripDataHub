@@ -131,6 +131,352 @@ final class CalendarBidPeriodGenerationTests: XCTestCase {
     }
 }
 
+final class ManualOperationalEventTimeRuleTests: XCTestCase {
+    private static let iso = ISO8601DateFormatter()
+
+    func test_ancReserveC_resolvesOvernightStandardTime() throws {
+        try assertEvent(
+            code: .reserveC,
+            base: .anc,
+            localDate: localDate(year: 2026, month: 1, day: 15),
+            startUTC: "2026-01-16T05:15:00Z",
+            endUTC: "2026-01-16T17:14:00Z"
+        )
+    }
+
+    func test_ontReserveA_resolvesOvernightStandardTime() throws {
+        try assertEvent(
+            code: .reserveA,
+            base: .ont,
+            localDate: localDate(year: 2026, month: 1, day: 15),
+            startUTC: "2026-01-16T07:00:00Z",
+            endUTC: "2026-01-16T18:59:00Z"
+        )
+    }
+
+    func test_sdfReserveC_resolvesOvernightStandardTime() throws {
+        try assertEvent(
+            code: .reserveC,
+            base: .sdf,
+            localDate: localDate(year: 2026, month: 1, day: 15),
+            startUTC: "2026-01-15T21:00:00Z",
+            endUTC: "2026-01-16T08:59:00Z"
+        )
+    }
+
+    func test_miaReserveD_resolvesStandardTime() throws {
+        try assertEvent(
+            code: .reserveD,
+            base: .mia,
+            localDate: localDate(year: 2026, month: 1, day: 15),
+            startUTC: "2026-01-15T10:00:00Z",
+            endUTC: "2026-01-15T21:59:00Z"
+        )
+    }
+
+    func test_rcid_resolvesForSelectedBase() throws {
+        try assertEvent(
+            code: .rcid,
+            base: .sdfz,
+            localDate: localDate(year: 2026, month: 1, day: 15),
+            startUTC: "2026-01-15T14:00:00Z",
+            endUTC: "2026-01-15T18:00:00Z"
+        )
+    }
+
+    func test_lco_resolvesForSelectedBase() throws {
+        try assertEvent(
+            code: .lco,
+            base: .anc,
+            localDate: localDate(year: 2026, month: 1, day: 15),
+            startUTC: "2026-01-15T17:00:00Z",
+            endUTC: "2026-01-15T23:00:00Z"
+        )
+    }
+
+    func test_dstBoundary_usesDomicileTimeZoneSemantics() throws {
+        try assertEvent(
+            code: .rcid,
+            base: .sdf,
+            localDate: localDate(year: 2025, month: 3, day: 9),
+            startUTC: "2025-03-09T13:00:00Z",
+            endUTC: "2025-03-09T17:00:00Z"
+        )
+        try assertEvent(
+            code: .rcid,
+            base: .sdf,
+            localDate: localDate(year: 2025, month: 11, day: 2),
+            startUTC: "2025-11-02T14:00:00Z",
+            endUTC: "2025-11-02T18:00:00Z"
+        )
+    }
+
+    func test_sdfAndSdfz_useSameReserveRulesAndTimeZone() throws {
+        let localDate = localDate(year: 2026, month: 1, day: 15)
+        let sdf = try ManualOperationalEvent(code: .reserveC, crewBase: .sdf, localStartDate: localDate)
+        let sdfz = try ManualOperationalEvent(code: .reserveC, crewBase: .sdfz, localStartDate: localDate)
+
+        XCTAssertEqual(sdf.startUTC, sdfz.startUTC)
+        XCTAssertEqual(sdf.endUTC, sdfz.endUTC)
+    }
+
+    func test_manualOperationalCodes_doNotIncludeDHOrRCIT() {
+        let rawCodes = ManualOperationalCode.allCases.map(\.rawValue)
+
+        XCTAssertTrue(rawCodes.contains("RCID"))
+        XCTAssertFalse(rawCodes.contains("RCIT"))
+        XCTAssertFalse(rawCodes.contains("DH"))
+    }
+
+    func test_manualOperationalEvents_areOperationalLayerOnly() throws {
+        let event = try ManualOperationalEvent(
+            code: .reserveC,
+            crewBase: .anc,
+            localStartDate: localDate(year: 2026, month: 1, day: 15)
+        )
+
+        XCTAssertEqual(event.layer, .operational)
+        XCTAssertEqual(event.code.layer, .operational)
+    }
+
+    func test_unsupportedBaseReserveAndUnspecifiedCodes_haveNoDefaultTimeRange() {
+        let miaRule = CrewBaseRule.rule(for: .mia)
+        XCTAssertNil(miaRule.defaultTimeRange(for: .reserveA))
+        XCTAssertNil(miaRule.defaultTimeRange(for: .reserveB))
+
+        let ancRule = CrewBaseRule.rule(for: .anc)
+        XCTAssertNil(ancRule.defaultTimeRange(for: .hot))
+        XCTAssertNil(ancRule.defaultTimeRange(for: .cq12))
+        XCTAssertNil(ancRule.defaultTimeRange(for: .cq6))
+    }
+
+    func test_operationalSettings_defaultCrewBaseIsANC() throws {
+        let defaults = try makeIsolatedDefaults()
+
+        XCTAssertEqual(OperationalSettings.selectedCrewBase(defaults: defaults), .anc)
+    }
+
+    func test_operationalSettings_persistsSelectedCrewBase() throws {
+        let defaults = try makeIsolatedDefaults()
+
+        OperationalSettings.setSelectedCrewBase(.ont, defaults: defaults)
+
+        XCTAssertEqual(defaults.string(forKey: OperationalSettings.crewBaseKey), "ONT")
+        XCTAssertEqual(OperationalSettings.selectedCrewBase(defaults: defaults), .ont)
+    }
+
+    func test_manualOperationalEvent_canResolveCrewBaseFromSettings() throws {
+        let defaults = try makeIsolatedDefaults()
+        OperationalSettings.setSelectedCrewBase(.ont, defaults: defaults)
+
+        let event = try ManualOperationalEvent(
+            code: .reserveA,
+            localStartDate: localDate(year: 2026, month: 1, day: 15),
+            defaults: defaults
+        )
+
+        XCTAssertEqual(event.crewBase, .ont)
+        XCTAssertEqual(event.startUTC, try XCTUnwrap(Self.iso.date(from: "2026-01-16T07:00:00Z")))
+        XCTAssertEqual(event.endUTC, try XCTUnwrap(Self.iso.date(from: "2026-01-16T18:59:00Z")))
+    }
+
+    func test_manualOperationalEvent_defaultRangeAllowsEditableCrossMidnightEndDate() throws {
+        let event = try ManualOperationalEvent(
+            code: .reserveC,
+            crewBase: .anc,
+            localStartDate: localDate(year: 2026, month: 1, day: 15),
+            localEndDate: localDate(year: 2026, month: 1, day: 16)
+        )
+
+        XCTAssertEqual(event.startUTC, try XCTUnwrap(Self.iso.date(from: "2026-01-16T05:15:00Z")))
+        XCTAssertEqual(event.endUTC, try XCTUnwrap(Self.iso.date(from: "2026-01-16T17:14:00Z")))
+        XCTAssertGreaterThan(event.endUTC, event.startUTC)
+    }
+
+    func test_manualOperationalEvent_autoFillRangeCreatesDailyEventsNotContinuousBar() throws {
+        let events = try ManualOperationalEvent.dailyAutoFilledEvents(
+            code: .lco,
+            crewBase: .anc,
+            localStartDate: localDate(year: 2026, month: 1, day: 15),
+            localEndDate: localDate(year: 2026, month: 1, day: 17)
+        )
+
+        XCTAssertEqual(events.count, 3)
+        XCTAssertEqual(events[0].startUTC, try XCTUnwrap(Self.iso.date(from: "2026-01-15T17:00:00Z")))
+        XCTAssertEqual(events[0].endUTC, try XCTUnwrap(Self.iso.date(from: "2026-01-15T23:00:00Z")))
+        XCTAssertEqual(events[1].startUTC, try XCTUnwrap(Self.iso.date(from: "2026-01-16T17:00:00Z")))
+        XCTAssertEqual(events[1].endUTC, try XCTUnwrap(Self.iso.date(from: "2026-01-16T23:00:00Z")))
+        XCTAssertEqual(events[2].startUTC, try XCTUnwrap(Self.iso.date(from: "2026-01-17T17:00:00Z")))
+        XCTAssertEqual(events[2].endUTC, try XCTUnwrap(Self.iso.date(from: "2026-01-17T23:00:00Z")))
+        XCTAssertLessThan(events[0].endUTC.timeIntervalSince(events[0].startUTC), 24 * 60 * 60)
+    }
+
+    func test_manualOperationalEvent_autoFillRangeCreatesCrossMidnightDailyEvents() throws {
+        let events = try ManualOperationalEvent.dailyAutoFilledEvents(
+            code: .reserveC,
+            crewBase: .anc,
+            localStartDate: localDate(year: 2026, month: 1, day: 15),
+            localEndDate: localDate(year: 2026, month: 1, day: 16)
+        )
+
+        XCTAssertEqual(events.count, 2)
+        XCTAssertEqual(events[0].startUTC, try XCTUnwrap(Self.iso.date(from: "2026-01-16T05:15:00Z")))
+        XCTAssertEqual(events[0].endUTC, try XCTUnwrap(Self.iso.date(from: "2026-01-16T17:14:00Z")))
+        XCTAssertEqual(events[1].startUTC, try XCTUnwrap(Self.iso.date(from: "2026-01-17T05:15:00Z")))
+        XCTAssertEqual(events[1].endUTC, try XCTUnwrap(Self.iso.date(from: "2026-01-17T17:14:00Z")))
+    }
+
+    func test_manualEventStore_persistsOperationalAndPersonalEvents() throws {
+        let defaults = try makeIsolatedDefaults()
+        let directory = try makeTemporaryDirectory()
+        let store = ManualEventStore(defaults: defaults, directory: directory)
+        let operational = try ManualOperationalEvent(
+            code: .reserveC,
+            crewBase: .anc,
+            localStartDate: localDate(year: 2026, month: 1, day: 15)
+        )
+        let personal = try ManualPersonalEvent(
+            code: .medical,
+            startUTC: try XCTUnwrap(Self.iso.date(from: "2026-01-15T18:00:00Z")),
+            endUTC: try XCTUnwrap(Self.iso.date(from: "2026-01-15T19:00:00Z"))
+        )
+
+        try store.save(ManualEventStoreSnapshot(operationalEvents: [operational], personalEvents: [personal]))
+
+        let reloaded = ManualEventStore(defaults: defaults, directory: directory).load()
+        XCTAssertEqual(reloaded.operationalEvents, [operational])
+        XCTAssertEqual(reloaded.personalEvents, [personal])
+    }
+
+    func test_manualEventStore_persistsDailyAutoFilledOperationalEvents() throws {
+        let defaults = try makeIsolatedDefaults()
+        let directory = try makeTemporaryDirectory()
+        let store = ManualEventStore(defaults: defaults, directory: directory)
+        let events = try ManualOperationalEvent.dailyAutoFilledEvents(
+            code: .lco,
+            crewBase: .anc,
+            localStartDate: localDate(year: 2026, month: 1, day: 15),
+            localEndDate: localDate(year: 2026, month: 1, day: 17)
+        )
+
+        try store.save(ManualEventStoreSnapshot(operationalEvents: events, personalEvents: []))
+
+        let reloaded = ManualEventStore(defaults: defaults, directory: directory).load()
+        XCTAssertEqual(reloaded.operationalEvents.count, 3)
+        XCTAssertEqual(reloaded.operationalEvents.first?.startUTC, try XCTUnwrap(Self.iso.date(from: "2026-01-15T17:00:00Z")))
+        XCTAssertEqual(reloaded.operationalEvents.first?.endUTC, try XCTUnwrap(Self.iso.date(from: "2026-01-15T23:00:00Z")))
+        XCTAssertEqual(reloaded.operationalEvents.last?.startUTC, try XCTUnwrap(Self.iso.date(from: "2026-01-17T17:00:00Z")))
+        XCTAssertEqual(reloaded.operationalEvents.last?.endUTC, try XCTUnwrap(Self.iso.date(from: "2026-01-17T23:00:00Z")))
+    }
+
+    func test_manualOperationalAutoFillReplacingOverlapsRemovesOldContinuousDuplicate() throws {
+        let oldContinuous = try ManualOperationalEvent(
+            code: .reserveA,
+            crewBase: .anc,
+            localStartDate: localDate(year: 2026, month: 1, day: 15),
+            localEndDate: localDate(year: 2026, month: 1, day: 17)
+        )
+        let dailyEvents = try ManualOperationalEvent.dailyAutoFilledEvents(
+            code: .reserveA,
+            crewBase: .anc,
+            localStartDate: localDate(year: 2026, month: 1, day: 15),
+            localEndDate: localDate(year: 2026, month: 1, day: 17)
+        )
+
+        let merged = mergeManualOperationalEventsReplacingOverlaps(
+            existing: [oldContinuous],
+            replacements: dailyEvents
+        )
+
+        XCTAssertEqual(merged.count, 3)
+        XCTAssertFalse(merged.contains { $0.id == oldContinuous.id })
+        XCTAssertEqual(merged.map(\.startUTC), dailyEvents.map(\.startUTC))
+    }
+
+    func test_manualOperationalAutoFillReplacingOverlapsKeepsDifferentCodeOrBase() throws {
+        let sameDayLCO = try ManualOperationalEvent(
+            code: .lco,
+            crewBase: .anc,
+            localStartDate: localDate(year: 2026, month: 1, day: 15)
+        )
+        let differentBaseRSVA = try ManualOperationalEvent(
+            code: .reserveA,
+            crewBase: .ont,
+            localStartDate: localDate(year: 2026, month: 1, day: 15)
+        )
+        let dailyEvents = try ManualOperationalEvent.dailyAutoFilledEvents(
+            code: .reserveA,
+            crewBase: .anc,
+            localStartDate: localDate(year: 2026, month: 1, day: 15),
+            localEndDate: localDate(year: 2026, month: 1, day: 17)
+        )
+
+        let merged = mergeManualOperationalEventsReplacingOverlaps(
+            existing: [sameDayLCO, differentBaseRSVA],
+            replacements: dailyEvents
+        )
+
+        XCTAssertEqual(merged.count, 5)
+        XCTAssertTrue(merged.contains(sameDayLCO))
+        XCTAssertTrue(merged.contains(differentBaseRSVA))
+    }
+
+    func test_manualOperationalEvent_allowsExplicitTimesForCodesWithoutDefaultRange() throws {
+        let startUTC = try XCTUnwrap(Self.iso.date(from: "2026-01-15T18:00:00Z"))
+        let endUTC = try XCTUnwrap(Self.iso.date(from: "2026-01-15T20:00:00Z"))
+
+        let event = try ManualOperationalEvent(
+            code: .hot,
+            crewBase: .anc,
+            startUTC: startUTC,
+            endUTC: endUTC
+        )
+
+        XCTAssertEqual(event.code, .hot)
+        XCTAssertEqual(event.startUTC, startUTC)
+        XCTAssertEqual(event.endUTC, endUTC)
+        XCTAssertEqual(event.layer, .operational)
+    }
+
+    private func assertEvent(
+        code: ManualOperationalCode,
+        base: CrewBase,
+        localDate: DateComponents,
+        startUTC: String,
+        endUTC: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let event = try ManualOperationalEvent(code: code, crewBase: base, localStartDate: localDate)
+
+        XCTAssertEqual(event.startUTC, try XCTUnwrap(Self.iso.date(from: startUTC)), file: file, line: line)
+        XCTAssertEqual(event.endUTC, try XCTUnwrap(Self.iso.date(from: endUTC)), file: file, line: line)
+        XCTAssertGreaterThan(event.endUTC, event.startUTC, file: file, line: line)
+    }
+
+    private func localDate(year: Int, month: Int, day: Int) -> DateComponents {
+        DateComponents(year: year, month: month, day: day)
+    }
+
+    private func makeIsolatedDefaults(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> UserDefaults {
+        let suiteName = "ManualOperationalEventTimeRuleTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName), file: file, line: line)
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
+    }
+
+    private func makeTemporaryDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ManualOperationalEventTimeRuleTests")
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+}
+
 final class OpenTimeSectionBuilderTests: XCTestCase {
     func test_openTimePPLabel_usesLegUTCBeforeDomicile0300Boundary() {
         let trip = openTimeTrip(
@@ -497,6 +843,49 @@ final class CalendarSegmentationTests: XCTestCase {
         XCTAssertEqual(segments.count, 2)
     }
 
+    func test_buildSegments_manualOperationalEventSplitsAcrossLocalMidnight() throws {
+        let event = try ManualOperationalEvent(
+            code: .reserveC,
+            crewBase: .anc,
+            localStartDate: DateComponents(year: 2026, month: 1, day: 15)
+        )
+        let days = generateBidPeriodDays(
+            startUTC: Self.iso.date(from: "2026-01-15T09:00:00Z")!,
+            payPeriodCount: 1,
+            domicile: "ANC"
+        )
+
+        let segments = buildSegments(event: event, days: days)
+
+        XCTAssertEqual(segments.count, 2)
+        XCTAssertEqual(segments[0].tripID, manualOperationalSegmentID(for: event))
+        XCTAssertEqual(segments[0].dayIndex, 0)
+        XCTAssertEqual(segments[0].startFraction, (20.0 + 15.0 / 60.0) / 24.0, accuracy: 0.000001)
+        XCTAssertEqual(segments[0].endFraction, 1, accuracy: 0.000001)
+        XCTAssertEqual(segments[1].dayIndex, 1)
+        XCTAssertEqual(segments[1].startFraction, 0, accuracy: 0.000001)
+        XCTAssertEqual(segments[1].endFraction, (8.0 + 14.0 / 60.0) / 24.0, accuracy: 0.000001)
+        XCTAssertFalse(segments.contains { $0.hasLocalTimeRegression })
+    }
+
+    func test_visibleManualOperationalEventsIncludesPartialOverlapOnly() throws {
+        let bidPeriod = makeBidPeriod(startUTC: "2026-01-15T09:00:00Z")
+        let overlapping = try ManualOperationalEvent(
+            code: .lco,
+            crewBase: .anc,
+            startUTC: Self.iso.date(from: "2026-01-16T17:00:00Z")!,
+            endUTC: Self.iso.date(from: "2026-01-16T23:00:00Z")!
+        )
+        let outside = try ManualOperationalEvent(
+            code: .lco,
+            crewBase: .anc,
+            startUTC: Self.iso.date(from: "2026-03-20T17:00:00Z")!,
+            endUTC: Self.iso.date(from: "2026-03-20T23:00:00Z")!
+        )
+
+        XCTAssertEqual(visibleManualOperationalEvents(in: bidPeriod, events: [overlapping, outside]), [overlapping])
+    }
+
     func test_buildSegments_finalLegRegressionExtendsToDepartureWallClockInDomicileCell() throws {
         let trip = makeTrip(
             payPeriod: "PP26-04",
@@ -623,6 +1012,156 @@ final class CalendarLaneAllocationTests: XCTestCase {
     }
 }
 
+final class CalendarLayerRegressionHardeningTests: XCTestCase {
+    private static let iso = ISO8601DateFormatter()
+
+    func test_bidAndPersonalSameDay_usesBidRepresentativeWithOverflow() throws {
+        let day = try makeDay(startUTC: "2026-01-15T00:00:00Z")
+        let personal = try ManualPersonalEvent(
+            code: .medical,
+            startUTC: day.dayStartUTC.addingTimeInterval(60 * 60),
+            endUTC: day.dayStartUTC.addingTimeInterval(2 * 60 * 60)
+        )
+        let bid = CalendarStackItem(
+            id: "vto-close",
+            title: "VTO Bid Close BP26-02",
+            compactTitle: "VTO BID CLOSE",
+            layer: .bid
+        )
+
+        let summary = try XCTUnwrap(calendarStackSummary(
+            bidItems: [bid],
+            personalItems: manualPersonalStackItems(for: day, events: [personal])
+        ))
+
+        XCTAssertEqual(summary.representative, bid)
+        XCTAssertEqual(summary.overflowCount, 1)
+        XCTAssertEqual(summary.items.map(\.layer), [.bid, .personal])
+    }
+
+    func test_personalOnlyDay_usesPersonalRepresentative() throws {
+        let day = try makeDay(startUTC: "2026-01-15T00:00:00Z")
+        let personal = try ManualPersonalEvent(
+            code: .other,
+            startUTC: day.dayStartUTC.addingTimeInterval(60 * 60),
+            endUTC: day.dayStartUTC.addingTimeInterval(2 * 60 * 60)
+        )
+
+        let summary = try XCTUnwrap(calendarStackSummary(
+            bidItems: [],
+            personalItems: manualPersonalStackItems(for: day, events: [personal])
+        ))
+
+        XCTAssertEqual(summary.representative.compactTitle, "OTHER")
+        XCTAssertEqual(summary.representative.layer, .personal)
+        XCTAssertEqual(summary.overflowCount, 0)
+    }
+
+    func test_manualOperationalSameDay_staysOperationalLaneOnly() throws {
+        let bidPeriod = makeBidPeriod(startUTC: "2026-01-15T09:00:00Z")
+        let event = try ManualOperationalEvent(
+            code: .rcid,
+            crewBase: .anc,
+            startUTC: try XCTUnwrap(Self.iso.date(from: "2026-01-15T18:00:00Z")),
+            endUTC: try XCTUnwrap(Self.iso.date(from: "2026-01-15T22:00:00Z"))
+        )
+
+        let segments = visibleManualOperationalEvents(in: bidPeriod, events: [event])
+            .flatMap { buildSegments(event: $0, days: bidPeriod.days) }
+        let stack = calendarStackSummary(bidItems: [], personalItems: [])
+
+        XCTAssertFalse(segments.isEmpty)
+        XCTAssertTrue(segments.allSatisfy { $0.tripID == manualOperationalSegmentID(for: event) })
+        XCTAssertNil(stack)
+    }
+
+    func test_deletePersonal_updatesStackCount() throws {
+        let day = try makeDay(startUTC: "2026-01-15T00:00:00Z")
+        let deletedID = UUID()
+        let deleted = try ManualPersonalEvent(
+            id: deletedID,
+            code: .medical,
+            startUTC: day.dayStartUTC.addingTimeInterval(60 * 60),
+            endUTC: day.dayStartUTC.addingTimeInterval(2 * 60 * 60)
+        )
+        let kept = try ManualPersonalEvent(
+            code: .commute,
+            startUTC: day.dayStartUTC.addingTimeInterval(3 * 60 * 60),
+            endUTC: day.dayStartUTC.addingTimeInterval(4 * 60 * 60)
+        )
+
+        let before = manualPersonalStackItems(for: day, events: [deleted, kept])
+        let after = manualPersonalStackItems(for: day, events: [deleted, kept].filter { $0.id != deletedID })
+
+        XCTAssertEqual(before.count, 2)
+        XCTAssertEqual(after.count, 1)
+        XCTAssertEqual(after.first?.manualPersonalEventID, kept.id)
+    }
+
+    func test_deleteOperational_updatesOperationalLaneSegments() throws {
+        let bidPeriod = makeBidPeriod(startUTC: "2026-01-15T09:00:00Z")
+        let deletedID = UUID()
+        let deleted = try ManualOperationalEvent(
+            id: deletedID,
+            code: .lco,
+            crewBase: .anc,
+            startUTC: try XCTUnwrap(Self.iso.date(from: "2026-01-15T17:00:00Z")),
+            endUTC: try XCTUnwrap(Self.iso.date(from: "2026-01-15T23:00:00Z"))
+        )
+
+        let before = visibleManualOperationalEvents(in: bidPeriod, events: [deleted])
+            .flatMap { buildSegments(event: $0, days: bidPeriod.days) }
+        let after = visibleManualOperationalEvents(in: bidPeriod, events: [deleted].filter { $0.id != deletedID })
+            .flatMap { buildSegments(event: $0, days: bidPeriod.days) }
+
+        XCTAssertFalse(before.isEmpty)
+        XCTAssertTrue(after.isEmpty)
+    }
+
+    func test_crewBaseChangeDoesNotRecalculateExistingManualOperationalEvent() throws {
+        let defaults = try makeIsolatedDefaults()
+        OperationalSettings.setSelectedCrewBase(.anc, defaults: defaults)
+        let event = try ManualOperationalEvent(
+            code: .reserveC,
+            localStartDate: DateComponents(year: 2026, month: 1, day: 15),
+            defaults: defaults
+        )
+
+        OperationalSettings.setSelectedCrewBase(.ont, defaults: defaults)
+
+        XCTAssertEqual(event.crewBase, .anc)
+        XCTAssertEqual(event.startUTC, try XCTUnwrap(Self.iso.date(from: "2026-01-16T05:15:00Z")))
+        XCTAssertEqual(event.endUTC, try XCTUnwrap(Self.iso.date(from: "2026-01-16T17:14:00Z")))
+    }
+
+    func test_rcidSpellingRemainsFixedInOperationalCodesAndTimelineEntryIDs() throws {
+        let event = try ManualOperationalEvent(
+            code: .rcid,
+            crewBase: .anc,
+            startUTC: try XCTUnwrap(Self.iso.date(from: "2026-01-15T18:00:00Z")),
+            endUTC: try XCTUnwrap(Self.iso.date(from: "2026-01-15T22:00:00Z"))
+        )
+
+        XCTAssertEqual(event.code.rawValue, "RCID")
+        XCTAssertFalse(ManualOperationalCode.allCases.map(\.rawValue).contains("RCIT"))
+        XCTAssertEqual(TimelineDutyEntry.manualOperational(event).id, "manual-operational-\(event.id.uuidString)")
+    }
+
+    private func makeDay(startUTC: String) throws -> CalendarDay {
+        try XCTUnwrap(generateBidPeriodDays(startUTC: try XCTUnwrap(Self.iso.date(from: startUTC))).first)
+    }
+
+    private func makeIsolatedDefaults(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> UserDefaults {
+        let suiteName = "CalendarLayerRegressionHardeningTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName), file: file, line: line)
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
+    }
+}
+
 final class CalendarGeometryTests: XCTestCase {
     func test_frameForSegment_mapsHorizontalBoundsCorrectly() {
         let rect = frameForSegment(
@@ -677,6 +1216,72 @@ final class TimelinePastStateSupportTests: XCTestCase {
                 now: beforeArrival
             )
         )
+    }
+}
+
+final class TimelineChronologySupportTests: XCTestCase {
+    private static let iso = ISO8601DateFormatter()
+
+    func test_timelineLegData_includesManualOperationalEventsAsDutyEntries() throws {
+        let event = try ManualOperationalEvent(
+            code: .reserveC,
+            crewBase: .anc,
+            localStartDate: DateComponents(year: 2026, month: 1, day: 15)
+        )
+
+        let data = TimelineLegData(
+            schedules: [],
+            manualOperationalEvents: [event],
+            now: Self.iso.date(from: "2026-01-15T12:00:00Z")!
+        )
+
+        XCTAssertEqual(data.daySections.count, 1)
+        XCTAssertEqual(data.daySections[0].id, "2026-01-15")
+        XCTAssertEqual(data.daySections[0].legs.count, 0)
+        XCTAssertEqual(data.daySections[0].entries.count, 1)
+        if case .manualOperational(let entryEvent) = data.daySections[0].entries[0] {
+            XCTAssertEqual(entryEvent, event)
+        } else {
+            XCTFail("Manual operational event should remain an operational chronology entry")
+        }
+    }
+
+    func test_timelineLegData_sortsFlightsAndManualOperationalEventsByUTC() throws {
+        let flight = leg(
+            payPeriod: "PP26-01",
+            pairing: "1234",
+            flight: "5X1",
+            depAirport: "ANC",
+            arrAirport: "SDF",
+            depUTC: "2026-01-15T19:00:00Z",
+            arrUTC: "2026-01-16T03:00:00Z"
+        )
+        let event = try ManualOperationalEvent(
+            code: .rcid,
+            crewBase: .anc,
+            startUTC: Self.iso.date(from: "2026-01-15T18:00:00Z")!,
+            endUTC: Self.iso.date(from: "2026-01-15T22:00:00Z")!
+        )
+        let tripSchedule = schedule(id: "schedule", label: "PP26-01", legs: [flight])
+
+        let data = TimelineLegData(
+            schedules: [tripSchedule],
+            manualOperationalEvents: [event],
+            now: Self.iso.date(from: "2026-01-15T12:00:00Z")!
+        )
+
+        let entries = data.daySections.flatMap(\.entries)
+        XCTAssertEqual(entries.count, 2)
+        if case .manualOperational = entries[0] {
+            // Expected first.
+        } else {
+            XCTFail("Manual RCID starts before the flight and should sort first")
+        }
+        if case .leg(let entryLeg) = entries[1] {
+            XCTAssertEqual(entryLeg.id, flight.id)
+        } else {
+            XCTFail("Flight should remain in chronology after the manual duty")
+        }
     }
 }
 

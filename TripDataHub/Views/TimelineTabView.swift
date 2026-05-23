@@ -12,39 +12,20 @@ struct TimelineTabView: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("app_font_size_option") private var appFontSizeOptionRawValue = AppFontSizeOption.medium.rawValue
     @AppStorage("timeline_clock_display") private var timelineClockDisplayRawValue = TimelineClockDisplay.lcl.rawValue
-    private let anchorageTimeZone = TimeZone(identifier: "America/Anchorage")
-        ?? TimeZone(secondsFromGMT: NextReportWindowBuilder.anchorageFallbackOffsetSeconds)!
-    private let tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared
+    @AppStorage(OperationalSettings.crewBaseKey) private var crewDomicileRawValue = OperationalSettings.defaultCrewBase.rawValue
     @State private var legData = TimelineLegData(schedules: [])
     @State private var tripDataByTripID: [String: CrewAccessTripSummary] = [:]
     @State private var importedUTCTimesByTripAndSequence: [String: CrewAccessLegUTCTimes] = [:]
     @State private var friendMatchAlert: FriendMatchAlert?
     @State private var friendScheduleMatches: FriendScheduleMatches = .empty
     @State private var deleteTripConfirmPairing: String? = nil
+    @State private var showingAddEvent = false
+    @State private var selectedManualOperationalEvent: ManualOperationalEvent?
     // Caches updated in refreshLegData() — avoids recomputing expensive values on every body eval.
     @State private var cachedReportWindows: [NextReportTripWindow] = []
     @State private var cachedDaySections: [TimelineDaySection] = []
     @State private var cachedTripBoundaryAfterLegIDs: Set<UUID> = []
     @State private var cachedTripStartLegByBoundaryLegID: [UUID: TripLeg] = [:]
-    private static let nextReportTimestampFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US")
-        formatter.timeZone = TimeZone(identifier: "America/Anchorage")
-            ?? TimeZone(secondsFromGMT: NextReportWindowBuilder.anchorageFallbackOffsetSeconds)!
-        formatter.dateFormat = "EEE, MMM d yyyy  HH:mm"
-        return formatter
-    }()
-
-    private static let localHeaderFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = .current
-        formatter.dateFormat = "yyyy-MM-dd  HH:mm"
-        return formatter
-    }()
-
     private static let utcHeaderFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -84,6 +65,30 @@ struct TimelineTabView: View {
     // Formatters cached per timezone identifier — avoids mutating shared static state.
     private static var localTimeFormatters: [String: DateFormatter] = [:]
     private static var localDayKeyFormatters: [String: DateFormatter] = [:]
+    private static var localHeaderFormatters: [String: DateFormatter] = [:]
+    private static var reportTimestampFormatters: [String: DateFormatter] = [:]
+
+    private static func localHeaderFormatter(for tzID: String) -> DateFormatter {
+        if let cached = localHeaderFormatters[tzID] { return cached }
+        let fmt = DateFormatter()
+        fmt.calendar = Calendar(identifier: .gregorian)
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd  HH:mm"
+        fmt.timeZone = TimeZone(identifier: tzID)
+        localHeaderFormatters[tzID] = fmt
+        return fmt
+    }
+
+    private static func reportTimestampFormatter(for tzID: String) -> DateFormatter {
+        if let cached = reportTimestampFormatters[tzID] { return cached }
+        let fmt = DateFormatter()
+        fmt.calendar = Calendar(identifier: .gregorian)
+        fmt.locale = Locale(identifier: "en_US")
+        fmt.dateFormat = "EEE, MMM d yyyy  HH:mm"
+        fmt.timeZone = TimeZone(identifier: tzID)
+        reportTimestampFormatters[tzID] = fmt
+        return fmt
+    }
 
     private static func localTimeFormatter(for tzID: String) -> DateFormatter {
         if let cached = localTimeFormatters[tzID] { return cached }
@@ -111,24 +116,35 @@ struct TimelineTabView: View {
         TimelineClockDisplay(rawValue: timelineClockDisplayRawValue) ?? .lcl
     }
 
+    private var selectedCrewDomicile: CrewBase {
+        CrewBase(rawValue: crewDomicileRawValue) ?? OperationalSettings.defaultCrewBase
+    }
+
+    private var selectedDomicileTimeZone: TimeZone {
+        selectedCrewDomicile.timeZone
+    }
+
     private var currentTimelineSchedules: [PayPeriodSchedule] {
         viewModel.displaySchedules(filter: .crewAccess)
     }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                timelineTopBar
-                importSummaryBanner
-                if shouldShowNextReportCardOnTop {
-                    nextReportCard
+            ZStack(alignment: .bottomTrailing) {
+                VStack(spacing: 0) {
+                    timelineTopBar
+                    importSummaryBanner
+                    if shouldShowNextReportCardOnTop {
+                        nextReportCard
+                    }
+                    timelineContent
+                    if !shouldShowNextReportCardOnTop {
+                        nextReportCard
+                    }
+                    Color.gray.opacity(0.10)
+                        .frame(height: 10)
                 }
-                timelineContent
-                if !shouldShowNextReportCardOnTop {
-                    nextReportCard
-                }
-                Color.gray.opacity(0.10)
-                    .frame(height: 10)
+                addEventButton
             }
             .onAppear {
                 viewModel.lastImportSummaryMessage = nil
@@ -168,7 +184,32 @@ struct TimelineTabView: View {
             } message: {
                 Text("This will remove the trip from Timeline and synced devices.")
             }
+            .sheet(isPresented: $showingAddEvent) {
+                ManualEventAddSheet()
+                    .environmentObject(viewModel)
+            }
+            .sheet(item: $selectedManualOperationalEvent) { event in
+                ManualEventDetailSheet(operationalEvent: event)
+                    .environmentObject(viewModel)
+            }
         }
+    }
+
+    private var addEventButton: some View {
+        Button {
+            showingAddEvent = true
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 20))
+                .foregroundStyle(.secondary)
+                .frame(width: 44, height: 44)
+                .background(Color(.tertiarySystemFill))
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Add Event")
+        .padding(.trailing, 18)
+        .padding(.bottom, 18)
     }
 
     @ViewBuilder
@@ -209,50 +250,65 @@ struct TimelineTabView: View {
                                 .id(daySectionScrollID(section.id))
                                 .accessibilityIdentifier("timeline.dayHeader.\(section.id)")
 
-                            let legs = section.legs
-                            ForEach(Array(legs.enumerated()), id: \.element.id) { _, leg in
-                                let isHighlighted = deleteTripConfirmPairing == leg.pairing
-                                timelineRow(leg: leg, nextLegByID: connectionMap)
-                                    .id("\(leg.id.uuidString)|\(selectedClockDisplay.rawValue)")
-                                    .background(isHighlighted ? Color.red.opacity(0.10) : Color.clear)
-                                    .simultaneousGesture(
-                                        LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                                            deleteTripConfirmPairing = leg.pairing
-                                        }
-                                    )
-                                // レイオーバーカード（接続時間 > 3h かつ同一ステーション）
-                                if shouldShowLayover(leg: leg, connectionMap: connectionMap) {
-                                    TimelineView(.periodic(from: Date(), by: 60)) { context in
-                                        layoverCard(for: leg, connectionMap: connectionMap, now: context.date)
-                                    }
-                                    .id(layoverScrollID(leg.id))
-                                    .background(isHighlighted ? Color.red.opacity(0.10) : Color.clear)
-                                    .simultaneousGesture(
-                                        LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                                            deleteTripConfirmPairing = leg.pairing
-                                        }
-                                    )
-                                }
-                                if tripBoundaryAfterLegs.contains(leg.id) {
-                                    if let nextTripStartLeg = tripStartLegAfterBoundary[leg.id] {
-                                        let nextHighlighted = deleteTripConfirmPairing == nextTripStartLeg.pairing
-                                        tripDataCard(
-                                            forTripID: nextTripStartLeg.pairing,
-                                            isPast: isPastTrip(nextTripStartLeg.pairing),
-                                            isHighlighted: nextHighlighted
-                                        )
-                                        .id(tripDataScrollID(leg.id))
+                            ForEach(section.entries) { entry in
+                                switch entry {
+                                case .leg(let leg):
+                                    let isHighlighted = deleteTripConfirmPairing == leg.pairing
+                                    timelineRow(leg: leg, nextLegByID: connectionMap)
+                                        .id("\(leg.id.uuidString)|\(selectedClockDisplay.rawValue)")
+                                        .background(isHighlighted ? Color.red.opacity(0.10) : Color.clear)
                                         .simultaneousGesture(
                                             LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                                                deleteTripConfirmPairing = nextTripStartLeg.pairing
+                                                deleteTripConfirmPairing = leg.pairing
                                             }
                                         )
-                                    } else {
-                                        Rectangle()
-                                            .fill(isPastLeg(leg, nextLeg: connectionMap[leg.id]) ? Color.gray : dateHeaderTextColor)
-                                            .frame(height: 4)
+                                    // レイオーバーカード（接続時間 > 3h かつ同一ステーション）
+                                    if shouldShowLayover(leg: leg, connectionMap: connectionMap) {
+                                        TimelineView(.periodic(from: Date(), by: 60)) { context in
+                                            layoverCard(for: leg, connectionMap: connectionMap, now: context.date)
+                                        }
+                                        .id(layoverScrollID(leg.id))
+                                        .background(isHighlighted ? Color.red.opacity(0.10) : Color.clear)
+                                        .simultaneousGesture(
+                                            LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                                deleteTripConfirmPairing = leg.pairing
+                                            }
+                                        )
                                     }
-                                } else {
+                                    if tripBoundaryAfterLegs.contains(leg.id) {
+                                        if let nextTripStartLeg = tripStartLegAfterBoundary[leg.id] {
+                                            let nextHighlighted = deleteTripConfirmPairing == nextTripStartLeg.pairing
+                                            tripDataCard(
+                                                forTripID: nextTripStartLeg.pairing,
+                                                isPast: isPastTrip(nextTripStartLeg.pairing),
+                                                isHighlighted: nextHighlighted
+                                            )
+                                            .id(tripDataScrollID(leg.id))
+                                            .simultaneousGesture(
+                                                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                                    deleteTripConfirmPairing = nextTripStartLeg.pairing
+                                                }
+                                            )
+                                        } else {
+                                            Rectangle()
+                                                .fill(isPastLeg(leg, nextLeg: connectionMap[leg.id]) ? Color.gray : dateHeaderTextColor)
+                                                .frame(height: 4)
+                                        }
+                                    } else {
+                                        Divider()
+                                    }
+                                case .manualOperational(let event):
+                                    manualOperationalRow(event)
+                                        .id("manual-operational.\(event.id.uuidString)|\(selectedClockDisplay.rawValue)")
+                                        .contentShape(Rectangle())
+                                        .onTapGesture {
+                                            selectedManualOperationalEvent = event
+                                        }
+                                        .simultaneousGesture(
+                                            LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                                selectedManualOperationalEvent = event
+                                            }
+                                        )
                                     Divider()
                                 }
                             }
@@ -270,10 +326,16 @@ struct TimelineTabView: View {
                 refreshTripDataCards()
                 refreshFriendScheduleMatches()
             }
+            .onChange(of: viewModel.manualOperationalEvents) { _, _ in
+                refreshLegData()
+            }
             .onChange(of: viewModel.friendConnections) { _, _ in
                 refreshFriendScheduleMatches()
             }
             .onChange(of: selectedClockDisplay) { _, _ in
+                refreshLegData()
+            }
+            .onChange(of: crewDomicileRawValue) { _, _ in
                 refreshLegData()
             }
             .task(id: focusScrollContextKey) {
@@ -344,13 +406,23 @@ struct TimelineTabView: View {
         )
     }
 
+    private func manualOperationalRow(_ event: ManualOperationalEvent) -> some View {
+        TimelineManualOperationalRow(
+            event: event,
+            isPast: isPastManualOperationalEvent(event),
+            fontScale: fontScale,
+            timeRangeText: manualOperationalTimeRangeText(for: event),
+            dayDiff: manualOperationalDayShift(for: event)
+        )
+    }
+
     /// 到着日付ラベルを生成（"Tue, Apr 28 2026"）- UTC/LCL トグルに連動
     private func arrivalLocalDateLabel(for leg: TripLeg) -> String {
         guard let arrUTC = utcArrivalDate(for: leg) else { return "" }
         if selectedClockDisplay == .utc {
             return Self.utcDayHeaderFormatter.string(from: arrUTC)
         }
-        guard let tzID = tzResolver.resolve(leg.arrAirport),
+        guard let tzID = IATATimeZoneResolver.shared.resolve(leg.arrAirport),
               let tz   = TimeZone(identifier: tzID) else { return "" }
         let fmt = DateFormatter()
         fmt.locale     = Locale(identifier: "en_US")
@@ -548,12 +620,12 @@ struct TimelineTabView: View {
 
     /// Lightweight: selects from pre-built cachedReportWindows using current time.
     private var nextReportInfo: NextReportInfo? {
-        let nowANC = nowInAnchorage()
+        let now = Date()
         for window in cachedReportWindows {
-            if nowANC < window.reportTime {
+            if now < window.reportTime {
                 return NextReportInfo(pairing: window.pairing, reportTime: window.reportTime)
             }
-            if nowANC >= window.reportTime && nowANC < window.tripEndANC {
+            if now >= window.reportTime && now < window.tripEndDomicile {
                 return nil
             }
         }
@@ -561,9 +633,9 @@ struct TimelineTabView: View {
     }
 
     private var hasActiveTripWindow: Bool {
-        let nowANC = nowInAnchorage()
+        let now = Date()
         return cachedReportWindows.contains { window in
-            nowANC >= window.reportTime && nowANC < window.tripEndANC
+            now >= window.reportTime && now < window.tripEndDomicile
         }
     }
 
@@ -593,11 +665,16 @@ struct TimelineTabView: View {
         // Cache report windows (expensive build, runs once per schedule change).
         cachedReportWindows = NextReportWindowBuilder.build(
             schedules: schedules,
-            anchorageTimeZone: anchorageTimeZone
+            domicileAirportCode: selectedCrewDomicile.reportAirportCode,
+            domicileTimeZone: selectedDomicileTimeZone
         ).sorted { $0.reportTime < $1.reportTime }
 
         // Cache day sections (depends on selectedClockDisplay via dayKey).
-        cachedDaySections = buildDisplayDaySections(from: data.allLegs, nextLegByID: data.nextLegByID)
+        cachedDaySections = buildDisplayDaySections(
+            from: data.allLegs,
+            manualOperationalEvents: viewModel.manualOperationalEvents,
+            nextLegByID: data.nextLegByID
+        )
 
         // Cache trip boundaries in one pass over allLegs.
         let legs = data.allLegs
@@ -626,6 +703,7 @@ struct TimelineTabView: View {
                 // now that UTC import times are available.
                 cachedDaySections = buildDisplayDaySections(
                     from: legData.allLegs,
+                    manualOperationalEvents: viewModel.manualOperationalEvents,
                     nextLegByID: legData.nextLegByID
                 )
             }
@@ -639,7 +717,7 @@ struct TimelineTabView: View {
     private var focusScrollContextKey: String {
         let dayIDs = cachedDaySections.map(\.id).joined(separator: "|")
         let focusKey = focusScrollID ?? "none"
-        return "\(selectedClockDisplay.rawValue)|\(focusKey)|\(dayIDs)|\(scrollTrigger)"
+        return "\(selectedClockDisplay.rawValue)|\(crewDomicileRawValue)|\(focusKey)|\(dayIDs)|\(scrollTrigger)"
     }
 
     @MainActor
@@ -661,11 +739,11 @@ struct TimelineTabView: View {
     }
 
     private func nextReportTimestampText(for reportTime: Date) -> String {
-        "\(Self.nextReportTimestampFormatter.string(from: reportTime)) ANC"
+        "\(Self.reportTimestampFormatter(for: selectedDomicileTimeZone.identifier).string(from: reportTime)) \(selectedCrewDomicile.displayName)"
     }
 
     private func localHeaderTimeText() -> String {
-        Self.localHeaderFormatter.string(from: Date())
+        Self.localHeaderFormatter(for: selectedDomicileTimeZone.identifier).string(from: Date())
     }
 
     private func utcHeaderTimeText() -> String {
@@ -727,7 +805,7 @@ struct TimelineTabView: View {
     }
 
     private func countdownText(to target: Date) -> String {
-        let deltaSeconds = Int(target.timeIntervalSince(nowInAnchorage()))
+        let deltaSeconds = Int(target.timeIntervalSince(Date()))
         let sign = deltaSeconds >= 0 ? "-" : "+"
         let absMinutes = abs(deltaSeconds) / 60
         let days = absMinutes / (24 * 60)
@@ -740,7 +818,7 @@ struct TimelineTabView: View {
     }
 
     private func countdownColor(to target: Date) -> Color {
-        let remainingSeconds = target.timeIntervalSince(nowInAnchorage())
+        let remainingSeconds = target.timeIntervalSince(Date())
         let remainingHours = remainingSeconds / 3600.0
 
         if remainingHours <= 12 {
@@ -788,6 +866,10 @@ struct TimelineTabView: View {
         )
     }
 
+    private func isPastManualOperationalEvent(_ event: ManualOperationalEvent) -> Bool {
+        event.endUTC < Date()
+    }
+
     private func isPastTrip(_ tripID: String) -> Bool {
         let tripLegs = allLegs.filter { $0.pairing == tripID }
         guard !tripLegs.isEmpty else { return false }
@@ -800,10 +882,6 @@ struct TimelineTabView: View {
 
     private func parseLocalDateTime(_ text: String) -> Date? {
         Self.localDateTimeFormatter.date(from: text)
-    }
-
-    private func nowInAnchorage() -> Date {
-        Date()
     }
 
     private var dateCardBackground: Color {
@@ -819,30 +897,58 @@ struct TimelineTabView: View {
 
     private func buildDisplayDaySections(
         from legs: [TripLeg],
+        manualOperationalEvents: [ManualOperationalEvent],
         nextLegByID: [UUID: TripLeg]
     ) -> [TimelineDaySection] {
         var order: [String] = []
-        var grouped: [String: [TripLeg]] = [:]
-        for leg in legs {
-            let key = dayKey(for: leg)
+        var grouped: [String: [TimelineDutyEntry]] = [:]
+        let entries = (
+            legs.map { TimelineDutyEntry.leg($0) }
+                + manualOperationalEvents.map { TimelineDutyEntry.manualOperational($0) }
+        )
+        .sorted { lhs, rhs in
+            let lhsStart = lhs.startUTC ?? .distantFuture
+            let rhsStart = rhs.startUTC ?? .distantFuture
+            if lhsStart == rhsStart { return lhs.id < rhs.id }
+            return lhsStart < rhsStart
+        }
+
+        for entry in entries {
+            let key = dayKey(for: entry)
             if grouped[key] == nil {
                 grouped[key] = []
                 order.append(key)
             }
-            grouped[key]?.append(leg)
+            grouped[key]?.append(entry)
         }
 
         return order.map { key in
-            let sectionLegs = grouped[key] ?? []
-            let isPast = !sectionLegs.isEmpty && sectionLegs.allSatisfy {
-                isPastLeg($0, nextLeg: nextLegByID[$0.id])
+            let sectionEntries = grouped[key] ?? []
+            let sectionLegs = sectionEntries.compactMap(\.leg)
+            let isPast = !sectionEntries.isEmpty && sectionEntries.allSatisfy { entry in
+                switch entry {
+                case .leg(let leg):
+                    return isPastLeg(leg, nextLeg: nextLegByID[leg.id])
+                case .manualOperational(let event):
+                    return isPastManualOperationalEvent(event)
+                }
             }
             return TimelineDaySection(
                 id: key,
                 label: dayHeaderLabel(from: key),
                 isPast: isPast,
-                legs: sectionLegs
+                legs: sectionLegs,
+                entries: sectionEntries
             )
+        }
+    }
+
+    private func dayKey(for entry: TimelineDutyEntry) -> String {
+        switch entry {
+        case .leg(let leg):
+            return dayKey(for: leg)
+        case .manualOperational(let event):
+            return manualOperationalDayKey(for: event)
         }
     }
 
@@ -883,16 +989,48 @@ struct TimelineTabView: View {
 
     private func localTimeText(fromUTC utcDate: Date?, airport: String) -> String? {
         guard let utcDate,
-              let tzID = tzResolver.resolve(airport)
+              let tzID = IATATimeZoneResolver.shared.resolve(airport)
         else { return nil }
         return Self.localTimeFormatter(for: tzID).string(from: utcDate)
     }
 
     private func localDayKey(fromUTC utcDate: Date?, airport: String) -> String? {
         guard let utcDate,
-              let tzID = tzResolver.resolve(airport)
+              let tzID = IATATimeZoneResolver.shared.resolve(airport)
         else { return nil }
         return Self.localDayKeyFormatter(for: tzID).string(from: utcDate)
+    }
+
+    private func manualOperationalTimeRangeText(for event: ManualOperationalEvent) -> String {
+        if selectedClockDisplay == .utc {
+            return "\(Self.utcTimeFormatter.string(from: event.startUTC)) - \(Self.utcTimeFormatter.string(from: event.endUTC))"
+        }
+        let formatter = Self.localTimeFormatter(for: selectedDomicileTimeZone.identifier)
+        return "\(formatter.string(from: event.startUTC)) - \(formatter.string(from: event.endUTC))"
+    }
+
+    private func manualOperationalDayKey(for event: ManualOperationalEvent) -> String {
+        if selectedClockDisplay == .utc {
+            return SharedDateFormatters.utcDayOnly.string(from: event.startUTC)
+        }
+        return Self.localDayKeyFormatter(for: selectedDomicileTimeZone.identifier).string(from: event.startUTC)
+    }
+
+    private func manualOperationalDayShift(for event: ManualOperationalEvent) -> Int {
+        if selectedClockDisplay == .utc {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+            let startDay = calendar.startOfDay(for: event.startUTC)
+            let endDay = calendar.startOfDay(for: event.endUTC)
+            return calendar.dateComponents([.day], from: startDay, to: endDay).day ?? 0
+        }
+        let formatter = Self.localDayKeyFormatter(for: selectedDomicileTimeZone.identifier)
+        guard let startDay = SharedDateFormatters.utcDayOnly.date(from: formatter.string(from: event.startUTC)),
+              let endDay = SharedDateFormatters.utcDayOnly.date(from: formatter.string(from: event.endUTC))
+        else {
+            return 0
+        }
+        return Calendar(identifier: .gregorian).dateComponents([.day], from: startDay, to: endDay).day ?? 0
     }
 
     private func dayDate(from key: String) -> Date? {
@@ -1056,7 +1194,7 @@ private struct NextReportInfo {
     let reportTime: Date
 }
 
-private enum TimelineClockDisplay: String {
+enum TimelineClockDisplay: String {
     case lcl
     case utc
 }

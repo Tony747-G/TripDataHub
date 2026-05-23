@@ -20,18 +20,24 @@ protocol NextReportNotificationServiceProtocol {
 
 final class NextReportNotificationService: NextReportNotificationServiceProtocol {
     private let center: UNUserNotificationCenter
-    private let ancTimeZone = TimeZone(identifier: "America/Anchorage")
-        ?? TimeZone(secondsFromGMT: NextReportWindowBuilder.anchorageFallbackOffsetSeconds)!
     private let requestPrefix = "nextreport."
-    private let reportFormatter: DateFormatter = {
+
+    private var selectedCrewDomicile: CrewBase {
+        OperationalSettings.selectedCrewBase()
+    }
+
+    private var selectedDomicileTimeZone: TimeZone {
+        selectedCrewDomicile.timeZone
+    }
+
+    private func reportFormatter(for timeZone: TimeZone) -> DateFormatter {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US")
-        formatter.timeZone = TimeZone(identifier: "America/Anchorage")
-            ?? TimeZone(secondsFromGMT: NextReportWindowBuilder.anchorageFallbackOffsetSeconds)!
+        formatter.timeZone = timeZone
         formatter.dateFormat = "EEE, MMM d yyyy HH:mm"
         return formatter
-    }()
+    }
 
     init(center: UNUserNotificationCenter = .current()) {
         self.center = center
@@ -71,7 +77,13 @@ final class NextReportNotificationService: NextReportNotificationServiceProtocol
         }
 
         let now = Date()
-        let windows = NextReportWindowBuilder.build(schedules: schedules, anchorageTimeZone: ancTimeZone)
+        let crewDomicile = selectedCrewDomicile
+        let domicileTimeZone = selectedDomicileTimeZone
+        let windows = NextReportWindowBuilder.build(
+            schedules: schedules,
+            domicileAirportCode: crewDomicile.reportAirportCode,
+            domicileTimeZone: domicileTimeZone
+        )
         var requested = 0
         var scheduled = 0
         var failed = 0
@@ -88,12 +100,12 @@ final class NextReportNotificationService: NextReportNotificationServiceProtocol
 
                 let content = UNMutableNotificationContent()
                 content.title = "Next Report Reminder"
-                content.body = "Trip \(window.pairing): report \(formatReportTime(window.reportTime)) ANC"
+                content.body = "Trip \(window.pairing): report \(formatReportTime(window.reportTime, timeZone: domicileTimeZone)) \(crewDomicile.displayName)"
                 content.sound = .default
                 content.threadIdentifier = "nextreport"
 
                 let triggerDate = Calendar(identifier: .gregorian).dateComponents(
-                    in: ancTimeZone,
+                    in: domicileTimeZone,
                     from: fireDate
                 )
 
@@ -144,7 +156,7 @@ final class NextReportNotificationService: NextReportNotificationServiceProtocol
         }
     }
 
-    private func formatReportTime(_ date: Date) -> String {
-        reportFormatter.string(from: date)
+    private func formatReportTime(_ date: Date, timeZone: TimeZone) -> String {
+        reportFormatter(for: timeZone).string(from: date)
     }
 }

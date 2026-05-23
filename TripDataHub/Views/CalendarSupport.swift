@@ -166,6 +166,89 @@ func visibleTrips(in bidPeriod: CalendarBidPeriod, trips: [CalendarTrip]) -> [Ca
     }
 }
 
+func visibleManualOperationalEvents(
+    in bidPeriod: CalendarBidPeriod,
+    events: [ManualOperationalEvent]
+) -> [ManualOperationalEvent] {
+    events.filter { event in
+        event.startUTC < bidPeriod.endDateUTC && event.endUTC > bidPeriod.startDateUTC
+    }
+}
+
+struct CalendarStackItem: Identifiable, Equatable {
+    enum Layer: Equatable {
+        case bid
+        case personal
+    }
+
+    let id: String
+    let title: String
+    let compactTitle: String
+    let layer: Layer
+    let manualPersonalEventID: UUID?
+
+    init(
+        id: String,
+        title: String,
+        compactTitle: String,
+        layer: Layer,
+        manualPersonalEventID: UUID? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.compactTitle = compactTitle
+        self.layer = layer
+        self.manualPersonalEventID = manualPersonalEventID
+    }
+}
+
+struct CalendarStackSummary: Equatable {
+    let representative: CalendarStackItem
+    let overflowCount: Int
+    let items: [CalendarStackItem]
+}
+
+func calendarStackItems(
+    bidItems: [CalendarStackItem],
+    personalItems: [CalendarStackItem]
+) -> [CalendarStackItem] {
+    bidItems + personalItems
+}
+
+func calendarStackSummary(
+    bidItems: [CalendarStackItem],
+    personalItems: [CalendarStackItem]
+) -> CalendarStackSummary? {
+    let items = calendarStackItems(bidItems: bidItems, personalItems: personalItems)
+    guard let representative = items.first else { return nil }
+    return CalendarStackSummary(
+        representative: representative,
+        overflowCount: max(items.count - 1, 0),
+        items: items
+    )
+}
+
+func manualPersonalStackItems(
+    for day: CalendarDay,
+    events: [ManualPersonalEvent]
+) -> [CalendarStackItem] {
+    events
+        .filter { $0.endUTC > day.dayStartUTC && $0.startUTC < day.dayEndUTC }
+        .sorted { lhs, rhs in
+            if lhs.startUTC != rhs.startUTC { return lhs.startUTC < rhs.startUTC }
+            return lhs.code.rawValue < rhs.code.rawValue
+        }
+        .map { event in
+            CalendarStackItem(
+                id: "manual-personal-\(event.id.uuidString)-\(day.displayDateKey)",
+                title: event.code.rawValue,
+                compactTitle: event.code.rawValue.uppercased(),
+                layer: .personal,
+                manualPersonalEventID: event.id
+            )
+        }
+}
+
 func resolveDayIndex(for utcDate: Date, timeZone: TimeZone, calendarDays: [CalendarDay]) -> Int? {
     _ = timeZone
     return calendarDays.first { day in
@@ -346,6 +429,94 @@ func buildSegments(trip: CalendarTrip, days: [CalendarDay]) -> [CalendarSegment]
                 lane: 0,
                 hasLocalTimeRegression: regressedRange != nil,
                 regressedRange: regressedRange
+            )
+        )
+    }
+
+    return segments.sorted { lhs, rhs in
+        if lhs.segmentStartUTC == rhs.segmentStartUTC {
+            return lhs.dayIndex < rhs.dayIndex
+        }
+        return lhs.segmentStartUTC < rhs.segmentStartUTC
+    }
+}
+
+func buildSegments(event: ManualOperationalEvent, days: [CalendarDay]) -> [CalendarSegment] {
+    buildOperationalSegments(
+        id: manualOperationalSegmentID(for: event),
+        startUTC: event.startUTC,
+        endUTC: event.endUTC,
+        days: days
+    )
+}
+
+func manualOperationalSegmentID(for event: ManualOperationalEvent) -> String {
+    "manual-operational-\(event.id.uuidString)"
+}
+
+private func buildOperationalSegments(
+    id: String,
+    startUTC: Date,
+    endUTC: Date,
+    days: [CalendarDay]
+) -> [CalendarSegment] {
+    guard let firstDay = days.first, endUTC > startUTC else {
+        return []
+    }
+
+    let secondsPerDay: TimeInterval = 86_400
+    let rawStart = Int((startUTC.timeIntervalSince(firstDay.dayStartUTC) / secondsPerDay).rounded(.down))
+    let rawEnd = Int((endUTC.timeIntervalSince(firstDay.dayStartUTC) / secondsPerDay).rounded(.down))
+
+    guard rawEnd >= 0, rawStart < days.count else { return [] }
+    let startDayIndex = max(0, rawStart)
+    let endDayIndex = min(days.count - 1, rawEnd)
+    guard startDayIndex <= endDayIndex else { return [] }
+    let isCarryIn = rawStart < 0
+    let isCarryOut = rawEnd >= days.count
+
+    var segments: [CalendarSegment] = []
+
+    for dayIndex in startDayIndex...endDayIndex {
+        guard let day = days.first(where: { $0.index == dayIndex }) else { continue }
+        let isFirstDay = dayIndex == startDayIndex
+        let isLastDay = dayIndex == endDayIndex
+
+        let start = isFirstDay && !isCarryIn ? fractionWithinCalendarDay(startUTC, day: day) : 0
+        let end = isLastDay && !isCarryOut ? fractionWithinCalendarDay(endUTC, day: day) : 1
+        let normalizedStart: Double
+        let normalizedEnd: Double
+        if startDayIndex == endDayIndex, start > end {
+            normalizedStart = 0
+            normalizedEnd = 1
+        } else {
+            normalizedStart = clampFraction(start)
+            normalizedEnd = clampFraction(end)
+        }
+
+        let segmentStartUTC: Date
+        if isFirstDay && !isCarryIn {
+            segmentStartUTC = startUTC
+        } else {
+            segmentStartUTC = localDayStartUTC(
+                at: dayIndex,
+                timeZone: calendarEngineUTCCalendar.timeZone,
+                calendarDays: days
+            ) ?? startUTC
+        }
+
+        guard normalizedEnd > normalizedStart else { continue }
+        segments.append(
+            CalendarSegment(
+                tripID: id,
+                weekIndex: day.weekIndex,
+                dayIndex: dayIndex,
+                segmentStartUTC: segmentStartUTC,
+                startFraction: normalizedStart,
+                endFraction: normalizedEnd,
+                lane: 0,
+                hasLocalTimeRegression: false,
+                regressedRange: nil
             )
         )
     }

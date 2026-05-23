@@ -5,6 +5,58 @@ struct TimelineDaySection: Identifiable {
     let label: String
     let isPast: Bool
     let legs: [TripLeg]
+    let entries: [TimelineDutyEntry]
+
+    init(
+        id: String,
+        label: String,
+        isPast: Bool,
+        legs: [TripLeg],
+        entries: [TimelineDutyEntry]? = nil
+    ) {
+        self.id = id
+        self.label = label
+        self.isPast = isPast
+        self.legs = legs
+        self.entries = entries ?? legs.map { .leg($0) }
+    }
+}
+
+enum TimelineDutyEntry: Identifiable {
+    case leg(TripLeg)
+    case manualOperational(ManualOperationalEvent)
+
+    var id: String {
+        switch self {
+        case .leg(let leg):
+            return "leg-\(leg.id.uuidString)"
+        case .manualOperational(let event):
+            return "manual-operational-\(event.id.uuidString)"
+        }
+    }
+
+    var startUTC: Date? {
+        switch self {
+        case .leg(let leg):
+            return LegConnectionTextBuilder.parseUTC(leg.depUTC)
+        case .manualOperational(let event):
+            return event.startUTC
+        }
+    }
+
+    var endUTC: Date? {
+        switch self {
+        case .leg(let leg):
+            return LegConnectionTextBuilder.parseUTC(leg.arrUTC)
+        case .manualOperational(let event):
+            return event.endUTC
+        }
+    }
+
+    var leg: TripLeg? {
+        if case .leg(let leg) = self { return leg }
+        return nil
+    }
 }
 
 struct TimelineLegData {
@@ -12,7 +64,12 @@ struct TimelineLegData {
     let nextLegByID: [UUID: TripLeg]
     let daySections: [TimelineDaySection]
 
-    init(schedules: [PayPeriodSchedule], now: Date = Date()) {
+    init(
+        schedules: [PayPeriodSchedule],
+        manualOperationalEvents: [ManualOperationalEvent] = [],
+        displayTimeZone: TimeZone? = nil,
+        now: Date = Date()
+    ) {
         // Primary dedup: UUID — catches the same TripLeg object appearing in multiple
         // PayPeriodSchedule objects (pay-period boundary carry-over).
         var seenIDs = Set<UUID>()
@@ -36,29 +93,49 @@ struct TimelineLegData {
         allLegs = legs
         let suffixMap = Self.pairingSuffixByPairingAndPeriod(from: legs)
         nextLegByID = Self.buildNextLegMap(from: legs, suffixMap: suffixMap)
-        daySections = Self.buildDaySections(from: legs, now: now)
+        daySections = Self.buildDaySections(
+            from: legs,
+            manualOperationalEvents: manualOperationalEvents,
+            displayTimeZone: displayTimeZone,
+            now: now
+        )
     }
 
-    private static func buildDaySections(from legs: [TripLeg], now: Date) -> [TimelineDaySection] {
+    private static func buildDaySections(
+        from legs: [TripLeg],
+        manualOperationalEvents: [ManualOperationalEvent],
+        displayTimeZone: TimeZone?,
+        now: Date
+    ) -> [TimelineDaySection] {
         var order: [String] = []
-        var grouped: [String: [TripLeg]] = [:]
+        var grouped: [String: [TimelineDutyEntry]] = [:]
+        let entries = (
+            legs.map { TimelineDutyEntry.leg($0) }
+                + manualOperationalEvents.map { TimelineDutyEntry.manualOperational($0) }
+        )
+        .sorted { lhs, rhs in
+            let lhsStart = lhs.startUTC ?? .distantFuture
+            let rhsStart = rhs.startUTC ?? .distantFuture
+            if lhsStart == rhsStart { return lhs.id < rhs.id }
+            return lhsStart < rhsStart
+        }
 
-        for leg in legs {
-            let key = ScheduleDateText.datePart(from: leg.depLocal)
+        for entry in entries {
+            let key = dayKey(for: entry, displayTimeZone: displayTimeZone)
             if grouped[key] == nil {
                 order.append(key)
                 grouped[key] = []
             }
-            grouped[key]?.append(leg)
+            grouped[key]?.append(entry)
         }
 
         return order.map { key in
-            let sectionLegs = grouped[key] ?? []
+            let sectionEntries = grouped[key] ?? []
+            let sectionLegs = sectionEntries.compactMap(\.leg)
             // INV-001: isPast uses UTC source of truth.
-            // Use the latest UTC arrival (or departure) across legs in this section.
-            let latestUTC = sectionLegs.compactMap {
-                LegConnectionTextBuilder.parseUTC($0.arrUTC)
-                    ?? LegConnectionTextBuilder.parseUTC($0.depUTC)
+            // Use the latest UTC end/start across entries in this section.
+            let latestUTC = sectionEntries.compactMap { entry in
+                entry.endUTC ?? entry.startUTC
             }.max()
 
             let isPast: Bool
@@ -75,10 +152,36 @@ struct TimelineLegData {
                 id: key,
                 label: ScheduleDateText.dayHeaderLabel(from: key),
                 isPast: isPast,
-                legs: sectionLegs
+                legs: sectionLegs,
+                entries: sectionEntries
             )
         }
     }
+
+    private static func dayKey(for entry: TimelineDutyEntry, displayTimeZone: TimeZone?) -> String {
+        switch entry {
+        case .leg(let leg):
+            return ScheduleDateText.datePart(from: leg.depLocal)
+        case .manualOperational(let event):
+            if let displayTimeZone {
+                return localDayKeyFormatter(for: displayTimeZone.identifier).string(from: event.startUTC)
+            }
+            return localDayKeyFormatter(for: event.crewBase.timeZone.identifier).string(from: event.startUTC)
+        }
+    }
+
+    private static func localDayKeyFormatter(for tzID: String) -> DateFormatter {
+        if let cached = localDayKeyFormatters[tzID] { return cached }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: tzID)
+        formatter.dateFormat = "yyyy-MM-dd"
+        localDayKeyFormatters[tzID] = formatter
+        return formatter
+    }
+
+    private static var localDayKeyFormatters: [String: DateFormatter] = [:]
 
     private static func buildNextLegMap(from legs: [TripLeg], suffixMap: [String: String]) -> [UUID: TripLeg] {
         var map: [UUID: TripLeg] = [:]

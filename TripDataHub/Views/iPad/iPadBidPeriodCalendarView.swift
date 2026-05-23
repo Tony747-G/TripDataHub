@@ -11,6 +11,7 @@ struct IPadBidPeriodCalendarView: View {
     @AppStorage("faa_medical_expiry_date") private var faaMedicalExpiryDate = ""
     @AppStorage("passport_expiry_date") private var passportExpiryDate = ""
     @AppStorage("china_visa_expiry_date") private var chinaVisaExpiryDate = ""
+    @AppStorage(OperationalSettings.crewBaseKey) private var crewDomicileRawValue = OperationalSettings.defaultCrewBase.rawValue
 
     @State private var currentBidPeriod: CalendarBidPeriod? = nil
     @State private var headerBidPeriod: CalendarBidPeriod? = nil
@@ -20,6 +21,8 @@ struct IPadBidPeriodCalendarView: View {
     @State private var bpLayoutCache: [String: CalendarBPLayout] = [:]
     @State private var cachedAllTrips: [CalendarTrip] = []
     @State private var dayLayerCache: [String: IPadCalendarDayLayerData] = [:]
+    @State private var selectedManualOperationalEvent: ManualOperationalEvent?
+    @State private var selectedManualPersonalEvent: ManualPersonalEvent?
 
     // BP date range labels (e.g. "May 17 – Jul 11, 2026") must render the BP's UTC calendar
     // dates verbatim. Without an explicit UTC timezone, the device's local timezone shifts the
@@ -48,7 +51,7 @@ struct IPadBidPeriodCalendarView: View {
     private var allTrips: [CalendarTrip] { cachedAllTrips }
 
     private var domicile: String {
-        viewModel.verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
+        (CrewBase(rawValue: crewDomicileRawValue) ?? OperationalSettings.defaultCrewBase).rawValue
     }
 
     private var pilotQualification: PilotQualification {
@@ -117,6 +120,8 @@ struct IPadBidPeriodCalendarView: View {
         .onAppear { loadBidPeriod(for: Date()) }
         .onChange(of: viewModel.crewAccessSchedules) { _, _ in refreshCalendarLayouts() }
         .onChange(of: viewModel.schedules) { _, _ in refreshCalendarLayouts() }
+        .onChange(of: viewModel.manualOperationalEvents) { _, _ in refreshCalendarLayouts() }
+        .onChange(of: viewModel.manualPersonalEvents) { _, _ in refreshCalendarLayouts() }
         .onChange(of: pilotQualificationRawValue) { _, _ in refreshCalendarLayouts() }
         .onChange(of: bidTransitionTimelineEnabled) { _, _ in refreshCalendarLayouts() }
         .onChange(of: faaMedicalExpiryDate) { _, _ in refreshCalendarLayouts() }
@@ -130,6 +135,14 @@ struct IPadBidPeriodCalendarView: View {
             selectedBidPeriodID = bp?.id
             headerBidPeriod = bp
             refreshCalendarLayouts()
+        }
+        .sheet(item: $selectedManualOperationalEvent) { event in
+            ManualEventDetailSheet(operationalEvent: event)
+                .environmentObject(viewModel)
+        }
+        .sheet(item: $selectedManualPersonalEvent) { event in
+            ManualEventDetailSheet(personalEvent: event)
+                .environmentObject(viewModel)
         }
     }
 
@@ -228,11 +241,16 @@ struct IPadBidPeriodCalendarView: View {
                         let segsByDay: [Int: [CalendarSegment]] = layout?.segmentsByDayIndex ?? {
                             let days = grid.map(\.calendarDay)
                             let trips = visibleTrips(in: bp, trips: allTrips)
-                            return segmentsByDayIndex(for: trips, days: days)
+                            let events = visibleManualOperationalEvents(in: bp, events: viewModel.manualOperationalEvents)
+                            return segmentsByDayIndex(for: trips, manualOperationalEvents: events, days: days)
                         }()
                         let tripsByID = layout?.tripsByID ?? {
                             let trips = visibleTrips(in: bp, trips: allTrips)
                             return Dictionary(uniqueKeysWithValues: trips.map { ($0.id, $0) })
+                        }()
+                        let manualEventsBySegmentID = layout?.manualOperationalEventsBySegmentID ?? {
+                            let events = visibleManualOperationalEvents(in: bp, events: viewModel.manualOperationalEvents)
+                            return Dictionary(uniqueKeysWithValues: events.map { (manualOperationalSegmentID(for: $0), $0) })
                         }()
                         // Thick divider between BP sections (thicker than PP boundary).
                         if sectionIndex > 0 {
@@ -250,6 +268,7 @@ struct IPadBidPeriodCalendarView: View {
                                 gridDays: grid,
                                 segmentsByDayIndex: segsByDay,
                                 tripsByID: tripsByID,
+                                manualOperationalEventsBySegmentID: manualEventsBySegmentID,
                                 weekIndex: row,
                                 rowHeight: rowHeight
                             )
@@ -321,9 +340,15 @@ struct IPadBidPeriodCalendarView: View {
         }
     }
 
-    private func segmentsByDayIndex(for trips: [CalendarTrip], days: [CalendarDay]) -> [Int: [CalendarSegment]] {
+    private func segmentsByDayIndex(
+        for trips: [CalendarTrip],
+        manualOperationalEvents: [ManualOperationalEvent],
+        days: [CalendarDay]
+    ) -> [Int: [CalendarSegment]] {
         guard !days.isEmpty else { return [:] }
-        let allSegments = trips.flatMap { buildSegments(trip: $0, days: days) }
+        let tripSegments = trips.flatMap { buildSegments(trip: $0, days: days) }
+        let manualSegments = manualOperationalEvents.flatMap { buildSegments(event: $0, days: days) }
+        let allSegments = tripSegments + manualSegments
         let withLanes = assignLanes(to: allSegments)
         return Dictionary(grouping: withLanes, by: \.dayIndex)
     }
@@ -333,6 +358,7 @@ struct IPadBidPeriodCalendarView: View {
         gridDays: [IPadCalendarGridDay],
         segmentsByDayIndex: [Int: [CalendarSegment]],
         tripsByID: [String: CalendarTrip],
+        manualOperationalEventsBySegmentID: [String: ManualOperationalEvent],
         weekIndex: Int,
         rowHeight: CGFloat
     ) -> some View {
@@ -359,7 +385,8 @@ struct IPadBidPeriodCalendarView: View {
                                 payPeriodLabel: layerData.payPeriodLabel,
                                 financialIndicator: layerData.financialIndicator,
                                 personalChips: layerData.personalChips,
-                                bidEventChips: layerData.bidEventChips
+                                bidEventChips: layerData.bidEventChips,
+                                onManualPersonalEventTap: showManualPersonalEvent
                             )
                                 .frame(maxWidth: .infinity)
                             if col < 6 { Divider() }
@@ -390,6 +417,28 @@ struct IPadBidPeriodCalendarView: View {
                         ) {
                             selectedTripID = selectedTripID == span.tripID ? nil : span.tripID
                         }
+                        .frame(width: width, height: CalendarDayCell.metrics.laneHeight)
+                        .offset(x: x, y: y)
+                    } else if let event = manualOperationalEventsBySegmentID[span.tripID] {
+                        let x = contentFrame.minX + span.startRowFraction * contentFrame.width + CalendarDayCell.metrics.layerHorizontalInset
+                        let width = max(
+                            (span.endRowFraction - span.startRowFraction) * contentFrame.width - CalendarDayCell.metrics.layerHorizontalInset * 2,
+                            1
+                        )
+                        let y = contentFrame.minY + CGFloat(span.lane) * (CalendarDayCell.metrics.laneHeight + CalendarDayCell.metrics.laneSpacing)
+                        IPadTripBarSpanView(
+                            label: event.code.rawValue,
+                            isSelected: false,
+                            regressedRanges: [],
+                            hasRegression: false
+                        ) {
+                            selectedManualOperationalEvent = event
+                        }
+                        .simultaneousGesture(
+                            LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                selectedManualOperationalEvent = event
+                            }
+                        )
                         .frame(width: width, height: CalendarDayCell.metrics.laneHeight)
                         .offset(x: x, y: y)
                     }
@@ -441,7 +490,7 @@ struct IPadBidPeriodCalendarView: View {
         return IPadCalendarDayLayerData(
             payPeriodLabel: payPeriodLabel(for: gridDay, in: bidPeriod),
             financialIndicator: IPadCalendarCycleData.financialIndicator(for: dateKey),
-            personalChips: personalExpiryChips(for: dateKey),
+            personalChips: personalExpiryChips(for: dateKey) + manualPersonalChips(for: gridDay.calendarDay),
             bidEventChips: bidTransitionTimelineEnabled
                 ? IPadCalendarCycleData.bidEventChips(for: dateKey, qualification: pilotQualification)
                 : []
@@ -486,6 +535,23 @@ struct IPadBidPeriodCalendarView: View {
             compactTitle: compactTitle,
             layer: .personal(IPadCalendarCycleData.personalWarningState(daysRemaining: daysRemaining))
         )
+    }
+
+    private func manualPersonalChips(for day: CalendarDay) -> [IPadCalendarEventChip] {
+        manualPersonalStackItems(for: day, events: viewModel.manualPersonalEvents)
+            .map { item in
+                IPadCalendarEventChip(
+                    id: item.id,
+                    title: item.title,
+                    compactTitle: item.compactTitle,
+                    layer: .personal(.normal),
+                    manualPersonalEventID: item.manualPersonalEventID
+                )
+            }
+    }
+
+    private func showManualPersonalEvent(id: UUID) {
+        selectedManualPersonalEvent = viewModel.manualPersonalEvents.first { $0.id == id }
     }
 
     // MARK: Navigation helpers
@@ -537,9 +603,16 @@ struct IPadBidPeriodCalendarView: View {
             let grid = iPadCalendarGrid(for: bp, domicile: domicile)
             let days = grid.map(\.calendarDay)
             let bpTrips = visibleTrips(in: bp, trips: trips)
-            let segs = segmentsByDayIndex(for: bpTrips, days: days)
+            let bpManualEvents = visibleManualOperationalEvents(in: bp, events: viewModel.manualOperationalEvents)
+            let segs = segmentsByDayIndex(for: bpTrips, manualOperationalEvents: bpManualEvents, days: days)
             let byID = Dictionary(uniqueKeysWithValues: bpTrips.map { ($0.id, $0) })
-            cache[bp.id] = CalendarBPLayout(grid: grid, segmentsByDayIndex: segs, tripsByID: byID)
+            let manualByID = Dictionary(uniqueKeysWithValues: bpManualEvents.map { (manualOperationalSegmentID(for: $0), $0) })
+            cache[bp.id] = CalendarBPLayout(
+                grid: grid,
+                segmentsByDayIndex: segs,
+                tripsByID: byID,
+                manualOperationalEventsBySegmentID: manualByID
+            )
         }
         bpLayoutCache = cache
         dayLayerCache = buildDayLayerCache(from: cache)
@@ -640,6 +713,7 @@ private struct IPadCalendarEventChip: Identifiable, Equatable {
     let title: String
     let compactTitle: String
     let layer: Layer
+    var manualPersonalEventID: UUID? = nil
 }
 
 private enum IPadCalendarPersonalWarningState: Equatable {
@@ -733,17 +807,17 @@ private enum IPadCalendarCycleData {
         switch qualification {
         case .captain:
             events = [
-                (0, "CA Schedule Bid Close", "CA BID CLOSE", "ca-bid-close"),
-                (10, "CA VTO Published", "CA VTO", "ca-vto-published"),
-                (12, "CA VTO Bid Close", "CA VTO CLOSE", "ca-vto-close"),
-                (18, "CA LITT Accepted", "CA LITT", "ca-litt")
+                (0, "Schedule Bid Close", "SCHD BID CLOSE", "ca-bid-close"),
+                (10, "VTO Published", "VTO PUBLISHED", "ca-vto-published"),
+                (12, "VTO Bid Close", "VTO BID CLOSE", "ca-vto-close"),
+                (18, "LITT Accepted", "LITT ACCEPT", "ca-litt")
             ]
         case .firstOfficer:
             events = [
-                (4, "FO Schedule Bid Close", "FO BID CLOSE", "fo-bid-close"),
-                (11, "FO VTO Published", "FO VTO", "fo-vto-published"),
-                (13, "FO VTO Bid Close", "FO VTO CLOSE", "fo-vto-close"),
-                (20, "FO LITT Accepted", "FO LITT", "fo-litt")
+                (4, "Schedule Bid Close", "SCHD BID CLOSE", "fo-bid-close"),
+                (11, "VTO Published", "VTO PUBLISHED", "fo-vto-published"),
+                (13, "VTO Bid Close", "VTO BID CLOSE", "fo-vto-close"),
+                (20, "LITT Accepted", "LITT ACCEPT", "fo-litt")
             ]
         }
 
@@ -892,11 +966,14 @@ private func rowTripSpans(
 // MARK: - Day Cell
 
 private struct CalendarDayCell: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let gridDay: IPadCalendarGridDay
     let payPeriodLabel: String?
     let financialIndicator: IPadCalendarFinancialIndicator?
     let personalChips: [IPadCalendarEventChip]
     let bidEventChips: [IPadCalendarEventChip]
+    let onManualPersonalEventTap: (UUID) -> Void
 
     @State private var isShowingPayPeriodPopover = false
     @State private var isShowingEventPopover = false
@@ -990,13 +1067,24 @@ private struct CalendarDayCell: View {
             }
 
             if !eventStackChips.isEmpty {
+                if isShowingEventPopover {
+                    eventStackPanel
+                        .padding(.horizontal, Self.metrics.layerHorizontalInset)
+                        .padding(.bottom, Self.metrics.eventStackBottomPadding + 22)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .zIndex(2)
+                }
+
                 eventStack
                     .padding(.horizontal, Self.metrics.layerHorizontalInset)
                     .padding(.bottom, Self.metrics.eventStackBottomPadding)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .zIndex(3)
             }
         }
         .opacity(gridDay.isOverflow ? 0.35 : 1)
+        .animation(.easeOut(duration: 0.16), value: isShowingEventPopover)
     }
 
     @ViewBuilder
@@ -1017,10 +1105,7 @@ private struct CalendarDayCell: View {
             Rectangle()
                 .fill(
                     LinearGradient(
-                        colors: [
-                            Color(hex: "#FCB900"),
-                            Color(hex: "#301504")
-                        ],
+                        colors: payPeriodRibbonColors,
                         startPoint: .top,
                         endPoint: .bottom
                     )
@@ -1037,6 +1122,21 @@ private struct CalendarDayCell: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .presentationCompactAdaptation(.popover)
+        }
+    }
+
+    private var payPeriodRibbonColors: [Color] {
+        if colorScheme == .light {
+            [
+                Color(hex: "#301506").opacity(0.92),
+                Color(hex: "#301506").opacity(0.36),
+                Color(hex: "#301506").opacity(0.02)
+            ]
+        } else {
+            [
+                Color(hex: "#FCB900"),
+                Color(hex: "#301504")
+            ]
         }
     }
 
@@ -1064,7 +1164,7 @@ private struct CalendarDayCell: View {
                 .fill(eventColor(for: chip.layer))
                 .frame(width: 5, height: 5)
             Text(chip.compactTitle)
-                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .font(.system(size: 10, weight: .bold, design: .rounded))
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
         }
@@ -1084,8 +1184,12 @@ private struct CalendarDayCell: View {
 
     private var eventStack: some View {
         Button {
-            if eventStackChips.count > 1 {
-                isShowingEventPopover = true
+            if eventStackChips.count == 1,
+               let eventID = eventStackChips.first?.manualPersonalEventID {
+                isShowingEventPopover = false
+                onManualPersonalEventTap(eventID)
+            } else {
+                isShowingEventPopover.toggle()
             }
         } label: {
             VStack(spacing: 0) {
@@ -1115,20 +1219,44 @@ private struct CalendarDayCell: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(eventStackChips.map(\.title).joined(separator: ", "))
-        .popover(isPresented: $isShowingEventPopover, arrowEdge: .bottom) {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(eventStackChips) { chip in
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(eventColor(for: chip.layer))
-                            .frame(width: 8, height: 8)
-                        Text(chip.title)
-                            .font(.system(size: 13, weight: .medium))
+    }
+
+    private var eventStackPanel: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(eventStackChips) { chip in
+                if let eventID = chip.manualPersonalEventID {
+                    Button {
+                        isShowingEventPopover = false
+                        onManualPersonalEventTap(eventID)
+                    } label: {
+                        eventPopoverRow(chip)
                     }
+                    .buttonStyle(.plain)
+                } else {
+                    eventPopoverRow(chip)
                 }
             }
-            .padding(12)
-            .presentationCompactAdaptation(.popover)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemBackground).opacity(0.96))
+        .overlay(
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .stroke(Color(.separator).opacity(0.55), lineWidth: 0.7)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+        .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
+    }
+
+    private func eventPopoverRow(_ chip: IPadCalendarEventChip) -> some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(eventColor(for: chip.layer))
+                .frame(width: 8, height: 8)
+            Text(chip.title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(eventForegroundColor(for: chip.layer))
         }
     }
 
@@ -1174,7 +1302,9 @@ private struct CalendarDayCell: View {
         switch layer {
         case .personal(.expired):
             return .red
-        case .bid, .personal(_), .operational:
+        case .bid:
+            return colorScheme == .dark ? Color(hex: "#FFB500") : Color(hex: "#301506")
+        case .personal(_), .operational:
             return eventColor(for: layer)
         }
     }
@@ -1187,6 +1317,7 @@ private struct CalendarBPLayout {
     let grid: [IPadCalendarGridDay]
     let segmentsByDayIndex: [Int: [CalendarSegment]]
     let tripsByID: [String: CalendarTrip]
+    let manualOperationalEventsBySegmentID: [String: ManualOperationalEvent]
 }
 
 private extension Color {

@@ -192,6 +192,8 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var hasSeniorityDataOnDisk = false
     @Published private(set) var isDeviceSyncing = false
     @Published private(set) var deviceSyncStatusMessage: String?
+    @Published private(set) var manualOperationalEvents: [ManualOperationalEvent] = []
+    @Published private(set) var manualPersonalEvents: [ManualPersonalEvent] = []
 
     private let syncService: TripBoardSyncServiceProtocol
     private let authService: TripBoardAuthServiceProtocol
@@ -204,6 +206,7 @@ final class AppViewModel: ObservableObject {
     private let crewAccessImportCloudKitService: CrewAccessImportCloudKitServicing
     private let tzResolver: IATATimeZoneResolving
     private let keychainService: KeychainServiceProtocol
+    private let manualEventStore: ManualEventStoring
     private let externalOpenCoordinator: ExternalOpenImportCoordinator
     private let flightCountdownCoordinator = FlightCountdownCoordinator()
     private var sessionCookies: [HTTPCookie] = []
@@ -280,7 +283,8 @@ final class AppViewModel: ObservableObject {
             containerIdentifier: "iCloud.com.sfune.TimelineSchedule"
         ),
         tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared,
-        keychainService: KeychainServiceProtocol = KeychainService()
+        keychainService: KeychainServiceProtocol = KeychainService(),
+        manualEventStore: ManualEventStoring = ManualEventStore()
     ) {
         self.syncService = syncService
         self.authService = authService
@@ -293,6 +297,7 @@ final class AppViewModel: ObservableObject {
         self.crewAccessImportCloudKitService = crewAccessImportCloudKitService
         self.tzResolver = tzResolver
         self.keychainService = keychainService
+        self.manualEventStore = manualEventStore
         self.externalOpenCoordinator = ExternalOpenImportCoordinator.shared
         let loadedAdminPolicy = Self.loadAdminPolicy()
         self.adminPolicy = loadedAdminPolicy
@@ -319,6 +324,9 @@ final class AppViewModel: ObservableObject {
         self.logTenExportedFingerprints = UserDefaults.standard.dictionary(forKey: logTenExportedFingerprintsKey) as? [String: String] ?? [:]
         self.authStatus = authService.isAuthenticated(url: nil, cookies: sessionCookies) ? .loggedIn : .loggedOut
         self.friendConnections = loadFriendConnections()
+        let manualEvents = manualEventStore.load()
+        self.manualOperationalEvents = manualEvents.operationalEvents.sorted { $0.startUTC < $1.startUTC }
+        self.manualPersonalEvents = manualEvents.personalEvents.sorted { $0.startUTC < $1.startUTC }
         self.isScheduleSharingEnabled = UserDefaults.standard.bool(forKey: scheduleSharingEnabledKey)
         self.seniorityRecords = []
         self.hasSeniorityDataOnDisk = Self.seniorityDataIsUsableOnDisk(
@@ -405,6 +413,86 @@ final class AppViewModel: ObservableObject {
             NotificationCenter.default.removeObserver(iCloudKVObserver)
         }
         logger.info("[VM] deinit vm=\(String(describing: ObjectIdentifier(self)), privacy: .public)")
+    }
+
+    func saveManualOperationalEvent(_ event: ManualOperationalEvent) throws {
+        try upsertManualOperationalEvent(event)
+    }
+
+    func saveManualOperationalEventsReplacingOverlaps(_ events: [ManualOperationalEvent]) throws {
+        guard !events.isEmpty else { return }
+        let merged = mergeManualOperationalEventsReplacingOverlaps(
+            existing: manualOperationalEvents,
+            replacements: events
+        )
+        let snapshot = ManualEventStoreSnapshot(
+            operationalEvents: merged,
+            personalEvents: manualPersonalEvents
+        )
+        try manualEventStore.save(snapshot)
+        manualOperationalEvents = snapshot.operationalEvents
+    }
+
+    func updateManualOperationalEvent(_ event: ManualOperationalEvent) throws {
+        try upsertManualOperationalEvent(event)
+    }
+
+    private func upsertManualOperationalEvent(_ event: ManualOperationalEvent) throws {
+        var snapshot = ManualEventStoreSnapshot(
+            operationalEvents: manualOperationalEvents,
+            personalEvents: manualPersonalEvents
+        )
+        if let index = snapshot.operationalEvents.firstIndex(where: { $0.id == event.id }) {
+            snapshot.operationalEvents[index] = event
+        } else {
+            snapshot.operationalEvents.append(event)
+        }
+        snapshot.operationalEvents.sort { $0.startUTC < $1.startUTC }
+        try manualEventStore.save(snapshot)
+        manualOperationalEvents = snapshot.operationalEvents
+    }
+
+    func deleteManualOperationalEvent(id: UUID) throws {
+        var snapshot = ManualEventStoreSnapshot(
+            operationalEvents: manualOperationalEvents,
+            personalEvents: manualPersonalEvents
+        )
+        snapshot.operationalEvents.removeAll { $0.id == id }
+        try manualEventStore.save(snapshot)
+        manualOperationalEvents = snapshot.operationalEvents
+    }
+
+    func saveManualPersonalEvent(_ event: ManualPersonalEvent) throws {
+        try upsertManualPersonalEvent(event)
+    }
+
+    func updateManualPersonalEvent(_ event: ManualPersonalEvent) throws {
+        try upsertManualPersonalEvent(event)
+    }
+
+    private func upsertManualPersonalEvent(_ event: ManualPersonalEvent) throws {
+        var snapshot = ManualEventStoreSnapshot(
+            operationalEvents: manualOperationalEvents,
+            personalEvents: manualPersonalEvents
+        )
+        if let index = snapshot.personalEvents.firstIndex(where: { $0.id == event.id }) {
+            snapshot.personalEvents[index] = event
+        } else {
+            snapshot.personalEvents.append(event)
+        }
+        snapshot.personalEvents.sort { $0.startUTC < $1.startUTC }
+        try manualEventStore.save(snapshot)
+        manualPersonalEvents = snapshot.personalEvents
+    }
+
+    func deleteManualPersonalEvent(id: UUID) throws {
+        var snapshot = ManualEventStoreSnapshot(
+            operationalEvents: manualOperationalEvents,
+            personalEvents: manualPersonalEvents
+        )
+        snapshot.personalEvents.removeAll { $0.id == id }
+        try manualEventStore.save(snapshot)
+        manualPersonalEvents = snapshot.personalEvents
     }
 
     func handleIncomingAppDeepLink(_ url: URL) {
