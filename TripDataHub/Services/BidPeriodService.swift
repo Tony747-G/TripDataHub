@@ -114,6 +114,26 @@ func bidPeriod(for dateUTC: Date, domicile: String = DomicileSupport.defaultDomi
     )
 }
 
+func bidPeriod(identifier: String, domicile: String = DomicileSupport.defaultDomicile) -> CalendarBidPeriod? {
+    let cleaned = identifier.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    guard let definition = bidPeriodDefinitions.first(where: { $0.id == cleaned }) else {
+        return nil
+    }
+
+    let startBoundaryUTC = bidPeriodStartBoundaryUTC(for: definition, domicile: domicile)
+    let days = generateBidPeriodDays(
+        startUTC: startBoundaryUTC,
+        payPeriodCount: definition.payPeriodCount,
+        domicile: domicile
+    )
+    return CalendarBidPeriod(
+        id: definition.id,
+        startDateUTC: startBoundaryUTC,
+        endDateUTC: bidPeriodEndBoundaryUTC(for: definition, domicile: domicile),
+        days: days
+    )
+}
+
 func generateBidPeriodDays(startUTC: Date, payPeriodCount: Int = 2) -> [CalendarDay] {
     generateBidPeriodDays(
         startUTC: startUTC,

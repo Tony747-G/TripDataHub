@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // MARK: - Sidebar content type
 
@@ -11,10 +14,24 @@ private enum IPadSidebarContent {
 struct IPadOperationalWorkspaceView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @AppStorage("appearance_mode") private var appearanceModeRawValue = AppearanceMode.system.rawValue
+    @AppStorage("pilot_qualification") private var pilotQualificationRawValue = PilotQualification.captain.rawValue
+    @AppStorage("bid_transition_timeline_enabled") private var bidTransitionTimelineEnabled = true
+    @AppStorage("faa_medical_expiry_date") private var faaMedicalExpiryDate = ""
+    @AppStorage("passport_expiry_date") private var passportExpiryDate = ""
+    @AppStorage("china_visa_expiry_date") private var chinaVisaExpiryDate = ""
+    @AppStorage(OperationalSettings.crewBaseKey) private var crewDomicileRawValue = OperationalSettings.defaultCrewBase.rawValue
     @Environment(\.scenePhase) private var scenePhase
 
     private var selectedAppearanceMode: AppearanceMode {
         AppearanceMode(rawValue: appearanceModeRawValue) ?? .system
+    }
+
+    private var selectedCrewDomicile: CrewBase {
+        CrewBase(rawValue: crewDomicileRawValue) ?? OperationalSettings.defaultCrewBase
+    }
+
+    private var selectedPilotQualification: PilotQualification {
+        PilotQualification(rawValue: pilotQualificationRawValue) ?? .captain
     }
 
     @State private var selectedTripID: String?
@@ -25,6 +42,12 @@ struct IPadOperationalWorkspaceView: View {
     @State private var showingBrowser = false
     @State private var showingSettings = false
     @State private var showingAddEvent = false
+    @State private var showingBidPeriodExportOptions = false
+    @State private var bidPeriodPDFExportURL: URL?
+    @State private var isExportingBidPeriodPDF = false
+    @State private var bidPeriodExportErrorMessage: String?
+    @State private var exportIncludesBidLayer = true
+    @State private var exportIncludesPersonalLayer = true
     @State private var isShowingImportPreviewFromExternalOpen = false
     /// ポートレート時にトリップバータップで表示するシートのトリップID
     @State private var portraitTripSheetID: String? = nil
@@ -141,6 +164,65 @@ struct IPadOperationalWorkspaceView: View {
             ManualEventAddSheet()
                 .environmentObject(viewModel)
         }
+#if canImport(UIKit)
+        .sheet(isPresented: Binding(
+            get: { bidPeriodPDFExportURL != nil },
+            set: { isPresented in
+                if !isPresented {
+                    removeBidPeriodPDFExportFile()
+                }
+            }
+        )) {
+            if let bidPeriodPDFExportURL {
+                IPadActivityView(activityItems: [bidPeriodPDFExportURL]) { _ in
+                    removeBidPeriodPDFExportFile()
+                }
+            }
+        }
+#endif
+        .sheet(isPresented: $showingBidPeriodExportOptions) {
+            NavigationStack {
+                Form {
+                    Section {
+                        Toggle("Bid Layer", isOn: $exportIncludesBidLayer)
+                        Toggle("Personal Layer", isOn: $exportIncludesPersonalLayer)
+                    } footer: {
+                        Text("Generating a print-ready PDF for \(exportBidPeriodLabel).")
+                    }
+                }
+                .navigationTitle("Export Bid Period")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { showingBidPeriodExportOptions = false }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(isExportingBidPeriodPDF ? "Generating..." : "Export") {
+                            let includeBidLayer = exportIncludesBidLayer
+                            let includePersonalLayer = exportIncludesPersonalLayer
+                            showingBidPeriodExportOptions = false
+                            Task {
+                                try? await Task.sleep(nanoseconds: 180_000_000)
+                                await exportCurrentBidPeriodPDF(
+                                    includeBidLayer: includeBidLayer,
+                                    includePersonalLayer: includePersonalLayer
+                                )
+                            }
+                        }
+                        .disabled(isExportingBidPeriodPDF)
+                    }
+                }
+            }
+            .presentationDetents([.medium])
+        }
+        .alert("PDF Export Failed", isPresented: Binding(
+            get: { bidPeriodExportErrorMessage != nil },
+            set: { if !$0 { bidPeriodExportErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { bidPeriodExportErrorMessage = nil }
+        } message: {
+            Text(bidPeriodExportErrorMessage ?? "Unable to generate the PDF.")
+        }
         .onChange(of: viewModel.pendingImport?.id) { _, newValue in
             isShowingImportPreviewFromExternalOpen = newValue != nil
         }
@@ -158,7 +240,7 @@ struct IPadOperationalWorkspaceView: View {
 
     // MARK: Floating menu
 
-    private let verticalMenuItemCount = 4
+    private let verticalMenuItemCount = 5
     private let verticalMenuItemSpacing: CGFloat = 58
 
     private var floatingMenu: some View {
@@ -176,7 +258,13 @@ struct IPadOperationalWorkspaceView: View {
                 showingAddEvent = true
                 withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
             }
-            verticalMenuItem(index: 3, icon: "gearshape", label: "Settings") {
+            verticalMenuItem(index: 3, icon: "square.and.arrow.up", label: "Print") {
+                exportIncludesBidLayer = bidTransitionTimelineEnabled
+                exportIncludesPersonalLayer = true
+                showingBidPeriodExportOptions = true
+                withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
+            }
+            verticalMenuItem(index: 4, icon: "gearshape", label: "Settings") {
                 showingSettings = true
                 withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
             }
@@ -241,7 +329,60 @@ struct IPadOperationalWorkspaceView: View {
         if case .ownTimeline = sidebarContent { return true }
         return false
     }
+
+    private var exportBidPeriodLabel: String {
+        selectedBidPeriodID ?? "the current bid period"
+    }
+
+    @MainActor
+    private func exportCurrentBidPeriodPDF(includeBidLayer: Bool, includePersonalLayer: Bool) async {
+        guard !isExportingBidPeriodPDF else { return }
+        isExportingBidPeriodPDF = true
+        defer { isExportingBidPeriodPDF = false }
+
+        do {
+            removeBidPeriodPDFExportFile()
+            bidPeriodPDFExportURL = try BidPeriodPDFExportRenderer.renderPDF(
+                selectedBidPeriodID: selectedBidPeriodID,
+                crewAccessSchedules: viewModel.crewAccessSchedules,
+                manualOperationalEvents: viewModel.manualOperationalEvents,
+                manualPersonalEvents: viewModel.manualPersonalEvents,
+                crewDomicile: selectedCrewDomicile,
+                pilotQualification: selectedPilotQualification,
+                includeBidLayer: includeBidLayer,
+                includePersonalLayer: includePersonalLayer,
+                faaMedicalExpiryDate: faaMedicalExpiryDate,
+                passportExpiryDate: passportExpiryDate,
+                chinaVisaExpiryDate: chinaVisaExpiryDate
+            )
+        } catch {
+            bidPeriodExportErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func removeBidPeriodPDFExportFile() {
+        guard let url = bidPeriodPDFExportURL else { return }
+        try? FileManager.default.removeItem(at: url)
+        bidPeriodPDFExportURL = nil
+    }
 }
+
+#if canImport(UIKit)
+private struct IPadActivityView: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    var completion: ((Bool) -> Void)?
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+        controller.completionWithItemsHandler = { _, completed, _, _ in
+            completion?(completed)
+        }
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+#endif
 
 // MARK: - Friends sheet
 

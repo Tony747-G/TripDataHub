@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // MARK: - Main View
 
@@ -283,7 +286,7 @@ struct IPadBidPeriodCalendarView: View {
                         if row < section.rowRange.upperBound - 1 {
                             let isPayPeriodBoundary = hasPayPeriodBoundary(after: row, in: grid)
                             Divider()
-                                .frame(height: isPayPeriodBoundary ? 2 : 1)
+                                .frame(height: isPayPeriodBoundary ? 5 : 1)
                                 .background(isPayPeriodBoundary ? Color(.separator) : Color.clear)
                         }
                     }
@@ -1031,10 +1034,6 @@ private struct CalendarDayCell: View {
         ZStack(alignment: .topLeading) {
             cellBackground
 
-            if isPayPeriodStart, let payPeriodLabel {
-                payPeriodRibbon(label: payPeriodLabel)
-            }
-
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Group {
                     if isToday {
@@ -1343,6 +1342,553 @@ private extension Color {
         self.init(red: red, green: green, blue: blue)
     }
 }
+
+#if canImport(UIKit)
+enum BidPeriodPDFExportRenderer {
+    enum ExportError: LocalizedError {
+        case bidPeriodUnavailable
+        case rendererUnavailable
+
+        var errorDescription: String? {
+            switch self {
+            case .bidPeriodUnavailable:
+                return "The current bid period could not be resolved."
+            case .rendererUnavailable:
+                return "The PDF renderer could not create output."
+            }
+        }
+    }
+
+    @MainActor
+    static func renderPDF(
+        selectedBidPeriodID: String?,
+        crewAccessSchedules: [PayPeriodSchedule],
+        manualOperationalEvents: [ManualOperationalEvent],
+        manualPersonalEvents: [ManualPersonalEvent],
+        crewDomicile: CrewBase,
+        pilotQualification: PilotQualification,
+        includeBidLayer: Bool,
+        includePersonalLayer: Bool,
+        faaMedicalExpiryDate: String,
+        passportExpiryDate: String,
+        chinaVisaExpiryDate: String
+    ) throws -> URL {
+        let domicile = crewDomicile.rawValue
+        let resolvedBidPeriod = selectedBidPeriodID.flatMap { bidPeriod(identifier: $0, domicile: domicile) }
+            ?? bidPeriod(for: Date(), domicile: domicile)
+        guard let bidPeriod = resolvedBidPeriod else {
+            throw ExportError.bidPeriodUnavailable
+        }
+
+        let pageSize = CGSize(width: 612, height: 792)
+        let content = BidPeriodPDFExportView(
+            bidPeriod: bidPeriod,
+            crewAccessSchedules: crewAccessSchedules,
+            manualOperationalEvents: manualOperationalEvents,
+            manualPersonalEvents: manualPersonalEvents,
+            crewDomicile: crewDomicile,
+            pilotQualification: pilotQualification,
+            includeBidLayer: includeBidLayer,
+            includePersonalLayer: includePersonalLayer,
+            faaMedicalExpiryDate: faaMedicalExpiryDate,
+            passportExpiryDate: passportExpiryDate,
+            chinaVisaExpiryDate: chinaVisaExpiryDate,
+            generatedAt: Date()
+        )
+        .frame(width: pageSize.width, height: pageSize.height)
+        .environment(\.colorScheme, .light)
+
+        let imageRenderer = ImageRenderer(content: content)
+        imageRenderer.proposedSize = ProposedViewSize(width: pageSize.width, height: pageSize.height)
+        imageRenderer.scale = 2
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TripDataHub_\(bidPeriod.id)_Calendar.pdf")
+        try? FileManager.default.removeItem(at: url)
+
+        var mediaBox = CGRect(origin: .zero, size: pageSize)
+        guard let pdfContext = CGContext(url as CFURL, mediaBox: &mediaBox, nil) else {
+            throw ExportError.rendererUnavailable
+        }
+
+        pdfContext.beginPDFPage(nil)
+        imageRenderer.render { _, renderInContext in
+            renderInContext(pdfContext)
+        }
+        pdfContext.endPDFPage()
+        pdfContext.closePDF()
+
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw ExportError.rendererUnavailable
+        }
+        return url
+    }
+}
+
+private struct BidPeriodPDFExportView: View {
+    let bidPeriod: CalendarBidPeriod
+    let crewAccessSchedules: [PayPeriodSchedule]
+    let manualOperationalEvents: [ManualOperationalEvent]
+    let manualPersonalEvents: [ManualPersonalEvent]
+    let crewDomicile: CrewBase
+    let pilotQualification: PilotQualification
+    let includeBidLayer: Bool
+    let includePersonalLayer: Bool
+    let faaMedicalExpiryDate: String
+    let passportExpiryDate: String
+    let chinaVisaExpiryDate: String
+    let generatedAt: Date
+
+    private let pageMargin: CGFloat = 24
+    private let weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+    private var gridDays: [IPadCalendarGridDay] {
+        iPadCalendarGrid(for: bidPeriod, domicile: crewDomicile.rawValue)
+    }
+
+    private var calendarTrips: [CalendarTrip] {
+        normalizeCalendarTrips(from: crewAccessSchedules)
+    }
+
+    private var tripsByID: [String: CalendarTrip] {
+        Dictionary(uniqueKeysWithValues: visibleTrips(in: bidPeriod, trips: calendarTrips).map { ($0.id, $0) })
+    }
+
+    private var manualOperationalEventsBySegmentID: [String: ManualOperationalEvent] {
+        Dictionary(uniqueKeysWithValues: visibleManualOperationalEvents(in: bidPeriod, events: manualOperationalEvents).map {
+            (manualOperationalSegmentID(for: $0), $0)
+        })
+    }
+
+    private var segmentsByDayIndex: [Int: [CalendarSegment]] {
+        let days = gridDays.map(\.calendarDay)
+        let tripSegments = visibleTrips(in: bidPeriod, trips: calendarTrips)
+            .flatMap { printSegments(trip: $0, days: days) }
+        let manualSegments = visibleManualOperationalEvents(in: bidPeriod, events: manualOperationalEvents)
+            .flatMap { buildSegments(event: $0, days: days) }
+        return Dictionary(grouping: assignLanes(to: tripSegments + manualSegments), by: \.dayIndex)
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            header
+            weekdayHeader
+            calendarGrid
+        }
+        .padding(pageMargin)
+        .background(Color.white)
+        .foregroundStyle(Color.black)
+    }
+
+    private var header: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("TripDataHub")
+                    .font(.system(size: 18, weight: .bold))
+                Text("\(bidPeriod.id) Calendar")
+                    .font(.system(size: 12, weight: .semibold))
+                Text(bidPeriodRangeText)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color.black.opacity(0.72))
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Text("Crew Domicile: \(crewDomicile.rawValue)")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("Generated \(generatedAtText)")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color.black.opacity(0.66))
+                Text("Operational > Bid > Personal")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color.black.opacity(0.58))
+            }
+        }
+    }
+
+    private var weekdayHeader: some View {
+        HStack(spacing: 0) {
+            ForEach(weekdayLabels, id: \.self) { label in
+                Text(label.uppercased())
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Color.black.opacity(0.62))
+                    .frame(maxWidth: .infinity, minHeight: 18)
+                    .background(Color.black.opacity(0.04))
+                    .overlay(Rectangle().stroke(Color.black.opacity(0.16), lineWidth: 0.5))
+            }
+        }
+    }
+
+    private var calendarGrid: some View {
+        VStack(spacing: 0) {
+            ForEach(0..<8, id: \.self) { row in
+                exportRow(row)
+                .frame(maxHeight: .infinity)
+            }
+        }
+        .overlay(Rectangle().stroke(Color.black.opacity(0.28), lineWidth: 0.8))
+    }
+
+    private func exportRow(_ row: Int) -> some View {
+        let rowDays = (0..<7).compactMap { column -> IPadCalendarGridDay? in
+            let index = row * 7 + column
+            guard gridDays.indices.contains(index) else { return nil }
+            return gridDays[index]
+        }
+        let rowSegments = rowDays.flatMap { gridDay -> [CalendarSegment] in
+            guard !gridDay.isOverflow else { return [] }
+            return segmentsByDayIndex[gridDay.calendarDay.index] ?? []
+        }
+        let spans = rowTripSpans(from: rowSegments, gridDays: rowDays)
+
+        return GeometryReader { geometry in
+            ZStack(alignment: .topLeading) {
+                HStack(spacing: 0) {
+                    ForEach(Array(rowDays.enumerated()), id: \.offset) { _, gridDay in
+                        exportDayCell(gridDay)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
+
+                let contentFrame = CGRect(
+                    x: 0,
+                    y: 24,
+                    width: geometry.size.width,
+                    height: max(geometry.size.height - 40, 1)
+                )
+
+                ForEach(spans) { span in
+                    let x = contentFrame.minX + CGFloat(span.startRowFraction) * contentFrame.width + 3
+                    let width = max(
+                        CGFloat(span.endRowFraction - span.startRowFraction) * contentFrame.width - 6,
+                        1
+                    )
+                    let y = contentFrame.minY + CGFloat(span.lane) * 12
+                    exportOperationalSpan(span)
+                        .frame(width: width, height: 10)
+                        .offset(x: x, y: y)
+                }
+
+                if row == 4 {
+                    Rectangle()
+                        .fill(Color.black.opacity(0.30))
+                        .frame(height: 1.25)
+                        .frame(maxWidth: .infinity, alignment: .top)
+                }
+            }
+        }
+    }
+
+    private func exportDayCell(_ gridDay: IPadCalendarGridDay) -> some View {
+        let day = gridDay.calendarDay
+        let stackItems = gridDay.isOverflow ? [] : stackChips(for: day)
+        let financial = gridDay.isOverflow ? nil : IPadCalendarCycleData.financialIndicator(for: day.displayDateKey)
+
+        return ZStack(alignment: .topLeading) {
+            dayBackground(for: day)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .top) {
+                    Text(dayNumberText(for: day))
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(gridDay.isOverflow ? Color.black.opacity(0.36) : Color.black)
+                    if shouldShowMonth(for: day) {
+                        Text(monthText(for: day))
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(Color.black.opacity(0.58))
+                    }
+                    Spacer(minLength: 2)
+                    if let financial {
+                        Image(systemName: financial == .bigCheck ? "dollarsign.circle.fill" : "dollarsign.circle")
+                            .font(.system(size: financial == .bigCheck ? 11 : 10, weight: .bold))
+                            .foregroundStyle(Color(hex: "#8A6410"))
+                    }
+                }
+                .frame(height: 13)
+
+                Color.clear.frame(maxHeight: .infinity)
+
+                if !stackItems.isEmpty {
+                    stackList(stackItems)
+                } else {
+                    Color.clear.frame(height: 12)
+                }
+            }
+            .padding(.leading, 4)
+            .padding(.trailing, 4)
+            .padding(.vertical, 3)
+        }
+        .opacity(gridDay.isOverflow ? 0.35 : 1)
+        .overlay(Rectangle().stroke(Color.black.opacity(0.16), lineWidth: 0.5))
+    }
+
+    private func exportOperationalSpan(_ span: IPadRowTripSpan) -> some View {
+        Text(operationalLabel(for: span.tripID))
+            .font(.system(size: 7.5, weight: .bold))
+            .foregroundStyle(Color(hex: "#06263D"))
+            .lineLimit(1)
+            .minimumScaleFactor(0.62)
+            .frame(maxWidth: .infinity, minHeight: 10, alignment: .center)
+            .padding(.horizontal, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(operationFillColor(for: span.tripID))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .stroke(Color(hex: "#0C5D85").opacity(0.45), lineWidth: 0.4)
+            )
+    }
+
+    private func stackList(_ chips: [IPadCalendarEventChip]) -> some View {
+        VStack(spacing: 1) {
+            ForEach(chips) { chip in
+                stackBar(chip)
+            }
+        }
+    }
+
+    private func stackBar(_ chip: IPadCalendarEventChip) -> some View {
+        Text(chip.compactTitle)
+            .font(.system(size: 6.6, weight: .bold))
+            .lineLimit(1)
+            .minimumScaleFactor(0.56)
+            .foregroundStyle(stackTextColor(for: chip))
+            .frame(maxWidth: .infinity, minHeight: 8, alignment: .center)
+            .background(Color.black.opacity(0.035))
+            .overlay(Rectangle().stroke(Color.black.opacity(0.13), lineWidth: 0.35))
+    }
+
+    private func stackTextColor(for chip: IPadCalendarEventChip) -> Color {
+        if case .bid = chip.layer {
+            return Color(hex: "#301506")
+        }
+        return Color.teal.opacity(0.92)
+    }
+
+    private func stackBar(_ summary: (title: String, overflow: Int, isBid: Bool)) -> some View {
+        HStack(spacing: 3) {
+            Text(summary.title)
+                .font(.system(size: 7.2, weight: .bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            if summary.overflow > 0 {
+                Text("+\(summary.overflow)")
+                    .font(.system(size: 7.2, weight: .bold))
+            }
+        }
+        .foregroundStyle(summary.isBid ? Color(hex: "#301506") : Color.teal.opacity(0.92))
+        .frame(maxWidth: .infinity, minHeight: 12, alignment: .center)
+        .background(Color.black.opacity(0.035))
+        .overlay(Rectangle().stroke(Color.black.opacity(0.13), lineWidth: 0.4))
+    }
+
+    private func printSegments(trip: CalendarTrip, days: [CalendarDay]) -> [CalendarSegment] {
+        guard let firstDay = days.first else { return [] }
+        let secondsPerDay: TimeInterval = 86_400
+        let rawStart = Int((trip.startUTC.timeIntervalSince(firstDay.dayStartUTC) / secondsPerDay).rounded(.down))
+        let rawEnd = Int((trip.endUTC.timeIntervalSince(firstDay.dayStartUTC) / secondsPerDay).rounded(.down))
+
+        guard rawEnd >= 0, rawStart < days.count else { return [] }
+        let startDayIndex = max(0, rawStart)
+        let endDayIndex = min(days.count - 1, rawEnd)
+        guard startDayIndex <= endDayIndex else { return [] }
+        let isCarryIn = rawStart < 0
+        let isCarryOut = rawEnd >= days.count
+
+        return (startDayIndex...endDayIndex).compactMap { dayIndex in
+            guard let day = days.first(where: { $0.index == dayIndex }) else { return nil }
+            let isFirstDay = dayIndex == startDayIndex
+            let isLastDay = dayIndex == endDayIndex
+            let start = isFirstDay && !isCarryIn ? fractionWithinPrintDay(trip.startUTC, day: day) : 0
+            let end = isLastDay && !isCarryOut ? fractionWithinPrintDay(trip.endUTC, day: day) : 1
+            let normalizedStart = min(max(start, 0), 1)
+            let normalizedEnd = min(max(end, 0), 1)
+            guard normalizedEnd > normalizedStart else { return nil }
+            let segmentStartUTC = isFirstDay && !isCarryIn ? trip.startUTC : day.dayStartUTC
+            return CalendarSegment(
+                tripID: trip.id,
+                weekIndex: day.weekIndex,
+                dayIndex: dayIndex,
+                segmentStartUTC: segmentStartUTC,
+                startFraction: normalizedStart,
+                endFraction: normalizedEnd,
+                lane: 0,
+                hasLocalTimeRegression: false,
+                regressedRange: nil
+            )
+        }
+    }
+
+    private func fractionWithinPrintDay(_ utcDate: Date, day: CalendarDay) -> Double {
+        let duration = day.dayEndUTC.timeIntervalSince(day.dayStartUTC)
+        guard duration > 0 else { return 0 }
+        return utcDate.timeIntervalSince(day.dayStartUTC) / duration
+    }
+
+    private func dayBackground(for day: CalendarDay) -> Color {
+        if day.weekdayIndex == 0 {
+            return Color.red.opacity(0.055)
+        }
+        if day.weekdayIndex == 6 {
+            return Color.blue.opacity(0.045)
+        }
+        return Color.white
+    }
+
+    private func operationFillColor(for segmentID: String) -> Color {
+        if manualOperationalEventsBySegmentID[segmentID] != nil {
+            return Color.cyan.opacity(0.34)
+        }
+        return Color.blue.opacity(0.30)
+    }
+
+    private func operationalLabel(for segmentID: String) -> String {
+        if let event = manualOperationalEventsBySegmentID[segmentID] {
+            return event.code.rawValue
+        }
+        if let trip = tripsByID[segmentID] {
+            return tripBarLabel(for: trip)
+        }
+        return segmentID
+    }
+
+    private func stackChips(for day: CalendarDay) -> [IPadCalendarEventChip] {
+        let bidChips = includeBidLayer
+            ? IPadCalendarCycleData.bidEventChips(for: day.displayDateKey, qualification: pilotQualification)
+            : []
+        let personalChips = includePersonalLayer
+            ? personalExpiryChips(for: day.displayDateKey) + manualPersonalChips(for: day)
+            : []
+        return bidChips + personalChips
+    }
+
+    private func stackSummary(for chips: [IPadCalendarEventChip]) -> (title: String, overflow: Int, isBid: Bool)? {
+        guard let representative = chips.first else { return nil }
+        let isBid: Bool
+        if case .bid = representative.layer {
+            isBid = true
+        } else {
+            isBid = false
+        }
+        return (representative.compactTitle, max(chips.count - 1, 0), isBid)
+    }
+
+    private func personalExpiryChips(for dateKey: String) -> [IPadCalendarEventChip] {
+        [
+            personalExpiryChip(storedDateKey: faaMedicalExpiryDate, dateKey: dateKey, title: "FAA Medical Expiry Date", compactTitle: "MEDICAL EXP"),
+            personalExpiryChip(storedDateKey: passportExpiryDate, dateKey: dateKey, title: "Passport Expiry Date", compactTitle: "PPT"),
+            personalExpiryChip(storedDateKey: chinaVisaExpiryDate, dateKey: dateKey, title: "China Visa Expiry Date", compactTitle: "VISA")
+        ]
+        .compactMap { $0 }
+    }
+
+    private func personalExpiryChip(
+        storedDateKey: String,
+        dateKey: String,
+        title: String,
+        compactTitle: String
+    ) -> IPadCalendarEventChip? {
+        guard !storedDateKey.isEmpty, storedDateKey == dateKey else { return nil }
+        let daysRemaining = IPadCalendarCycleData.daysFromToday(to: storedDateKey)
+        return IPadCalendarEventChip(
+            id: "pdf-personal-\(compactTitle)-\(storedDateKey)",
+            title: title,
+            compactTitle: compactTitle,
+            layer: .personal(IPadCalendarCycleData.personalWarningState(daysRemaining: daysRemaining))
+        )
+    }
+
+    private func manualPersonalChips(for day: CalendarDay) -> [IPadCalendarEventChip] {
+        manualPersonalStackItems(for: day, events: manualPersonalEvents)
+            .map { item in
+                IPadCalendarEventChip(
+                    id: item.id,
+                    title: item.title,
+                    compactTitle: item.compactTitle,
+                    layer: .personal(.normal),
+                    manualPersonalEventID: item.manualPersonalEventID
+                )
+            }
+    }
+
+    private var bidPeriodRangeText: String {
+        guard let first = bidPeriod.days.first, let last = bidPeriod.days.last else {
+            return ""
+        }
+        return "\(monthDayText(for: first)) - \(monthDayYearText(for: last))"
+    }
+
+    private var generatedAtText: String {
+        Self.generatedFormatter.string(from: generatedAt)
+    }
+
+    private func shouldShowMonth(for day: CalendarDay) -> Bool {
+        day.index == 0 || day.displayDateKey.hasSuffix("-01")
+    }
+
+    private func dayNumberText(for day: CalendarDay) -> String {
+        String(Int(day.displayDateKey.suffix(2)) ?? 0)
+    }
+
+    private func monthText(for day: CalendarDay) -> String {
+        guard let date = Self.dateKeyFormatter.date(from: day.displayDateKey) else { return "" }
+        return Self.monthFormatter.string(from: date).uppercased()
+    }
+
+    private func monthDayText(for day: CalendarDay) -> String {
+        guard let date = Self.dateKeyFormatter.date(from: day.displayDateKey) else { return day.displayDateKey }
+        return Self.monthDayFormatter.string(from: date)
+    }
+
+    private func monthDayYearText(for day: CalendarDay) -> String {
+        guard let date = Self.dateKeyFormatter.date(from: day.displayDateKey) else { return day.displayDateKey }
+        return Self.monthDayYearFormatter.string(from: date)
+    }
+
+    private static let dateKeyFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    private static let monthFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "MMM"
+        return formatter
+    }()
+
+    private static let monthDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "MMM d"
+        return formatter
+    }()
+
+    private static let monthDayYearFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "MMM d, yyyy"
+        return formatter
+    }()
+
+    private static let generatedFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+}
+#endif
 
 #Preview {
     IPadBidPeriodCalendarView(

@@ -203,6 +203,7 @@ final class AppViewModel: ObservableObject {
     private let friendScheduleCloudKitService: FriendScheduleCloudKitServicing
     private let gemsVerificationCloudKitService: GEMSVerificationCloudKitServicing
     private let deviceScheduleCloudKitService: DeviceScheduleCloudKitServicing
+    private let manualEventCloudKitService: ManualEventCloudKitServicing
     private let crewAccessImportCloudKitService: CrewAccessImportCloudKitServicing
     private let tzResolver: IATATimeZoneResolving
     private let keychainService: KeychainServiceProtocol
@@ -217,6 +218,7 @@ final class AppViewModel: ObservableObject {
     private var crewAccessLegImportReferenceTimes: [String: Date] = [:]
     private var logTenExportBacklog: [LogTenExportBacklogRecord] = []
     private var logTenExportedFingerprints: [String: String] = [:]
+    private var deletedCrewAccessTripKeys: Set<String> = []
     private var isUploadingSharedSchedule = false
     private var needsSharedScheduleUpload = false
     private var pendingSharedScheduleUploadReason: String?
@@ -224,9 +226,15 @@ final class AppViewModel: ObservableObject {
     private var needsDeviceScheduleUpload = false
     private var pendingDeviceScheduleUploadReason: String?
     private var lastDeviceScheduleUploadFingerprint: String?
+    private var isUploadingManualEvents = false
+    private var needsManualEventUpload = false
+    private var pendingManualEventUploadReason: String?
+    private var lastManualEventUploadFingerprint: String?
+    private var manualEventTombstones: [ManualEventTombstone] = []
     private var foregroundObserver: NSObjectProtocol?
     private var iCloudKVObserver: NSObjectProtocol?
     private var lastDeviceScheduleFetchAt: Date?
+    private var lastManualEventFetchAt: Date?
     private var cachedDeviceID: String?
     private var isFetchingCrewAccessImports = false
     private var lastCrewAccessImportFetchAt: Date?
@@ -242,6 +250,7 @@ final class AppViewModel: ObservableObject {
     private let legacySeniorityRecordsKey = "pilot_roster_records_v1"
     private let verifiedIdentityKey = "verified_identity_profile_v1"
     private let crewAccessLegImportReferenceTimesKey = "crewaccess_leg_import_reference_times_v1"
+    private let deletedCrewAccessTripKeysKey = "deleted_crewaccess_trip_keys_v1"
     private let logTenExportBacklogKey = "logten_export_backlog_v1"
     private let logTenExportedFingerprintsKey = "logten_exported_fingerprints_v1"
     private let seniorityFileName = "pilot_seniority_records_v1.json"
@@ -249,6 +258,8 @@ final class AppViewModel: ObservableObject {
     private let localIdentityRecordNameKey = "local_identity_record_name_v1"
     private let deviceScheduleUploadFingerprintKey = "device_schedule_last_upload_fingerprint_v1"
     private let deviceScheduleFetchAtKey = "device_schedule_last_fetch_at_v1"
+    private let manualEventUploadFingerprintKey = "manual_event_last_upload_fingerprint_v1"
+    private let manualEventFetchAtKey = "manual_event_last_fetch_at_v1"
     private let deviceIDKey = "device_id_v1"
     private let crewAccessImportFetchAtKey = "crewaccess_import_fetch_at_v1"
     private let cloudKitContainerIdentifier = "iCloud.com.sfune.TimelineSchedule"
@@ -279,6 +290,9 @@ final class AppViewModel: ObservableObject {
         deviceScheduleCloudKitService: DeviceScheduleCloudKitServicing = DeviceScheduleCloudKitService(
             containerIdentifier: "iCloud.com.sfune.TimelineSchedule"
         ),
+        manualEventCloudKitService: ManualEventCloudKitServicing = ManualEventCloudKitService(
+            containerIdentifier: "iCloud.com.sfune.TimelineSchedule"
+        ),
         crewAccessImportCloudKitService: CrewAccessImportCloudKitServicing = CrewAccessImportCloudKitService(
             containerIdentifier: "iCloud.com.sfune.TimelineSchedule"
         ),
@@ -294,6 +308,7 @@ final class AppViewModel: ObservableObject {
         self.friendScheduleCloudKitService = friendScheduleCloudKitService
         self.gemsVerificationCloudKitService = gemsVerificationCloudKitService
         self.deviceScheduleCloudKitService = deviceScheduleCloudKitService
+        self.manualEventCloudKitService = manualEventCloudKitService
         self.crewAccessImportCloudKitService = crewAccessImportCloudKitService
         self.tzResolver = tzResolver
         self.keychainService = keychainService
@@ -317,6 +332,7 @@ final class AppViewModel: ObservableObject {
             from: UserDefaults.standard,
             key: crewAccessLegImportReferenceTimesKey
         )
+        self.deletedCrewAccessTripKeys = Set(UserDefaults.standard.stringArray(forKey: deletedCrewAccessTripKeysKey) ?? [])
         self.logTenExportBacklog = Self.loadLogTenExportBacklog(
             from: UserDefaults.standard,
             key: logTenExportBacklogKey
@@ -327,6 +343,7 @@ final class AppViewModel: ObservableObject {
         let manualEvents = manualEventStore.load()
         self.manualOperationalEvents = manualEvents.operationalEvents.sorted { $0.startUTC < $1.startUTC }
         self.manualPersonalEvents = manualEvents.personalEvents.sorted { $0.startUTC < $1.startUTC }
+        self.manualEventTombstones = manualEvents.tombstones
         self.isScheduleSharingEnabled = UserDefaults.standard.bool(forKey: scheduleSharingEnabledKey)
         self.seniorityRecords = []
         self.hasSeniorityDataOnDisk = Self.seniorityDataIsUsableOnDisk(
@@ -345,6 +362,8 @@ final class AppViewModel: ObservableObject {
         pruneCrewAccessLegImportReferenceTimes()
         self.lastDeviceScheduleUploadFingerprint = UserDefaults.standard.string(forKey: deviceScheduleUploadFingerprintKey)
         self.lastDeviceScheduleFetchAt = UserDefaults.standard.object(forKey: deviceScheduleFetchAtKey) as? Date
+        self.lastManualEventUploadFingerprint = UserDefaults.standard.string(forKey: manualEventUploadFingerprintKey)
+        self.lastManualEventFetchAt = UserDefaults.standard.object(forKey: manualEventFetchAtKey) as? Date
         self.cachedDeviceID = UserDefaults.standard.string(forKey: deviceIDKey)
         if !useCloudKitIdentity {
             self.currentCloudKitRecordName = localIdentityRecordName()
@@ -387,6 +406,7 @@ final class AppViewModel: ObservableObject {
             Task {
                 await self?.fetchCrewAccessImportFilesIfNeeded(reason: "foreground")
                 await self?.fetchDeviceScheduleIfNeeded(reason: "foreground")
+                await self?.fetchManualEventsIfNeeded(reason: "foreground")
             }
         }
 
@@ -427,10 +447,13 @@ final class AppViewModel: ObservableObject {
         )
         let snapshot = ManualEventStoreSnapshot(
             operationalEvents: merged,
-            personalEvents: manualPersonalEvents
+            personalEvents: manualPersonalEvents,
+            tombstones: manualEventTombstones
         )
         try manualEventStore.save(snapshot)
         manualOperationalEvents = snapshot.operationalEvents
+        manualEventTombstones = snapshot.tombstones
+        Task { [weak self] in await self?.uploadManualEventsIfNeeded(reason: "manual operational event saved") }
     }
 
     func updateManualOperationalEvent(_ event: ManualOperationalEvent) throws {
@@ -440,7 +463,8 @@ final class AppViewModel: ObservableObject {
     private func upsertManualOperationalEvent(_ event: ManualOperationalEvent) throws {
         var snapshot = ManualEventStoreSnapshot(
             operationalEvents: manualOperationalEvents,
-            personalEvents: manualPersonalEvents
+            personalEvents: manualPersonalEvents,
+            tombstones: manualEventTombstones.filter { $0.id != event.id }
         )
         if let index = snapshot.operationalEvents.firstIndex(where: { $0.id == event.id }) {
             snapshot.operationalEvents[index] = event
@@ -450,16 +474,24 @@ final class AppViewModel: ObservableObject {
         snapshot.operationalEvents.sort { $0.startUTC < $1.startUTC }
         try manualEventStore.save(snapshot)
         manualOperationalEvents = snapshot.operationalEvents
+        manualEventTombstones = snapshot.tombstones
+        Task { [weak self] in await self?.uploadManualEventsIfNeeded(reason: "manual operational event saved") }
     }
 
     func deleteManualOperationalEvent(id: UUID) throws {
+        let deletedAt = Date()
         var snapshot = ManualEventStoreSnapshot(
             operationalEvents: manualOperationalEvents,
-            personalEvents: manualPersonalEvents
+            personalEvents: manualPersonalEvents,
+            tombstones: replacingTombstone(id: id, deletedAt: deletedAt)
         )
         snapshot.operationalEvents.removeAll { $0.id == id }
         try manualEventStore.save(snapshot)
         manualOperationalEvents = snapshot.operationalEvents
+        manualEventTombstones = snapshot.tombstones
+        lastManualEventFetchAt = deletedAt
+        UserDefaults.standard.set(deletedAt, forKey: manualEventFetchAtKey)
+        Task { [weak self] in await self?.uploadManualEventsIfNeeded(reason: "manual operational event deleted") }
     }
 
     func saveManualPersonalEvent(_ event: ManualPersonalEvent) throws {
@@ -473,7 +505,8 @@ final class AppViewModel: ObservableObject {
     private func upsertManualPersonalEvent(_ event: ManualPersonalEvent) throws {
         var snapshot = ManualEventStoreSnapshot(
             operationalEvents: manualOperationalEvents,
-            personalEvents: manualPersonalEvents
+            personalEvents: manualPersonalEvents,
+            tombstones: manualEventTombstones.filter { $0.id != event.id }
         )
         if let index = snapshot.personalEvents.firstIndex(where: { $0.id == event.id }) {
             snapshot.personalEvents[index] = event
@@ -483,16 +516,30 @@ final class AppViewModel: ObservableObject {
         snapshot.personalEvents.sort { $0.startUTC < $1.startUTC }
         try manualEventStore.save(snapshot)
         manualPersonalEvents = snapshot.personalEvents
+        manualEventTombstones = snapshot.tombstones
+        Task { [weak self] in await self?.uploadManualEventsIfNeeded(reason: "manual personal event saved") }
     }
 
     func deleteManualPersonalEvent(id: UUID) throws {
+        let deletedAt = Date()
         var snapshot = ManualEventStoreSnapshot(
             operationalEvents: manualOperationalEvents,
-            personalEvents: manualPersonalEvents
+            personalEvents: manualPersonalEvents,
+            tombstones: replacingTombstone(id: id, deletedAt: deletedAt)
         )
         snapshot.personalEvents.removeAll { $0.id == id }
         try manualEventStore.save(snapshot)
         manualPersonalEvents = snapshot.personalEvents
+        manualEventTombstones = snapshot.tombstones
+        lastManualEventFetchAt = deletedAt
+        UserDefaults.standard.set(deletedAt, forKey: manualEventFetchAtKey)
+        Task { [weak self] in await self?.uploadManualEventsIfNeeded(reason: "manual personal event deleted") }
+    }
+
+    private func replacingTombstone(id: UUID, deletedAt: Date) -> [ManualEventTombstone] {
+        var tombstones = manualEventTombstones.filter { $0.id != id }
+        tombstones.append(ManualEventTombstone(id: id, deletedAt: deletedAt))
+        return tombstones
     }
 
     func handleIncomingAppDeepLink(_ url: URL) {
@@ -1043,7 +1090,10 @@ final class AppViewModel: ObservableObject {
             // Intentionally not pruned so past-leg entries survive for any future LogTen export.
             let preservedReferenceTimes = crewAccessLegImportReferenceTimes
 
-            let remoteSchedules = snapshot.schedules
+            let remoteSchedules = snapshot.schedules.filter { schedule in
+                Self.crewAccessTripKeys(for: schedule, domicile: verifiedIdentity.domicile)
+                    .isDisjoint(with: deletedCrewAccessTripKeys)
+            }
             try cacheService.save(ScheduleCacheSnapshotV2(
                 crewAccessSchedules: remoteSchedules,
                 bidproSchedules: bidproSchedules,
@@ -1065,6 +1115,119 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    private func saveDeletedCrewAccessTripKeys() {
+        UserDefaults.standard.set(Array(deletedCrewAccessTripKeys).sorted(), forKey: deletedCrewAccessTripKeysKey)
+    }
+
+    // MARK: - Manual Event Device Sync
+
+    func uploadManualEventsIfNeeded(reason: String) async {
+        if isUploadingManualEvents {
+            needsManualEventUpload = true
+            pendingManualEventUploadReason = reason
+            logNonFatal("Manual event upload coalesced: \(reason)")
+            return
+        }
+
+        isUploadingManualEvents = true
+        isDeviceSyncing = true
+        var nextReason: String? = reason
+        defer {
+            isUploadingManualEvents = false
+            needsManualEventUpload = false
+            pendingManualEventUploadReason = nil
+            isDeviceSyncing = false
+        }
+
+        while let currentReason = nextReason {
+            nextReason = nil
+            needsManualEventUpload = false
+            pendingManualEventUploadReason = nil
+            await performManualEventUpload(reason: currentReason)
+            if needsManualEventUpload {
+                nextReason = pendingManualEventUploadReason ?? "coalesced"
+            }
+        }
+    }
+
+    private func performManualEventUpload(reason: String) async {
+        guard isIdentityVerified,
+              let verifiedIdentity,
+              let currentCloudKitRecordName else { return }
+
+        let snapshot = currentManualEventSnapshot()
+        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        let fingerprint = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        guard fingerprint != lastManualEventUploadFingerprint else { return }
+
+        let myDeviceID = getOrCreateDeviceID()
+        let source: DeviceScheduleSyncSource = UIDevice.current.userInterfaceIdiom == .pad ? .ipad : .iphone
+
+        do {
+            try await manualEventCloudKitService.uploadManualEvents(
+                gemsID: verifiedIdentity.gemsID,
+                cloudKitRecordName: currentCloudKitRecordName,
+                snapshot: snapshot,
+                deviceID: myDeviceID,
+                source: source
+            )
+            lastManualEventUploadFingerprint = fingerprint
+            UserDefaults.standard.set(fingerprint, forKey: manualEventUploadFingerprintKey)
+            deviceSyncStatusMessage = "Manual events synced."
+            logNonFatal("Manual events uploaded: \(reason) operational=\(snapshot.operationalEvents.count) personal=\(snapshot.personalEvents.count) tombstones=\(snapshot.tombstones.count)")
+        } catch {
+            deviceSyncStatusMessage = "Manual event sync upload failed."
+            logNonFatal("Manual event upload failed: \(error.localizedDescription) reason=\(reason)")
+        }
+    }
+
+    func fetchManualEventsIfNeeded(reason: String) async {
+        guard isIdentityVerified,
+              let verifiedIdentity else { return }
+        isDeviceSyncing = true
+        defer { isDeviceSyncing = false }
+
+        do {
+            guard let remote = try await manualEventCloudKitService.fetchManualEvents(
+                gemsID: verifiedIdentity.gemsID
+            ) else { return }
+
+            if let lastFetch = lastManualEventFetchAt, remote.updatedAt <= lastFetch { return }
+
+            let myDeviceID = getOrCreateDeviceID()
+            let localSnapshot = currentManualEventSnapshot()
+            let merged = mergeManualEventSnapshots(local: localSnapshot, remote: remote.manualEvents)
+            guard merged != localSnapshot else {
+                lastManualEventFetchAt = remote.updatedAt
+                UserDefaults.standard.set(remote.updatedAt, forKey: manualEventFetchAtKey)
+                return
+            }
+
+            try manualEventStore.save(merged)
+            manualOperationalEvents = merged.operationalEvents
+            manualPersonalEvents = merged.personalEvents
+            manualEventTombstones = merged.tombstones
+            lastManualEventFetchAt = remote.updatedAt
+            UserDefaults.standard.set(remote.updatedAt, forKey: manualEventFetchAtKey)
+            deviceSyncStatusMessage = "Manual events updated from device sync."
+            logNonFatal("Manual events fetched: \(reason) source=\(remote.source.rawValue) operational=\(merged.operationalEvents.count) personal=\(merged.personalEvents.count) tombstones=\(merged.tombstones.count)")
+
+            if remote.deviceID != myDeviceID {
+                await uploadManualEventsIfNeeded(reason: "manual event merge")
+            }
+        } catch {
+            logNonFatal("Manual event fetch failed: \(error.localizedDescription) reason=\(reason)")
+        }
+    }
+
+    private func currentManualEventSnapshot() -> ManualEventStoreSnapshot {
+        ManualEventStoreSnapshot(
+            operationalEvents: manualOperationalEvents,
+            personalEvents: manualPersonalEvents,
+            tombstones: manualEventTombstones
+        )
+    }
+
     // MARK: - CrewAccess Import CloudKit Sync
 
     func fetchCrewAccessImportFilesIfNeeded(reason: String) async {
@@ -1081,14 +1244,19 @@ final class AppViewModel: ObservableObject {
             let records = try await crewAccessImportCloudKitService.fetchImportFiles(gemsID: verifiedIdentity.gemsID)
             var writtenCount = 0
             for record in records {
+                let url = dir.appendingPathComponent(record.fileName)
                 if record.deletedAt != nil {
                     // Tombstoned: remove local file if present.
-                    let url = dir.appendingPathComponent(record.fileName)
                     if fm.fileExists(atPath: url.path) { try? fm.removeItem(at: url) }
                     continue
                 }
+                if Self.crewAccessTripKey(fromCloudKitRecord: record).map({ deletedCrewAccessTripKeys.contains($0) }) == true {
+                    if fm.fileExists(atPath: url.path) { try? fm.removeItem(at: url) }
+                    await tombstoneCrewAccessImportFiles(fileNames: [record.fileName])
+                    continue
+                }
                 try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-                let fileURL = dir.appendingPathComponent(record.fileName)
+                let fileURL = url
                 let localModifiedAt = (try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
                 guard localModifiedAt == nil || record.updatedAt > localModifiedAt! else { continue }
                 try? record.jsonData.write(to: fileURL)
@@ -1224,6 +1392,7 @@ final class AppViewModel: ObservableObject {
                     self.updateAdminStatus()
                     if self.isIdentityVerified {
                         Task { await self.fetchDeviceScheduleIfNeeded(reason: "identity verified") }
+                        Task { await self.fetchManualEventsIfNeeded(reason: "identity verified") }
                     }
                 case let .failure(error):
                     if case CloudKitIdentityFetchError.timeout = error {
@@ -1829,8 +1998,12 @@ final class AppViewModel: ObservableObject {
     }
 
     func reconcileCrewAccessSchedulesWithImportFiles() async {
+        let deletedKeys = deletedCrewAccessTripKeys
+        let domicile = verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
         let rebuiltSchedules = await Task.detached(priority: .utility) {
-            Self.loadCrewAccessSchedulesFromImportFiles()
+            Self.loadCrewAccessSchedulesFromImportFiles().filter { schedule in
+                Self.crewAccessTripKeys(for: schedule, domicile: domicile).isDisjoint(with: deletedKeys)
+            }
         }.value
 
         guard rebuiltSchedules != crewAccessSchedules else { return }
@@ -2032,6 +2205,10 @@ final class AppViewModel: ObservableObject {
         let scheduleIDsToDelete = toDelete.map(\.id)
         let domicile = verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
         let tripKeysToDelete = Array(Set(toDelete.flatMap { Self.crewAccessTripKeys(for: $0, domicile: domicile) }))
+        if !tripKeysToDelete.isEmpty {
+            deletedCrewAccessTripKeys.formUnion(tripKeysToDelete)
+            saveDeletedCrewAccessTripKeys()
+        }
         let fileDeleteResult = await Task.detached(priority: .utility) {
             Self.deleteCrewAccessImportFilesBestEffort(
                 scheduleIDs: scheduleIDsToDelete,
@@ -2234,6 +2411,10 @@ final class AppViewModel: ObservableObject {
 
         let domicile = verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
         let importedTripKeys = Self.crewAccessTripKeys(for: imported, domicile: domicile)
+        if !importedTripKeys.isEmpty {
+            deletedCrewAccessTripKeys.subtract(importedTripKeys)
+            saveDeletedCrewAccessTripKeys()
+        }
         updatedCrewAccess = updatedCrewAccess.compactMap { schedule in
             let remainingLegs = schedule.legs.filter { leg in
                 guard let key = Self.crewAccessTripKey(for: leg, domicile: domicile) else {
@@ -3047,6 +3228,18 @@ final class AppViewModel: ObservableObject {
         return "\(order):\(normalizedTripID)"
     }
 
+    private nonisolated static func crewAccessTripKey(fromCloudKitRecord record: CrewAccessImportCloudKitRecord) -> String? {
+        guard let payload = try? JSONDecoder().decode(CrewAccessTripJSON.self, from: record.jsonData) else {
+            return nil
+        }
+        let payloadTripInformationDate = payload.tripInformationDate.trimmingCharacters(in: .whitespacesAndNewlines)
+        return crewAccessTripKey(
+            tripID: payload.tripId,
+            tripInformationDate: payloadTripInformationDate.isEmpty ? record.tripInformationDate : payloadTripInformationDate,
+            fallbackDate: record.firstDepartureUTC.flatMap { LegConnectionTextBuilder.parseUTC($0) }
+        )
+    }
+
     private nonisolated static func crewAccessTripKey(for leg: TripLeg, domicile: String) -> String? {
         crewAccessTripKey(
             tripID: leg.pairing,
@@ -3819,6 +4012,11 @@ final class AppViewModel: ObservableObject {
             Task { [weak self] in
                 await self?.syncFriendCloudKit(reason: "identity verified")
             }
+        }
+        Task { [weak self] in
+            await self?.fetchDeviceScheduleIfNeeded(reason: "identity verified")
+            await self?.fetchManualEventsIfNeeded(reason: "identity verified")
+            await self?.uploadManualEventsIfNeeded(reason: "identity verified")
         }
     }
 

@@ -19,6 +19,10 @@ struct SettingsTabView: View {
     @State private var showNotificationDeniedAlert = false
     @State private var showLogTenExportWarning = false
     @State private var logTenExportOutput: LogTenExportOutput?
+#if DEBUG
+    @State private var verifyGemsIDInput = ""
+    @State private var verifyDOBDate = Date()
+#endif
 
     private var appearanceModeBinding: Binding<AppearanceMode> {
         Binding(
@@ -58,6 +62,14 @@ struct SettingsTabView: View {
         List {
             SettingsSupportSection()
 
+#if DEBUG
+            SettingsAccountSection(
+                verifyGemsIDInput: $verifyGemsIDInput,
+                verifyDOBDate: $verifyDOBDate,
+                formatDOB: formatDOB
+            )
+#endif
+
             SettingsCrewBaseSection(crewBaseRawValue: $crewBaseRawValue)
 
             SettingsQualificationSection(
@@ -93,6 +105,17 @@ struct SettingsTabView: View {
         }
         .scrollDismissesKeyboard(.interactively)
     }
+
+#if DEBUG
+    private func formatDOB(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+#endif
 
     var body: some View {
         NavigationStack {

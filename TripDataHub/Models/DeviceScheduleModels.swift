@@ -15,3 +15,13 @@ struct DeviceScheduleSnapshot: Sendable {
     let deviceID: String
     let source: DeviceScheduleSyncSource
 }
+
+struct ManualEventCloudKitSnapshot: Sendable {
+    let ownerGEMSID: String
+    let ownerRecordName: String
+    let manualEvents: ManualEventStoreSnapshot
+    let schemaVersion: Int
+    let updatedAt: Date
+    let deviceID: String
+    let source: DeviceScheduleSyncSource
+}

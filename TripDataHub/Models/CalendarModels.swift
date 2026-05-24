@@ -497,11 +497,88 @@ struct ManualPersonalEvent: Identifiable, Codable, Hashable {
     }
 }
 
+struct ManualEventTombstone: Codable, Hashable, Identifiable {
+    let id: UUID
+    let deletedAt: Date
+}
+
 struct ManualEventStoreSnapshot: Codable, Hashable {
     var operationalEvents: [ManualOperationalEvent]
     var personalEvents: [ManualPersonalEvent]
+    var tombstones: [ManualEventTombstone]
 
-    static let empty = ManualEventStoreSnapshot(operationalEvents: [], personalEvents: [])
+    static let empty = ManualEventStoreSnapshot(operationalEvents: [], personalEvents: [], tombstones: [])
+
+    init(
+        operationalEvents: [ManualOperationalEvent],
+        personalEvents: [ManualPersonalEvent],
+        tombstones: [ManualEventTombstone] = []
+    ) {
+        self.operationalEvents = operationalEvents
+        self.personalEvents = personalEvents
+        self.tombstones = tombstones
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case operationalEvents
+        case personalEvents
+        case tombstones
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        operationalEvents = try container.decode([ManualOperationalEvent].self, forKey: .operationalEvents)
+        personalEvents = try container.decode([ManualPersonalEvent].self, forKey: .personalEvents)
+        tombstones = try container.decodeIfPresent([ManualEventTombstone].self, forKey: .tombstones) ?? []
+    }
+}
+
+func mergeManualEventSnapshots(
+    local: ManualEventStoreSnapshot,
+    remote: ManualEventStoreSnapshot
+) -> ManualEventStoreSnapshot {
+    var tombstonesByID: [UUID: ManualEventTombstone] = [:]
+    for tombstone in local.tombstones + remote.tombstones {
+        if let existing = tombstonesByID[tombstone.id],
+           existing.deletedAt >= tombstone.deletedAt {
+            continue
+        }
+        tombstonesByID[tombstone.id] = tombstone
+    }
+
+    let tombstones = tombstonesByID
+
+    var operationalByID: [UUID: ManualOperationalEvent] = [:]
+    for event in local.operationalEvents + remote.operationalEvents {
+        if let tombstone = tombstones[event.id],
+           tombstone.deletedAt >= event.updatedAt {
+            continue
+        }
+        if let existing = operationalByID[event.id],
+           existing.updatedAt >= event.updatedAt {
+            continue
+        }
+        operationalByID[event.id] = event
+    }
+
+    var personalByID: [UUID: ManualPersonalEvent] = [:]
+    for event in local.personalEvents + remote.personalEvents {
+        if let tombstone = tombstones[event.id],
+           tombstone.deletedAt >= event.updatedAt {
+            continue
+        }
+        if let existing = personalByID[event.id],
+           existing.updatedAt >= event.updatedAt {
+            continue
+        }
+        personalByID[event.id] = event
+    }
+
+    return ManualEventStoreSnapshot(
+        operationalEvents: operationalByID.values.sorted { $0.startUTC < $1.startUTC },
+        personalEvents: personalByID.values.sorted { $0.startUTC < $1.startUTC },
+        tombstones: tombstonesByID.values.sorted { $0.deletedAt < $1.deletedAt }
+    )
 }
 
 protocol ManualEventStoring {

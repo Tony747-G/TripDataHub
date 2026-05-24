@@ -130,3 +130,114 @@ final class DeviceScheduleCloudKitService: DeviceScheduleCloudKitServicing, @unc
 enum DeviceScheduleDecodeError: Error {
     case missingRequiredField
 }
+
+// MARK: - Manual Event Sync
+
+protocol ManualEventCloudKitServicing: Sendable {
+    func uploadManualEvents(
+        gemsID: String,
+        cloudKitRecordName: String,
+        snapshot: ManualEventStoreSnapshot,
+        deviceID: String,
+        source: DeviceScheduleSyncSource
+    ) async throws
+
+    func fetchManualEvents(gemsID: String) async throws -> ManualEventCloudKitSnapshot?
+}
+
+final class ManualEventCloudKitService: ManualEventCloudKitServicing, @unchecked Sendable {
+    static let schemaVersion: Int = 1
+
+    private enum RecordType {
+        static let manualEventSnapshot = "TDHManualEventSnapshot"
+    }
+
+    private enum Field {
+        static let ownerGEMSID = "ownerGEMSID"
+        static let ownerRecordName = "ownerRecordName"
+        static let manualEventsData = "manualEventsData"
+        static let schemaVersion = "schemaVersion"
+        static let updatedAt = "updatedAt"
+        static let deviceID = "deviceID"
+        static let source = "source"
+    }
+
+    private let containerIdentifier: String
+    private let databaseProvider: () -> DeviceScheduleCloudKitDatabase
+
+    init(containerIdentifier: String) {
+        self.containerIdentifier = containerIdentifier
+        self.databaseProvider = {
+            CKContainer(identifier: containerIdentifier).publicCloudDatabase
+        }
+    }
+
+    init(databaseProvider: @escaping () -> DeviceScheduleCloudKitDatabase) {
+        self.containerIdentifier = "test"
+        self.databaseProvider = databaseProvider
+    }
+
+    func uploadManualEvents(
+        gemsID: String,
+        cloudKitRecordName: String,
+        snapshot: ManualEventStoreSnapshot,
+        deviceID: String,
+        source: DeviceScheduleSyncSource
+    ) async throws {
+        let database = databaseProvider()
+        let normalizedGEMSID = GEMSIDNormalizer.normalize(gemsID)
+        let recordID = CKRecord.ID(recordName: Self.recordName(for: normalizedGEMSID))
+        let record = (try? await database.record(for: recordID))
+            ?? CKRecord(recordType: RecordType.manualEventSnapshot, recordID: recordID)
+        let data = try JSONEncoder().encode(snapshot)
+        record[Field.ownerGEMSID] = normalizedGEMSID as CKRecordValue
+        record[Field.ownerRecordName] = cloudKitRecordName as CKRecordValue
+        record[Field.manualEventsData] = data as CKRecordValue
+        record[Field.schemaVersion] = Int64(Self.schemaVersion) as CKRecordValue
+        record[Field.updatedAt] = Date() as CKRecordValue
+        record[Field.deviceID] = deviceID as CKRecordValue
+        record[Field.source] = source.rawValue as CKRecordValue
+        _ = try await database.save(record)
+    }
+
+    func fetchManualEvents(gemsID: String) async throws -> ManualEventCloudKitSnapshot? {
+        let database = databaseProvider()
+        let normalizedGEMSID = GEMSIDNormalizer.normalize(gemsID)
+        let recordID = CKRecord.ID(recordName: Self.recordName(for: normalizedGEMSID))
+        let record: CKRecord
+        do {
+            record = try await database.record(for: recordID)
+        } catch let error as CKError where error.code == .unknownItem {
+            return nil
+        }
+        return try decodeSnapshot(from: record)
+    }
+
+    static func recordName(for normalizedGEMSID: String) -> String {
+        "tdh_manual_events_\(normalizedGEMSID)"
+    }
+
+    private func decodeSnapshot(from record: CKRecord) throws -> ManualEventCloudKitSnapshot {
+        guard let ownerGEMSID = record[Field.ownerGEMSID] as? String,
+              let ownerRecordName = record[Field.ownerRecordName] as? String,
+              let data = record[Field.manualEventsData] as? Data,
+              let updatedAt = record[Field.updatedAt] as? Date
+        else {
+            throw DeviceScheduleDecodeError.missingRequiredField
+        }
+        let manualEvents = try JSONDecoder().decode(ManualEventStoreSnapshot.self, from: data)
+        let schemaVersion = (record[Field.schemaVersion] as? Int64).map(Int.init) ?? 1
+        let deviceID = record[Field.deviceID] as? String ?? ""
+        let sourceRaw = record[Field.source] as? String ?? ""
+        let source = DeviceScheduleSyncSource(rawValue: sourceRaw) ?? .unknown
+        return ManualEventCloudKitSnapshot(
+            ownerGEMSID: ownerGEMSID,
+            ownerRecordName: ownerRecordName,
+            manualEvents: manualEvents,
+            schemaVersion: schemaVersion,
+            updatedAt: updatedAt,
+            deviceID: deviceID,
+            source: source
+        )
+    }
+}

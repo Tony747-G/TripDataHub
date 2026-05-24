@@ -421,6 +421,68 @@ final class ManualOperationalEventTimeRuleTests: XCTestCase {
         XCTAssertTrue(merged.contains(differentBaseRSVA))
     }
 
+    func test_manualEventSnapshotMerge_tombstonePreventsDeletedOperationalEventResurrection() throws {
+        let eventID = UUID()
+        let createdAt = try XCTUnwrap(Self.iso.date(from: "2026-01-15T10:00:00Z"))
+        let deletedAt = try XCTUnwrap(Self.iso.date(from: "2026-01-15T11:00:00Z"))
+        let staleRemoteEvent = try ManualOperationalEvent(
+            id: eventID,
+            code: .reserveA,
+            crewBase: .anc,
+            startUTC: try XCTUnwrap(Self.iso.date(from: "2026-01-15T16:30:00Z")),
+            endUTC: try XCTUnwrap(Self.iso.date(from: "2026-01-16T04:29:00Z")),
+            createdAt: createdAt,
+            updatedAt: createdAt
+        )
+
+        let merged = mergeManualEventSnapshots(
+            local: ManualEventStoreSnapshot(
+                operationalEvents: [],
+                personalEvents: [],
+                tombstones: [ManualEventTombstone(id: eventID, deletedAt: deletedAt)]
+            ),
+            remote: ManualEventStoreSnapshot(
+                operationalEvents: [staleRemoteEvent],
+                personalEvents: [],
+                tombstones: []
+            )
+        )
+
+        XCTAssertTrue(merged.operationalEvents.isEmpty)
+        XCTAssertEqual(merged.tombstones, [ManualEventTombstone(id: eventID, deletedAt: deletedAt)])
+    }
+
+    func test_manualEventSnapshotMerge_newerEventSurvivesOlderTombstone() throws {
+        let eventID = UUID()
+        let deletedAt = try XCTUnwrap(Self.iso.date(from: "2026-01-15T10:00:00Z"))
+        let updatedAt = try XCTUnwrap(Self.iso.date(from: "2026-01-15T11:00:00Z"))
+        let newerRemoteEvent = try ManualOperationalEvent(
+            id: eventID,
+            code: .lco,
+            crewBase: .anc,
+            startUTC: try XCTUnwrap(Self.iso.date(from: "2026-01-15T17:00:00Z")),
+            endUTC: try XCTUnwrap(Self.iso.date(from: "2026-01-15T23:00:00Z")),
+            createdAt: updatedAt,
+            updatedAt: updatedAt
+        )
+
+        let merged = mergeManualEventSnapshots(
+            local: ManualEventStoreSnapshot(
+                operationalEvents: [],
+                personalEvents: [],
+                tombstones: [ManualEventTombstone(id: eventID, deletedAt: deletedAt)]
+            ),
+            remote: ManualEventStoreSnapshot(
+                operationalEvents: [newerRemoteEvent],
+                personalEvents: [],
+                tombstones: []
+            )
+        )
+
+        XCTAssertEqual(merged.operationalEvents, [newerRemoteEvent])
+        XCTAssertEqual(merged.tombstones, [ManualEventTombstone(id: eventID, deletedAt: deletedAt)])
+    }
+
     func test_manualOperationalEvent_allowsExplicitTimesForCodesWithoutDefaultRange() throws {
         let startUTC = try XCTUnwrap(Self.iso.date(from: "2026-01-15T18:00:00Z"))
         let endUTC = try XCTUnwrap(Self.iso.date(from: "2026-01-15T20:00:00Z"))
