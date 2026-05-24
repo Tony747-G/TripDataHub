@@ -8,84 +8,142 @@
 
 /* Begin PBXBuildFile section */
 		014924D1545F5ED7E32BA50D /* NextReportWindowBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC24A3084F1CB77216493907 /* NextReportWindowBuilder.swift */; };
+		0265797D079B5C6759E4E85A /* WatchSessionReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB2933DBD93F1A1107621F80 /* WatchSessionReceiver.swift */; };
+		0286C7D60F7772DFCFDB8797 /* BrowserViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B42AD5BA433A2A0FD44B41D5 /* BrowserViewModel.swift */; };
 		060126BA99293293402CEC00 /* ViewShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FDA7EA4639BB0121DD6B803 /* ViewShared.swift */; };
+		0816E8851BD201BF2DF8AC31 /* WatchTrainingModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A30F46BE4C18C6D4D0F1BC4 /* WatchTrainingModeView.swift */; };
+		0B16D7ED1D2710ED3D2B006E /* DeviceScheduleCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 679580A304D5D28CA5D2DB52 /* DeviceScheduleCloudKitService.swift */; };
 		0E0B9373BE80E5F6829F98D6 /* ScheduleCacheService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E5301B208661C3E2632FC7 /* ScheduleCacheService.swift */; };
-		0F4A1B2C3D4E5F60718293A4 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F4A1B2C3D4E5F60718293A3 /* AppEnvironment.swift */; };
+		0F605A8C9A8E2FF5A5CEC334 /* CrewAccessTripSummaryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D962E538C7E8E67240363969 /* CrewAccessTripSummaryStore.swift */; };
+		10FDE18BDE05FE8F1C1CFBF1 /* GEMSVerificationCloudKitServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2C615E3B0D98F90EF0B9E71 /* GEMSVerificationCloudKitServiceTests.swift */; };
 		118967E43FF2203DAB98B97C /* TripBoardAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42BF7C6110CAC60779B38CC7 /* TripBoardAuthService.swift */; };
+		1212BF43E98EB31FB58E9A8F /* AppViewModelDeviceSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F704B25EFA9967FD3C609BE4 /* AppViewModelDeviceSyncTests.swift */; };
+		1322F51E683F63D579467CC2 /* BrowserTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEA20E261C3699D0271304A1 /* BrowserTabView.swift */; };
 		1413F694AAE3B23F47C3C436 /* FlightCountdownSharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58C18FF3A67E7E968B09F58E /* FlightCountdownSharedModels.swift */; };
+		16ADBD0BF779B7EAC8A54CA5 /* TripDataHubWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = FEED69B5DE90CC9938E1F3DA /* TripDataHubWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		235EF66A04B56236E1DFB575 /* FriendScheduleCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA4B8F120FCBF73865EE520 /* FriendScheduleCloudKitService.swift */; };
+		25006D6D82CEBB8DD918C398 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CC49C650036A8BDEC047E4FE /* Assets.xcassets */; };
 		27B924E6CA6484B9156032EC /* FlightCountdownCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F6C86491D2E927C2CEC60D5 /* FlightCountdownCoordinator.swift */; };
+		29B12A11ADFA831DE009B36A /* WatchClockText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 438EF6C95F92CC7E6B1BE26F /* WatchClockText.swift */; };
+		2BA380C403967D35505963E1 /* WatchSnapshotCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A86CCF6977DD586C4A213F63 /* WatchSnapshotCoordinator.swift */; };
+		2CD13A5C79CC96B4FD748A7D /* WatchReserveModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F9BC942330E37783331DBE /* WatchReserveModeView.swift */; };
+		309AE65AD8BCD28B3CB7D877 /* WatchOperationalMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3183C0987B3B9E347927499D /* WatchOperationalMode.swift */; };
+		321B4ECBF60C5A0CB5D0768A /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C0DEDEB01558E828246C59A9 /* WatchConnectivity.framework */; };
 		32AB31ECA2C3DA85192193E3 /* TripLegDisplaySupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AA31B4F87A8944508CA4749 /* TripLegDisplaySupport.swift */; };
+		35E055F7469305749B843618 /* WatchSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B35A65D7AEC09261A2BAF9F /* WatchSessionManager.swift */; };
 		3922CFC31FEDE9EC3DFB97BC /* FriendsTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7530BA3F3B6E04AB959D36F4 /* FriendsTabView.swift */; };
+		39637DBE2DA5BE117BB324E9 /* WatchOperationalSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D0FD35B0913B8A6678F6A18 /* WatchOperationalSnapshot.swift */; };
 		3A2F50E0D4536F59A322FEAB /* OpenTimeTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AE25B19B246FF6370CE9E6F /* OpenTimeTabView.swift */; };
+		3B9167DA193C6012D96B3376 /* BrowserWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 915C9CB6A4D2781EE5230B0C /* BrowserWebView.swift */; };
+		3ECBB48FE6C7191F26D374C0 /* WatchEmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 804493101D7F3DCE7FDC3AF4 /* WatchEmptyStateView.swift */; };
 		4016A931F2EA6DCF07900791 /* SettingsSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8A9A31A957111B4F5C5479E /* SettingsSections.swift */; };
+		4880AC5677EDBF3B9668B2F3 /* WatchOffDutyModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A2E19B72139A4C0A1EE0C97 /* WatchOffDutyModeView.swift */; };
 		4B757DBC3E4BB412A6E0A4B4 /* NextReportNotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26F1CF972BCCEF2CFFA1D9B1 /* NextReportNotificationService.swift */; };
 		4C5EC0A3F2B851101A6DF46D /* IATATimeZoneResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FC85F3B696ED2DB2C56FC18 /* IATATimeZoneResolver.swift */; };
 		4F7808E425C3280304305CB3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 906799561E65DB1AF44B2DE4 /* Assets.xcassets */; };
-		51A7C9D1E2F3456789ABC001 /* FriendScheduleMatching.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABC000 /* FriendScheduleMatching.swift */; };
-		51A7C9D1E2F3456789ABC003 /* FriendScheduleMatchingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABC002 /* FriendScheduleMatchingTests.swift */; };
-		51A7C9D1E2F3456789ABC005 /* CrewAccessParserRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABC004 /* CrewAccessParserRegressionTests.swift */; };
-		51A7C9D1E2F3456789ABC007 /* ExternalOpenImportCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABC006 /* ExternalOpenImportCoordinatorTests.swift */; };
-		51A7C9D1E2F3456789ABC009 /* FriendScheduleCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABC008 /* FriendScheduleCloudKitService.swift */; };
-		51A7C9D1E2F3456789ABC011 /* AppViewModelLogTenExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABC010 /* AppViewModelLogTenExportTests.swift */; };
-		51A7C9D1E2F3456789ABCF11 /* TripScheduleSnapshotEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABCF10 /* TripScheduleSnapshotEncoder.swift */; };
-		51A7C9D1E2F3456789ABCF13 /* TripScheduleSnapshotEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABCF12 /* TripScheduleSnapshotEncoderTests.swift */; };
-		51A7C9D1E2F3456789ABD001 /* GEMSVerificationCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABD000 /* GEMSVerificationCloudKitService.swift */; };
-		51A7C9D1E2F3456789ABD003 /* GEMSVerificationCloudKitServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABD002 /* GEMSVerificationCloudKitServiceTests.swift */; };
-		51A7C9D1E2F3456789ABD005 /* GEMSIDNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABD004 /* GEMSIDNormalizer.swift */; };
-		51A7C9D1E2F3456789ABD007 /* DomicileSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABD006 /* DomicileSupport.swift */; };
-		51A7C9D1E2F3456789ABE001 /* ScheduleTimelineRendererView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABE000 /* ScheduleTimelineRendererView.swift */; };
-		51A7C9D1E2F3456789ABF001 /* TimelineRowViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7C9D1E2F3456789ABF000 /* TimelineRowViews.swift */; };
+		560C6AC50CBE2C357746B607 /* TripScheduleSnapshotEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1682DE701661661F9C87C7D /* TripScheduleSnapshotEncoderTests.swift */; };
 		5BF750A9EB06E31DED48688D /* AdminTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F151A3C5326A78E7880243EB /* AdminTabView.swift */; };
 		5C839E2F9397C27B75B962A9 /* BidPeriodService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B6FCCCA54583B5E8D70721D /* BidPeriodService.swift */; };
-		67A567A25FC047F6B0E1810E /* PDFTripParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B958B23E0C844158F487B53 /* PDFTripParser.swift */; };
+		5D6FCE60DE22F8F2D15DEB20 /* WatchTransportKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27613D84DA15C76D5198DDC /* WatchTransportKey.swift */; };
+		64B12838A132EC7DCB59EDB8 /* TripDataHubWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 227F17E108EBC1CFCB397C56 /* TripDataHubWatchApp.swift */; };
+		657CE0BD8328A988EB6D9DAF /* TripScheduleSnapshotEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A29DAE34FE231561964648C1 /* TripScheduleSnapshotEncoder.swift */; };
+		659F96191E8496BC418E8015 /* CrewAccessParserRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6525000DBE9BF9003668EC3 /* CrewAccessParserRegressionTests.swift */; };
+		67D77849AA568A57737B8039 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 294D51ABEDC7BE8DE4F66EED /* ShareViewController.swift */; };
+		68AE24D4DC9200A316B42E55 /* AppViewModelLogTenExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3333297AB2139014598E2FD /* AppViewModelLogTenExportTests.swift */; };
 		6A4D1917B4C1F6301A23AA7D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 3E72BFB505AAA65912E222FA /* LaunchScreen.storyboard */; };
+		6B9506F2B4875F005E21D1A7 /* ExternalOpenImportCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8410083F38BBF0219A4F809B /* ExternalOpenImportCoordinatorTests.swift */; };
 		6EC416FDFC26261153D10DD5 /* CalendarSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD7C5B32EE84F84B8DB788FD /* CalendarSupport.swift */; };
+		708D64ABB3483E4BB24A0E10 /* DeviceScheduleModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88B5E9932D4ED582BB71316D /* DeviceScheduleModels.swift */; };
+		719410C44B68713EC3242D79 /* TimelineRowViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9ED434951F84971C73C60F7 /* TimelineRowViews.swift */; };
 		770DDB243CCA709322ED76E2 /* FriendsSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DD141C17FE03A5610C7CD39 /* FriendsSupport.swift */; };
+		786032686B5FE3D6C0D56A09 /* WatchTransportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0895426F330F88CC35014418 /* WatchTransportTests.swift */; };
+		7B58BDB3AFE1E62EC76B82CA /* WatchSnapshotGeneratorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFAB72ABE9ACCFAF85F686C2 /* WatchSnapshotGeneratorTests.swift */; };
+		7B628B2A32893468E96EAD80 /* DomicileSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DA89D2D4EE73D007B27D8F7 /* DomicileSupport.swift */; };
 		7C3AB2B9272B81AA8921086F /* MaterialIcons.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 5E0709AD7B1E41C090C2CDA2 /* MaterialIcons.ttf */; };
 		7D1704D2A316ADA1508A7A5E /* TripBoardSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A4FD2E096CBF54B7899BF9A /* TripBoardSyncService.swift */; };
 		7DCBF996FF525485AECDAF4C /* AdminSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24F3AE1A0D7CD7D7B5816484 /* AdminSections.swift */; };
-		8AE54C1B2D3E4F5061728392 /* LaunchBehaviorUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AE54C1B2D3E4F5061728391 /* LaunchBehaviorUITests.swift */; };
+		8410F992AB2AB4380AE193D2 /* GEMSIDNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8490A3DF28BAEE6B4A7905D8 /* GEMSIDNormalizer.swift */; };
+		86F8A20621DA16666563F01C /* FriendScheduleMatching.swift in Sources */ = {isa = PBXBuildFile; fileRef = 890162126747FE986AEDD30B /* FriendScheduleMatching.swift */; };
+		87418240871BAEDE8B2124F2 /* iPadTripBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6D9C7C076517590A793657B /* iPadTripBarView.swift */; };
+		8A6763FD9E2EE3410248A68C /* DeviceScheduleCloudKitServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 947E8F6FB100BB0AED4967CD /* DeviceScheduleCloudKitServiceTests.swift */; };
+		94D6405C334A97CF691121BA /* TripDataCountdownWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C08E1E529B18BA244811A48 /* TripDataCountdownWidget.swift */; };
 		9599AC8B5334199EAAC4FC49 /* FlightCountdownTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58EB09BC72A13BE9062573CC /* FlightCountdownTests.swift */; };
 		95B113CB364AA3060CA5D213 /* TimelineSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A53834B9B503F29F362404 /* TimelineSupport.swift */; };
-		95CC4D2499E74AA4A2CACDDE /* RosterParsingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A05C7A4B4AE482294FEBB55 /* RosterParsingModels.swift */; };
-		A1B2C3D4E5F60001AABBCC01 /* BrowserViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60002AABBCC01 /* BrowserViewModel.swift */; };
-		A1B2C3D4E5F60001AABBCC02 /* BrowserWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60002AABBCC02 /* BrowserWebView.swift */; };
-		A1B2C3D4E5F60001AABBCC03 /* BrowserTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60002AABBCC03 /* BrowserTabView.swift */; };
+		95EA363B67369FCF2A615031 /* CrewAccessImportCloudKitServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41B93306AF0DF77C8A58D12F /* CrewAccessImportCloudKitServiceTests.swift */; };
+		99DA5AB7758A88455C929BBF /* WatchSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F478C402A545706E06DC654 /* WatchSnapshotStore.swift */; };
+		9CC4DBFF8DD7A807E39DE379 /* RosterParsingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0A40DFB2EF7B9A57798ECF9 /* RosterParsingModels.swift */; };
+		9CD0181D8868373BC6D57B69 /* WatchTransportKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27613D84DA15C76D5198DDC /* WatchTransportKey.swift */; };
 		A1D82A544C65FC9E6F2AB004 /* OpenTimeSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD991C2C233AF5AEE5AB9A42 /* OpenTimeSupport.swift */; };
-		AA010101BB010101CC010102 /* iPadWorkspaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA010101BB010101CC010101 /* iPadWorkspaceModels.swift */; };
-		AA020202BB020202CC020202B /* iPadOperationalWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA020202BB020202CC020202 /* iPadOperationalWorkspaceView.swift */; };
-		AA030303BB030303CC030303B /* iPadBidPeriodCalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA030303BB030303CC030303 /* iPadBidPeriodCalendarView.swift */; };
-		AA040404BB040404CC040404B /* iPadTripBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA040404BB040404CC040404 /* iPadTripBarView.swift */; };
-		AA050505BB050505CC050505B /* iPadTimelineSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA050505BB050505CC050505 /* iPadTimelineSidebarView.swift */; };
+		A4ED9ABB8F67870FDF6DC827 /* PDFTripParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A472159ED43D1D3AE0B8922B /* PDFTripParser.swift */; };
+		A58218652FAADAC038FC07E6 /* WatchOperationalMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3183C0987B3B9E347927499D /* WatchOperationalMode.swift */; };
+		A7A1FA26E099D58187C6D27E /* WatchSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A81FE0C4F278062E45175A1B /* WatchSnapshotTests.swift */; };
 		B52957FE513ECC9639B99496 /* CrewAccessPDFImportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AF942899EBB7E90814E4995 /* CrewAccessPDFImportService.swift */; };
-		BB01CC01DD01EE01FF010001 /* DeviceScheduleModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC01DD01EE01FF010000 /* DeviceScheduleModels.swift */; };
-		BB01CC01DD01EE01FF010003 /* DeviceScheduleCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC01DD01EE01FF010002 /* DeviceScheduleCloudKitService.swift */; };
-		BB01CC01DD01EE01FF010005 /* DeviceScheduleCloudKitServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC01DD01EE01FF010004 /* DeviceScheduleCloudKitServiceTests.swift */; };
-		BB01CC01DD01EE01FF010007 /* AppViewModelDeviceSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC01DD01EE01FF010006 /* AppViewModelDeviceSyncTests.swift */; };
 		BCA4AE729D06B2ACB035CB39 /* CalendarSupportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30EA7A40210086623915E4DE /* CalendarSupportTests.swift */; };
+		BDB5E75E3F22104CE4F4E4BA /* iPadBidPeriodCalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D4D53F3DC79EADA851A73C6 /* iPadBidPeriodCalendarView.swift */; };
 		C253B94D1BAE19FE0272F3F3 /* AdminPolicy.json in Resources */ = {isa = PBXBuildFile; fileRef = 98EDE30CF9675F9EFF5433AD /* AdminPolicy.json */; };
+		C3CA1F06D46397744068D8F2 /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C0DEDEB01558E828246C59A9 /* WatchConnectivity.framework */; };
+		C5194577FDCCA8F6FD89109E /* CrewAccessImportCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3CE005F5518E5100BD8071A /* CrewAccessImportCloudKitService.swift */; };
 		C6DAD0A1BE825FB0BA256D13 /* SettingsTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B75C57D0E8EA97E45C283A7B /* SettingsTabView.swift */; };
+		C873F9D6C312A4C790E89630 /* WatchOperationalSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D0FD35B0913B8A6678F6A18 /* WatchOperationalSnapshot.swift */; };
 		C8D9B5BF0F2E0E10EFC1355F /* TripDataHubApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BDD762619119C64ED70F521 /* TripDataHubApp.swift */; };
 		CABB746FF49354B5B9FB8445 /* MaterialIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9B6B161A74F14EA6BD7D4F1 /* MaterialIconView.swift */; };
-		CC02DD02EE02FF02AA020003 /* CrewAccessImportCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC02DD02EE02FF02AA020002 /* CrewAccessImportCloudKitService.swift */; };
 		CE0849FD7F7F3F22C65211EE /* ImportPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF695C0A628B417D70BF6664 /* ImportPreviewView.swift */; };
+		CE14183F65070B2295103E1C /* iPadTimelineSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F613274D8F1AD32132CC8601 /* iPadTimelineSidebarView.swift */; };
+		D066058D150074B8B23AC5B0 /* WatchProgressRing.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3D7B47FCAE28C5E496F6704 /* WatchProgressRing.swift */; };
+		D3B46D762C2CE89BD8162A32 /* WatchTripModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10476E3E32E316BCE04F4021 /* WatchTripModeView.swift */; };
+		D50EEB6012D9F93407B92FE0 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FA878543A7B3FFB0BC0D0E6 /* AppEnvironment.swift */; };
 		D62D823638EA9042B84575C1 /* RootTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABBFA59E2733EED76133B12E /* RootTabView.swift */; };
+		D699779CEC9D10066F5AF038 /* iPadWorkspaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA43A088DA6CC56787500853 /* iPadWorkspaceModels.swift */; };
 		D7CF5354C3F636A38CCA3C27 /* CalendarModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C935139ABDF9C6B5FE71310 /* CalendarModels.swift */; };
 		DC8A5853601DC74925B4908E /* TripBoardLoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B56C7C114EB63B94E2C3ED4 /* TripBoardLoginView.swift */; };
-		DD03EE03FF03AA03BB030003 /* CrewAccessTripSummaryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD03EE03FF03AA03BB030002 /* CrewAccessTripSummaryStore.swift */; };
 		DEA186B6F8256B4A0B01C291 /* AppViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 537DE7E0A39D9117D8B2DE33 /* AppViewModel.swift */; };
 		E1BDA32E3801BEDCB3C9A9E3 /* CrewAccessImportHelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C6A66B614D3A175C4E929D9 /* CrewAccessImportHelpView.swift */; };
+		E60E5972A4C84425D3942CFD /* FriendScheduleMatchingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9148FEFD922511865B7B75D4 /* FriendScheduleMatchingTests.swift */; };
 		E72B7C0A1DA5134DAF4551D7 /* TripModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CD425A30028665C7AF3C26E /* TripModels.swift */; };
+		E8D881766B246E8CFF442BB1 /* WatchRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6A017583A1530E9700ADA56 /* WatchRootView.swift */; };
+		E9B2B40C2DFECBEBF71B41E9 /* ScheduleTimelineRendererView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 022B7246751D741B1792AE69 /* ScheduleTimelineRendererView.swift */; };
 		EBA28E56AF2F56DCDE5095FA /* OpenTimeTripDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E4DBC654459A337652E6EB /* OpenTimeTripDetailView.swift */; };
+		EBF81EC14EC47BBD406A4912 /* iPadOperationalWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53D43B2FDA88585324115FF9 /* iPadOperationalWorkspaceView.swift */; };
 		F4130D36B01FE4896582FC2F /* AppViewModel+PreviewData.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE4BC208606CA451400CC1BE /* AppViewModel+PreviewData.swift */; };
+		F454F43CAE37B445048E622E /* WatchSnapshotGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A898003604679CB4C9FEEF7C /* WatchSnapshotGenerator.swift */; };
 		F6354A96AD43D1B5043CF4E3 /* FlightCountdownSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 725719445A236E76E849AF2F /* FlightCountdownSupport.swift */; };
 		F7B3BF9F00B694A47A128868 /* ImportFileSniffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EABE1DFB8EE6CCCF77FB5717 /* ImportFileSniffer.swift */; };
+		FA08B0701796126497AB43BE /* LaunchBehaviorUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FF947013A4A08E8534AC00C /* LaunchBehaviorUITests.swift */; };
+		FA94D0C6D17D66FB42335FF5 /* GEMSVerificationCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA62E9D401CEECCAA308A707 /* GEMSVerificationCloudKitService.swift */; };
 		FCAF8CC3DA62D71F1FCBE6B8 /* TimelineTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5F00128A17C7CA217977EA7 /* TimelineTabView.swift */; };
 		FD43BBA08568699E1F1D5C5D /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B4DAB3D177949F363100BE8 /* KeychainService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		127FF9DDB7833EA6C3E6CF7E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5AE721792323228157DCB039 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9CDD311DB999C310E3ADCC73;
+			remoteInfo = TripDataHub;
+		};
 		30A401B24E2279426942B203 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5AE721792323228157DCB039 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9CDD311DB999C310E3ADCC73;
+			remoteInfo = TripDataHub;
+		};
+		5328BFFFB604553C82EBC412 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5AE721792323228157DCB039 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 661ED6C655BEF35C62D213A7;
+			remoteInfo = TripDataHubWatch;
+		};
+		A1817BA7C7786FFF291C4F81 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5AE721792323228157DCB039 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9CDD311DB999C310E3ADCC73;
+			remoteInfo = TripDataHub;
+		};
+		CF45968C2728032AE5858E80 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 5AE721792323228157DCB039 /* Project object */;
 			proxyType = 1;
@@ -94,97 +152,188 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		989F303732246E4DC37FA9C7 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				16ADBD0BF779B7EAC8A54CA5 /* TripDataHubWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		022B7246751D741B1792AE69 /* ScheduleTimelineRendererView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleTimelineRendererView.swift; sourceTree = "<group>"; };
 		0280B0ED64CBF38F6C06B873 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		0A05C7A4B4AE482294FEBB55 /* RosterParsingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RosterParsingModels.swift; sourceTree = "<group>"; };
+		0895426F330F88CC35014418 /* WatchTransportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchTransportTests.swift; sourceTree = "<group>"; };
 		0AF942899EBB7E90814E4995 /* CrewAccessPDFImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessPDFImportService.swift; sourceTree = "<group>"; };
-		0F4A1B2C3D4E5F60718293A3 /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
-		104E08AA2FAACD1200A732BF /* TripDataHubRelease.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TripDataHubRelease.entitlements; sourceTree = "<group>"; };
-		13F6EFC17A823450FE7E3210 /* TripDataHubTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TripDataHubTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		1BC23D4E5F60718293A4B5C6 /* TripDataHubUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TripDataHubUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		10476E3E32E316BCE04F4021 /* WatchTripModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchTripModeView.swift; sourceTree = "<group>"; };
+		13F6EFC17A823450FE7E3210 /* TripDataHubTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TripDataHubTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1FDA7EA4639BB0121DD6B803 /* ViewShared.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewShared.swift; sourceTree = "<group>"; };
+		227F17E108EBC1CFCB397C56 /* TripDataHubWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripDataHubWatchApp.swift; sourceTree = "<group>"; };
 		24F3AE1A0D7CD7D7B5816484 /* AdminSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminSections.swift; sourceTree = "<group>"; };
 		26F1CF972BCCEF2CFFA1D9B1 /* NextReportNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextReportNotificationService.swift; sourceTree = "<group>"; };
+		2715723CFCA0583F75104EF1 /* TripDataCountdownWidgetExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = TripDataCountdownWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		27B3B19D320BB806C27D1D1C /* TripDataHub.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TripDataHub.entitlements; sourceTree = "<group>"; };
+		294D51ABEDC7BE8DE4F66EED /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		2C935139ABDF9C6B5FE71310 /* CalendarModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarModels.swift; sourceTree = "<group>"; };
+		2CA4B8F120FCBF73865EE520 /* FriendScheduleCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendScheduleCloudKitService.swift; sourceTree = "<group>"; };
+		2FF947013A4A08E8534AC00C /* LaunchBehaviorUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchBehaviorUITests.swift; sourceTree = "<group>"; };
 		30EA7A40210086623915E4DE /* CalendarSupportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSupportTests.swift; sourceTree = "<group>"; };
+		3183C0987B3B9E347927499D /* WatchOperationalMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchOperationalMode.swift; sourceTree = "<group>"; };
 		3A4FD2E096CBF54B7899BF9A /* TripBoardSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripBoardSyncService.swift; sourceTree = "<group>"; };
 		3AA31B4F87A8944508CA4749 /* TripLegDisplaySupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripLegDisplaySupport.swift; sourceTree = "<group>"; };
 		3AE25B19B246FF6370CE9E6F /* OpenTimeTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenTimeTabView.swift; sourceTree = "<group>"; };
 		3E72BFB505AAA65912E222FA /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		41B93306AF0DF77C8A58D12F /* CrewAccessImportCloudKitServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessImportCloudKitServiceTests.swift; sourceTree = "<group>"; };
 		42BF7C6110CAC60779B38CC7 /* TripBoardAuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripBoardAuthService.swift; sourceTree = "<group>"; };
+		438EF6C95F92CC7E6B1BE26F /* WatchClockText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchClockText.swift; sourceTree = "<group>"; };
 		4F6C86491D2E927C2CEC60D5 /* FlightCountdownCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightCountdownCoordinator.swift; sourceTree = "<group>"; };
 		4FC85F3B696ED2DB2C56FC18 /* IATATimeZoneResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IATATimeZoneResolver.swift; sourceTree = "<group>"; };
-		51A7C9D1E2F3456789ABC000 /* FriendScheduleMatching.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendScheduleMatching.swift; sourceTree = "<group>"; };
-		51A7C9D1E2F3456789ABC002 /* FriendScheduleMatchingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendScheduleMatchingTests.swift; sourceTree = "<group>"; };
-		51A7C9D1E2F3456789ABC004 /* CrewAccessParserRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessParserRegressionTests.swift; sourceTree = "<group>"; };
-		51A7C9D1E2F3456789ABC006 /* ExternalOpenImportCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalOpenImportCoordinatorTests.swift; sourceTree = "<group>"; };
-		51A7C9D1E2F3456789ABC008 /* FriendScheduleCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendScheduleCloudKitService.swift; sourceTree = "<group>"; };
-		51A7C9D1E2F3456789ABC010 /* AppViewModelLogTenExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModelLogTenExportTests.swift; sourceTree = "<group>"; };
-		51A7C9D1E2F3456789ABCF10 /* TripScheduleSnapshotEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripScheduleSnapshotEncoder.swift; sourceTree = "<group>"; };
-		51A7C9D1E2F3456789ABCF12 /* TripScheduleSnapshotEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripScheduleSnapshotEncoderTests.swift; sourceTree = "<group>"; };
-		51A7C9D1E2F3456789ABD000 /* GEMSVerificationCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GEMSVerificationCloudKitService.swift; sourceTree = "<group>"; };
-		51A7C9D1E2F3456789ABD002 /* GEMSVerificationCloudKitServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GEMSVerificationCloudKitServiceTests.swift; sourceTree = "<group>"; };
-		51A7C9D1E2F3456789ABD004 /* GEMSIDNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GEMSIDNormalizer.swift; sourceTree = "<group>"; };
-		51A7C9D1E2F3456789ABD006 /* DomicileSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomicileSupport.swift; sourceTree = "<group>"; };
-		51A7C9D1E2F3456789ABE000 /* ScheduleTimelineRendererView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleTimelineRendererView.swift; sourceTree = "<group>"; };
-		51A7C9D1E2F3456789ABF000 /* TimelineRowViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineRowViews.swift; sourceTree = "<group>"; };
+		527B5CCC7CF1CE523CBD5C0D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		537DE7E0A39D9117D8B2DE33 /* AppViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModel.swift; sourceTree = "<group>"; };
+		53D43B2FDA88585324115FF9 /* iPadOperationalWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadOperationalWorkspaceView.swift; sourceTree = "<group>"; };
 		55E5301B208661C3E2632FC7 /* ScheduleCacheService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleCacheService.swift; sourceTree = "<group>"; };
 		58C18FF3A67E7E968B09F58E /* FlightCountdownSharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightCountdownSharedModels.swift; sourceTree = "<group>"; };
 		58EB09BC72A13BE9062573CC /* FlightCountdownTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightCountdownTests.swift; sourceTree = "<group>"; };
 		5B56C7C114EB63B94E2C3ED4 /* TripBoardLoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripBoardLoginView.swift; sourceTree = "<group>"; };
+		5C08E1E529B18BA244811A48 /* TripDataCountdownWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripDataCountdownWidget.swift; sourceTree = "<group>"; };
+		5DA89D2D4EE73D007B27D8F7 /* DomicileSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomicileSupport.swift; sourceTree = "<group>"; };
 		5E0709AD7B1E41C090C2CDA2 /* MaterialIcons.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = MaterialIcons.ttf; sourceTree = "<group>"; };
+		5F478C402A545706E06DC654 /* WatchSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSnapshotStore.swift; sourceTree = "<group>"; };
+		679580A304D5D28CA5D2DB52 /* DeviceScheduleCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScheduleCloudKitService.swift; sourceTree = "<group>"; };
+		6A30F46BE4C18C6D4D0F1BC4 /* WatchTrainingModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchTrainingModeView.swift; sourceTree = "<group>"; };
+		6D0FD35B0913B8A6678F6A18 /* WatchOperationalSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchOperationalSnapshot.swift; sourceTree = "<group>"; };
+		6DB6247591FD18389FEA8F71 /* TripDataShareActionExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = TripDataShareActionExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		6DD141C17FE03A5610C7CD39 /* FriendsSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendsSupport.swift; sourceTree = "<group>"; };
+		6FA878543A7B3FFB0BC0D0E6 /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
 		725719445A236E76E849AF2F /* FlightCountdownSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightCountdownSupport.swift; sourceTree = "<group>"; };
 		7530BA3F3B6E04AB959D36F4 /* FriendsTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendsTabView.swift; sourceTree = "<group>"; };
 		79E4DBC654459A337652E6EB /* OpenTimeTripDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenTimeTripDetailView.swift; sourceTree = "<group>"; };
+		7A4B044C3B3AC3CB75F18470 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		7B4DAB3D177949F363100BE8 /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
-		8AE54C1B2D3E4F5061728391 /* LaunchBehaviorUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchBehaviorUITests.swift; sourceTree = "<group>"; };
+		804493101D7F3DCE7FDC3AF4 /* WatchEmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchEmptyStateView.swift; sourceTree = "<group>"; };
+		8410083F38BBF0219A4F809B /* ExternalOpenImportCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalOpenImportCoordinatorTests.swift; sourceTree = "<group>"; };
+		8490A3DF28BAEE6B4A7905D8 /* GEMSIDNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GEMSIDNormalizer.swift; sourceTree = "<group>"; };
+		88B5E9932D4ED582BB71316D /* DeviceScheduleModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScheduleModels.swift; sourceTree = "<group>"; };
+		890162126747FE986AEDD30B /* FriendScheduleMatching.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendScheduleMatching.swift; sourceTree = "<group>"; };
+		8A71866D79BF8FF757543B80 /* TripDataHubUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TripDataHubUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		8B35A65D7AEC09261A2BAF9F /* WatchSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSessionManager.swift; sourceTree = "<group>"; };
 		8CD425A30028665C7AF3C26E /* TripModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripModels.swift; sourceTree = "<group>"; };
+		8D4D53F3DC79EADA851A73C6 /* iPadBidPeriodCalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadBidPeriodCalendarView.swift; sourceTree = "<group>"; };
 		906799561E65DB1AF44B2DE4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		9148FEFD922511865B7B75D4 /* FriendScheduleMatchingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendScheduleMatchingTests.swift; sourceTree = "<group>"; };
+		915C9CB6A4D2781EE5230B0C /* BrowserWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserWebView.swift; sourceTree = "<group>"; };
+		947E8F6FB100BB0AED4967CD /* DeviceScheduleCloudKitServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScheduleCloudKitServiceTests.swift; sourceTree = "<group>"; };
 		98EDE30CF9675F9EFF5433AD /* AdminPolicy.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = AdminPolicy.json; sourceTree = "<group>"; };
+		99864F714C5F48A6ECC8DFE3 /* TripDataCountdownWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TripDataCountdownWidgetExtension.entitlements; sourceTree = "<group>"; };
+		9A2E19B72139A4C0A1EE0C97 /* WatchOffDutyModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchOffDutyModeView.swift; sourceTree = "<group>"; };
 		9B6FCCCA54583B5E8D70721D /* BidPeriodService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BidPeriodService.swift; sourceTree = "<group>"; };
-		9B958B23E0C844158F487B53 /* PDFTripParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFTripParser.swift; sourceTree = "<group>"; };
 		9BDD762619119C64ED70F521 /* TripDataHubApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripDataHubApp.swift; sourceTree = "<group>"; };
 		9C6A66B614D3A175C4E929D9 /* CrewAccessImportHelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessImportHelpView.swift; sourceTree = "<group>"; };
-		A1B2C3D4E5F60002AABBCC01 /* BrowserViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserViewModel.swift; sourceTree = "<group>"; };
-		A1B2C3D4E5F60002AABBCC02 /* BrowserWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserWebView.swift; sourceTree = "<group>"; };
-		A1B2C3D4E5F60002AABBCC03 /* BrowserTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserTabView.swift; sourceTree = "<group>"; };
-		AA010101BB010101CC010101 /* iPadWorkspaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadWorkspaceModels.swift; sourceTree = "<group>"; };
-		AA020202BB020202CC020202 /* iPadOperationalWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadOperationalWorkspaceView.swift; sourceTree = "<group>"; };
-		AA030303BB030303CC030303 /* iPadBidPeriodCalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadBidPeriodCalendarView.swift; sourceTree = "<group>"; };
-		AA040404BB040404CC040404 /* iPadTripBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadTripBarView.swift; sourceTree = "<group>"; };
-		AA050505BB050505CC050505 /* iPadTimelineSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadTimelineSidebarView.swift; sourceTree = "<group>"; };
+		A1682DE701661661F9C87C7D /* TripScheduleSnapshotEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripScheduleSnapshotEncoderTests.swift; sourceTree = "<group>"; };
+		A29DAE34FE231561964648C1 /* TripScheduleSnapshotEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripScheduleSnapshotEncoder.swift; sourceTree = "<group>"; };
+		A3333297AB2139014598E2FD /* AppViewModelLogTenExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModelLogTenExportTests.swift; sourceTree = "<group>"; };
+		A472159ED43D1D3AE0B8922B /* PDFTripParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFTripParser.swift; sourceTree = "<group>"; };
+		A6525000DBE9BF9003668EC3 /* CrewAccessParserRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessParserRegressionTests.swift; sourceTree = "<group>"; };
+		A6D9C7C076517590A793657B /* iPadTripBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadTripBarView.swift; sourceTree = "<group>"; };
+		A81FE0C4F278062E45175A1B /* WatchSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSnapshotTests.swift; sourceTree = "<group>"; };
+		A86CCF6977DD586C4A213F63 /* WatchSnapshotCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSnapshotCoordinator.swift; sourceTree = "<group>"; };
+		A898003604679CB4C9FEEF7C /* WatchSnapshotGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSnapshotGenerator.swift; sourceTree = "<group>"; };
+		A9F9BC942330E37783331DBE /* WatchReserveModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchReserveModeView.swift; sourceTree = "<group>"; };
 		ABBFA59E2733EED76133B12E /* RootTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootTabView.swift; sourceTree = "<group>"; };
+		B0A40DFB2EF7B9A57798ECF9 /* RosterParsingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RosterParsingModels.swift; sourceTree = "<group>"; };
+		B3CE005F5518E5100BD8071A /* CrewAccessImportCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessImportCloudKitService.swift; sourceTree = "<group>"; };
+		B42AD5BA433A2A0FD44B41D5 /* BrowserViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserViewModel.swift; sourceTree = "<group>"; };
 		B75C57D0E8EA97E45C283A7B /* SettingsTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTabView.swift; sourceTree = "<group>"; };
 		B9B6B161A74F14EA6BD7D4F1 /* MaterialIconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaterialIconView.swift; sourceTree = "<group>"; };
-		BB01CC01DD01EE01FF010000 /* DeviceScheduleModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScheduleModels.swift; sourceTree = "<group>"; };
-		BB01CC01DD01EE01FF010002 /* DeviceScheduleCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScheduleCloudKitService.swift; sourceTree = "<group>"; };
-		BB01CC01DD01EE01FF010004 /* DeviceScheduleCloudKitServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScheduleCloudKitServiceTests.swift; sourceTree = "<group>"; };
-		BB01CC01DD01EE01FF010006 /* AppViewModelDeviceSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModelDeviceSyncTests.swift; sourceTree = "<group>"; };
 		BD7C5B32EE84F84B8DB788FD /* CalendarSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSupport.swift; sourceTree = "<group>"; };
-		CC02DD02EE02FF02AA020002 /* CrewAccessImportCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessImportCloudKitService.swift; sourceTree = "<group>"; };
+		BEA20E261C3699D0271304A1 /* BrowserTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserTabView.swift; sourceTree = "<group>"; };
+		C0DEDEB01558E828246C59A9 /* WatchConnectivity.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WatchConnectivity.framework; path = System/Library/Frameworks/WatchConnectivity.framework; sourceTree = SDKROOT; };
+		C2C615E3B0D98F90EF0B9E71 /* GEMSVerificationCloudKitServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GEMSVerificationCloudKitServiceTests.swift; sourceTree = "<group>"; };
+		CA43A088DA6CC56787500853 /* iPadWorkspaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadWorkspaceModels.swift; sourceTree = "<group>"; };
+		CC49C650036A8BDEC047E4FE /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		CD991C2C233AF5AEE5AB9A42 /* OpenTimeSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenTimeSupport.swift; sourceTree = "<group>"; };
 		D1A53834B9B503F29F362404 /* TimelineSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineSupport.swift; sourceTree = "<group>"; };
 		D5F00128A17C7CA217977EA7 /* TimelineTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineTabView.swift; sourceTree = "<group>"; };
 		D8A9A31A957111B4F5C5479E /* SettingsSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSections.swift; sourceTree = "<group>"; };
-		DD03EE03FF03AA03BB030002 /* CrewAccessTripSummaryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessTripSummaryStore.swift; sourceTree = "<group>"; };
+		D962E538C7E8E67240363969 /* CrewAccessTripSummaryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessTripSummaryStore.swift; sourceTree = "<group>"; };
+		D9ED434951F84971C73C60F7 /* TimelineRowViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineRowViews.swift; sourceTree = "<group>"; };
+		DB2933DBD93F1A1107621F80 /* WatchSessionReceiver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSessionReceiver.swift; sourceTree = "<group>"; };
 		DF695C0A628B417D70BF6664 /* ImportPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportPreviewView.swift; sourceTree = "<group>"; };
+		E27613D84DA15C76D5198DDC /* WatchTransportKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchTransportKey.swift; sourceTree = "<group>"; };
+		E6A017583A1530E9700ADA56 /* WatchRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRootView.swift; sourceTree = "<group>"; };
 		EABE1DFB8EE6CCCF77FB5717 /* ImportFileSniffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportFileSniffer.swift; sourceTree = "<group>"; };
+		EB93AA8DEFC3BFC3256EBA03 /* TripDataHubRelease.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TripDataHubRelease.entitlements; sourceTree = "<group>"; };
+		EFAB72ABE9ACCFAF85F686C2 /* WatchSnapshotGeneratorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSnapshotGeneratorTests.swift; sourceTree = "<group>"; };
 		F151A3C5326A78E7880243EB /* AdminTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminTabView.swift; sourceTree = "<group>"; };
-		F518C211127FA260E6247ED8 /* TripDataHub.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TripDataHub.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F3D7B47FCAE28C5E496F6704 /* WatchProgressRing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchProgressRing.swift; sourceTree = "<group>"; };
+		F518C211127FA260E6247ED8 /* TripDataHub.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TripDataHub.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F613274D8F1AD32132CC8601 /* iPadTimelineSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadTimelineSidebarView.swift; sourceTree = "<group>"; };
+		F704B25EFA9967FD3C609BE4 /* AppViewModelDeviceSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModelDeviceSyncTests.swift; sourceTree = "<group>"; };
+		FA62E9D401CEECCAA308A707 /* GEMSVerificationCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GEMSVerificationCloudKitService.swift; sourceTree = "<group>"; };
+		FBD9F22BB2B42C27B598C918 /* TripDataShareActionExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TripDataShareActionExtension.entitlements; sourceTree = "<group>"; };
 		FC24A3084F1CB77216493907 /* NextReportWindowBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextReportWindowBuilder.swift; sourceTree = "<group>"; };
 		FE4BC208606CA451400CC1BE /* AppViewModel+PreviewData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppViewModel+PreviewData.swift"; sourceTree = "<group>"; };
+		FEED69B5DE90CC9938E1F3DA /* TripDataHubWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TripDataHubWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFrameworksBuildPhase section */
+		413D030851466CD865C83F21 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				321B4ECBF60C5A0CB5D0768A /* WatchConnectivity.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		93FEE7616DAB99BFF977144C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C3CA1F06D46397744068D8F2 /* WatchConnectivity.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
 /* Begin PBXGroup section */
+		12035C3547B11E5407887E06 /* TripDataHubWatchApp */ = {
+			isa = PBXGroup;
+			children = (
+				CC49C650036A8BDEC047E4FE /* Assets.xcassets */,
+				227F17E108EBC1CFCB397C56 /* TripDataHubWatchApp.swift */,
+				E6A017583A1530E9700ADA56 /* WatchRootView.swift */,
+				DB2933DBD93F1A1107621F80 /* WatchSessionReceiver.swift */,
+				5F478C402A545706E06DC654 /* WatchSnapshotStore.swift */,
+				5F1D542DBDDA89EDDFB89589 /* Views */,
+			);
+			path = TripDataHubWatchApp;
+			sourceTree = "<group>";
+		};
+		2B9F9950557D56C3AB9B37E7 /* TripDataHubShared */ = {
+			isa = PBXGroup;
+			children = (
+				3183C0987B3B9E347927499D /* WatchOperationalMode.swift */,
+				6D0FD35B0913B8A6678F6A18 /* WatchOperationalSnapshot.swift */,
+				E27613D84DA15C76D5198DDC /* WatchTransportKey.swift */,
+			);
+			path = TripDataHubShared;
+			sourceTree = "<group>";
+		};
 		35A97BDAAEA706418C6B65F2 /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				2715723CFCA0583F75104EF1 /* TripDataCountdownWidgetExtension.appex */,
 				F518C211127FA260E6247ED8 /* TripDataHub.app */,
 				13F6EFC17A823450FE7E3210 /* TripDataHubTests.xctest */,
-				1BC23D4E5F60718293A4B5C6 /* TripDataHubUITests.xctest */,
+				8A71866D79BF8FF757543B80 /* TripDataHubUITests.xctest */,
+				FEED69B5DE90CC9938E1F3DA /* TripDataHubWatch.app */,
+				6DB6247591FD18389FEA8F71 /* TripDataShareActionExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -197,15 +346,29 @@
 			path = Fonts;
 			sourceTree = "<group>";
 		};
+		5F1D542DBDDA89EDDFB89589 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				438EF6C95F92CC7E6B1BE26F /* WatchClockText.swift */,
+				804493101D7F3DCE7FDC3AF4 /* WatchEmptyStateView.swift */,
+				9A2E19B72139A4C0A1EE0C97 /* WatchOffDutyModeView.swift */,
+				F3D7B47FCAE28C5E496F6704 /* WatchProgressRing.swift */,
+				A9F9BC942330E37783331DBE /* WatchReserveModeView.swift */,
+				6A30F46BE4C18C6D4D0F1BC4 /* WatchTrainingModeView.swift */,
+				10476E3E32E316BCE04F4021 /* WatchTripModeView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
 		61C9603609A3BE24BCF74010 /* TripDataHub */ = {
 			isa = PBXGroup;
 			children = (
-				104E08AA2FAACD1200A732BF /* TripDataHubRelease.entitlements */,
 				906799561E65DB1AF44B2DE4 /* Assets.xcassets */,
 				0280B0ED64CBF38F6C06B873 /* Info.plist */,
 				3E72BFB505AAA65912E222FA /* LaunchScreen.storyboard */,
 				27B3B19D320BB806C27D1D1C /* TripDataHub.entitlements */,
 				9BDD762619119C64ED70F521 /* TripDataHubApp.swift */,
+				EB93AA8DEFC3BFC3256EBA03 /* TripDataHubRelease.entitlements */,
 				E904C8310067C98AD7B34FC0 /* Models */,
 				BEB29902AE998E036232CA65 /* Resources */,
 				AEF8401FA9AEE5505B4A6FA5 /* Services */,
@@ -215,14 +378,21 @@
 			path = TripDataHub;
 			sourceTree = "<group>";
 		};
+		66BEF73589C80EF702AD4B1F /* TripDataHubUITests */ = {
+			isa = PBXGroup;
+			children = (
+				2FF947013A4A08E8534AC00C /* LaunchBehaviorUITests.swift */,
+			);
+			path = TripDataHubUITests;
+			sourceTree = "<group>";
+		};
 		8E1D8F615703F82B2B79E175 /* Views */ = {
 			isa = PBXGroup;
 			children = (
-				AA060606BB060606CC060606 /* iPad */,
-				A1B2C3D4E5F60002AABBCC03 /* BrowserTabView.swift */,
-				A1B2C3D4E5F60002AABBCC02 /* BrowserWebView.swift */,
 				24F3AE1A0D7CD7D7B5816484 /* AdminSections.swift */,
 				F151A3C5326A78E7880243EB /* AdminTabView.swift */,
+				BEA20E261C3699D0271304A1 /* BrowserTabView.swift */,
+				915C9CB6A4D2781EE5230B0C /* BrowserWebView.swift */,
 				BD7C5B32EE84F84B8DB788FD /* CalendarSupport.swift */,
 				9C6A66B614D3A175C4E929D9 /* CrewAccessImportHelpView.swift */,
 				6DD141C17FE03A5610C7CD39 /* FriendsSupport.swift */,
@@ -233,14 +403,15 @@
 				3AE25B19B246FF6370CE9E6F /* OpenTimeTabView.swift */,
 				79E4DBC654459A337652E6EB /* OpenTimeTripDetailView.swift */,
 				ABBFA59E2733EED76133B12E /* RootTabView.swift */,
+				022B7246751D741B1792AE69 /* ScheduleTimelineRendererView.swift */,
 				D8A9A31A957111B4F5C5479E /* SettingsSections.swift */,
 				B75C57D0E8EA97E45C283A7B /* SettingsTabView.swift */,
-				51A7C9D1E2F3456789ABE000 /* ScheduleTimelineRendererView.swift */,
-				51A7C9D1E2F3456789ABF000 /* TimelineRowViews.swift */,
+				D9ED434951F84971C73C60F7 /* TimelineRowViews.swift */,
 				D1A53834B9B503F29F362404 /* TimelineSupport.swift */,
 				D5F00128A17C7CA217977EA7 /* TimelineTabView.swift */,
 				5B56C7C114EB63B94E2C3ED4 /* TripBoardLoginView.swift */,
 				1FDA7EA4639BB0121DD6B803 /* ViewShared.swift */,
+				CD888FE3611ECB37117BB290 /* iPad */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -248,49 +419,40 @@
 		9236B65BD3BA721359C38B56 /* ViewModels */ = {
 			isa = PBXGroup;
 			children = (
-				A1B2C3D4E5F60002AABBCC01 /* BrowserViewModel.swift */,
 				537DE7E0A39D9117D8B2DE33 /* AppViewModel.swift */,
 				FE4BC208606CA451400CC1BE /* AppViewModel+PreviewData.swift */,
+				B42AD5BA433A2A0FD44B41D5 /* BrowserViewModel.swift */,
 			);
 			path = ViewModels;
-			sourceTree = "<group>";
-		};
-		AA060606BB060606CC060606 /* iPad */ = {
-			isa = PBXGroup;
-			children = (
-				AA010101BB010101CC010101 /* iPadWorkspaceModels.swift */,
-				AA020202BB020202CC020202 /* iPadOperationalWorkspaceView.swift */,
-				AA030303BB030303CC030303 /* iPadBidPeriodCalendarView.swift */,
-				AA040404BB040404CC040404 /* iPadTripBarView.swift */,
-				AA050505BB050505CC050505 /* iPadTimelineSidebarView.swift */,
-			);
-			path = iPad;
 			sourceTree = "<group>";
 		};
 		AEF8401FA9AEE5505B4A6FA5 /* Services */ = {
 			isa = PBXGroup;
 			children = (
-				0F4A1B2C3D4E5F60718293A3 /* AppEnvironment.swift */,
+				6FA878543A7B3FFB0BC0D0E6 /* AppEnvironment.swift */,
 				9B6FCCCA54583B5E8D70721D /* BidPeriodService.swift */,
+				B3CE005F5518E5100BD8071A /* CrewAccessImportCloudKitService.swift */,
 				0AF942899EBB7E90814E4995 /* CrewAccessPDFImportService.swift */,
-				51A7C9D1E2F3456789ABD006 /* DomicileSupport.swift */,
-				9B958B23E0C844158F487B53 /* PDFTripParser.swift */,
+				D962E538C7E8E67240363969 /* CrewAccessTripSummaryStore.swift */,
+				679580A304D5D28CA5D2DB52 /* DeviceScheduleCloudKitService.swift */,
+				5DA89D2D4EE73D007B27D8F7 /* DomicileSupport.swift */,
 				4F6C86491D2E927C2CEC60D5 /* FlightCountdownCoordinator.swift */,
-				51A7C9D1E2F3456789ABC008 /* FriendScheduleCloudKitService.swift */,
-				51A7C9D1E2F3456789ABD000 /* GEMSVerificationCloudKitService.swift */,
-				BB01CC01DD01EE01FF010002 /* DeviceScheduleCloudKitService.swift */,
-				CC02DD02EE02FF02AA020002 /* CrewAccessImportCloudKitService.swift */,
-				DD03EE03FF03AA03BB030002 /* CrewAccessTripSummaryStore.swift */,
-				51A7C9D1E2F3456789ABD004 /* GEMSIDNormalizer.swift */,
-				51A7C9D1E2F3456789ABCF10 /* TripScheduleSnapshotEncoder.swift */,
+				2CA4B8F120FCBF73865EE520 /* FriendScheduleCloudKitService.swift */,
+				8490A3DF28BAEE6B4A7905D8 /* GEMSIDNormalizer.swift */,
+				FA62E9D401CEECCAA308A707 /* GEMSVerificationCloudKitService.swift */,
 				4FC85F3B696ED2DB2C56FC18 /* IATATimeZoneResolver.swift */,
 				EABE1DFB8EE6CCCF77FB5717 /* ImportFileSniffer.swift */,
 				7B4DAB3D177949F363100BE8 /* KeychainService.swift */,
 				26F1CF972BCCEF2CFFA1D9B1 /* NextReportNotificationService.swift */,
 				FC24A3084F1CB77216493907 /* NextReportWindowBuilder.swift */,
+				A472159ED43D1D3AE0B8922B /* PDFTripParser.swift */,
 				55E5301B208661C3E2632FC7 /* ScheduleCacheService.swift */,
 				42BF7C6110CAC60779B38CC7 /* TripBoardAuthService.swift */,
 				3A4FD2E096CBF54B7899BF9A /* TripBoardSyncService.swift */,
+				A29DAE34FE231561964648C1 /* TripScheduleSnapshotEncoder.swift */,
+				8B35A65D7AEC09261A2BAF9F /* WatchSessionManager.swift */,
+				A86CCF6977DD586C4A213F63 /* WatchSnapshotCoordinator.swift */,
+				A898003604679CB4C9FEEF7C /* WatchSnapshotGenerator.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -304,52 +466,93 @@
 			path = Resources;
 			sourceTree = "<group>";
 		};
+		C942BAC12A087C4293703407 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				C0DEDEB01558E828246C59A9 /* WatchConnectivity.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		CD888FE3611ECB37117BB290 /* iPad */ = {
+			isa = PBXGroup;
+			children = (
+				8D4D53F3DC79EADA851A73C6 /* iPadBidPeriodCalendarView.swift */,
+				53D43B2FDA88585324115FF9 /* iPadOperationalWorkspaceView.swift */,
+				F613274D8F1AD32132CC8601 /* iPadTimelineSidebarView.swift */,
+				A6D9C7C076517590A793657B /* iPadTripBarView.swift */,
+				CA43A088DA6CC56787500853 /* iPadWorkspaceModels.swift */,
+			);
+			path = iPad;
+			sourceTree = "<group>";
+		};
 		D101DDBB3D56809CEA7A0D66 /* TripDataHubTests */ = {
 			isa = PBXGroup;
 			children = (
+				F704B25EFA9967FD3C609BE4 /* AppViewModelDeviceSyncTests.swift */,
+				A3333297AB2139014598E2FD /* AppViewModelLogTenExportTests.swift */,
 				30EA7A40210086623915E4DE /* CalendarSupportTests.swift */,
-				51A7C9D1E2F3456789ABC010 /* AppViewModelLogTenExportTests.swift */,
-				51A7C9D1E2F3456789ABC004 /* CrewAccessParserRegressionTests.swift */,
-				51A7C9D1E2F3456789ABC006 /* ExternalOpenImportCoordinatorTests.swift */,
-				51A7C9D1E2F3456789ABC002 /* FriendScheduleMatchingTests.swift */,
-				51A7C9D1E2F3456789ABD002 /* GEMSVerificationCloudKitServiceTests.swift */,
-				BB01CC01DD01EE01FF010004 /* DeviceScheduleCloudKitServiceTests.swift */,
-				BB01CC01DD01EE01FF010006 /* AppViewModelDeviceSyncTests.swift */,
+				41B93306AF0DF77C8A58D12F /* CrewAccessImportCloudKitServiceTests.swift */,
+				A6525000DBE9BF9003668EC3 /* CrewAccessParserRegressionTests.swift */,
+				947E8F6FB100BB0AED4967CD /* DeviceScheduleCloudKitServiceTests.swift */,
+				8410083F38BBF0219A4F809B /* ExternalOpenImportCoordinatorTests.swift */,
 				58EB09BC72A13BE9062573CC /* FlightCountdownTests.swift */,
-				51A7C9D1E2F3456789ABCF12 /* TripScheduleSnapshotEncoderTests.swift */,
+				9148FEFD922511865B7B75D4 /* FriendScheduleMatchingTests.swift */,
+				C2C615E3B0D98F90EF0B9E71 /* GEMSVerificationCloudKitServiceTests.swift */,
+				A1682DE701661661F9C87C7D /* TripScheduleSnapshotEncoderTests.swift */,
+				EFAB72ABE9ACCFAF85F686C2 /* WatchSnapshotGeneratorTests.swift */,
+				A81FE0C4F278062E45175A1B /* WatchSnapshotTests.swift */,
+				0895426F330F88CC35014418 /* WatchTransportTests.swift */,
 			);
 			path = TripDataHubTests;
-			sourceTree = "<group>";
-		};
-		D101DDBB3D56809CEA7A0D67 /* TripDataHubUITests */ = {
-			isa = PBXGroup;
-			children = (
-				8AE54C1B2D3E4F5061728391 /* LaunchBehaviorUITests.swift */,
-			);
-			path = TripDataHubUITests;
 			sourceTree = "<group>";
 		};
 		DA29E1945D375877678093FD = {
 			isa = PBXGroup;
 			children = (
+				E8D6183FD3AD13E18E5B2EA5 /* TripDataCountdownWidgetExtension */,
 				61C9603609A3BE24BCF74010 /* TripDataHub */,
+				2B9F9950557D56C3AB9B37E7 /* TripDataHubShared */,
 				D101DDBB3D56809CEA7A0D66 /* TripDataHubTests */,
-				D101DDBB3D56809CEA7A0D67 /* TripDataHubUITests */,
+				66BEF73589C80EF702AD4B1F /* TripDataHubUITests */,
+				12035C3547B11E5407887E06 /* TripDataHubWatchApp */,
+				E685CDB9D85FE004BE3F46EF /* TripDataShareActionExtension */,
+				C942BAC12A087C4293703407 /* Frameworks */,
 				35A97BDAAEA706418C6B65F2 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		E685CDB9D85FE004BE3F46EF /* TripDataShareActionExtension */ = {
+			isa = PBXGroup;
+			children = (
+				527B5CCC7CF1CE523CBD5C0D /* Info.plist */,
+				294D51ABEDC7BE8DE4F66EED /* ShareViewController.swift */,
+				FBD9F22BB2B42C27B598C918 /* TripDataShareActionExtension.entitlements */,
+			);
+			path = TripDataShareActionExtension;
+			sourceTree = "<group>";
+		};
+		E8D6183FD3AD13E18E5B2EA5 /* TripDataCountdownWidgetExtension */ = {
+			isa = PBXGroup;
+			children = (
+				7A4B044C3B3AC3CB75F18470 /* Info.plist */,
+				5C08E1E529B18BA244811A48 /* TripDataCountdownWidget.swift */,
+				99864F714C5F48A6ECC8DFE3 /* TripDataCountdownWidgetExtension.entitlements */,
+			);
+			path = TripDataCountdownWidgetExtension;
 			sourceTree = "<group>";
 		};
 		E904C8310067C98AD7B34FC0 /* Models */ = {
 			isa = PBXGroup;
 			children = (
 				2C935139ABDF9C6B5FE71310 /* CalendarModels.swift */,
-				BB01CC01DD01EE01FF010000 /* DeviceScheduleModels.swift */,
+				88B5E9932D4ED582BB71316D /* DeviceScheduleModels.swift */,
 				58C18FF3A67E7E968B09F58E /* FlightCountdownSharedModels.swift */,
 				725719445A236E76E849AF2F /* FlightCountdownSupport.swift */,
-				51A7C9D1E2F3456789ABC000 /* FriendScheduleMatching.swift */,
+				890162126747FE986AEDD30B /* FriendScheduleMatching.swift */,
+				B0A40DFB2EF7B9A57798ECF9 /* RosterParsingModels.swift */,
 				3AA31B4F87A8944508CA4749 /* TripLegDisplaySupport.swift */,
 				8CD425A30028665C7AF3C26E /* TripModels.swift */,
-				0A05C7A4B4AE482294FEBB55 /* RosterParsingModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -375,23 +578,60 @@
 			productReference = 13F6EFC17A823450FE7E3210 /* TripDataHubTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		4D5E6F708192A3B4C5D6E7F8 /* TripDataHubUITests */ = {
+		2E91B7925779B508EFEEB211 /* TripDataHubUITests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 5E6F708192A3B4C5D6E7F809 /* Build configuration list for PBXNativeTarget "TripDataHubUITests" */;
+			buildConfigurationList = 718846603A6D36F0CAC24AE6 /* Build configuration list for PBXNativeTarget "TripDataHubUITests" */;
 			buildPhases = (
-				6F708192A3B4C5D6E7F8091A /* Sources */,
+				5D0CECBCDEA84A29EAE9C2C0 /* Sources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				7A8192A3B4C5D6E7F8091A2B /* PBXTargetDependency */,
+				BF3D95AB0458FADD6102DF03 /* PBXTargetDependency */,
 			);
 			name = TripDataHubUITests;
 			packageProductDependencies = (
 			);
 			productName = TripDataHubUITests;
-			productReference = 1BC23D4E5F60718293A4B5C6 /* TripDataHubUITests.xctest */;
+			productReference = 8A71866D79BF8FF757543B80 /* TripDataHubUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		629B3D6DDB789EA0AAE1A672 /* TripDataCountdownWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 984304DC475E6F7CB5D6F9A2 /* Build configuration list for PBXNativeTarget "TripDataCountdownWidgetExtension" */;
+			buildPhases = (
+				1A633D8D740DE09AAA71BD9B /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				7B3B1B256DEA999C438FDD88 /* PBXTargetDependency */,
+			);
+			name = TripDataCountdownWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = TripDataCountdownWidgetExtension;
+			productReference = 2715723CFCA0583F75104EF1 /* TripDataCountdownWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		661ED6C655BEF35C62D213A7 /* TripDataHubWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 914DD24198492A44EC526FD0 /* Build configuration list for PBXNativeTarget "TripDataHubWatch" */;
+			buildPhases = (
+				B10EDC56A24975C982A052CD /* Sources */,
+				BDAC2FE8A9D05526684D1AFE /* Resources */,
+				93FEE7616DAB99BFF977144C /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TripDataHubWatch;
+			packageProductDependencies = (
+			);
+			productName = TripDataHubWatch;
+			productReference = FEED69B5DE90CC9938E1F3DA /* TripDataHubWatch.app */;
+			productType = "com.apple.product-type.application";
 		};
 		9CDD311DB999C310E3ADCC73 /* TripDataHub */ = {
 			isa = PBXNativeTarget;
@@ -399,10 +639,13 @@
 			buildPhases = (
 				B649BC6D86A43D9C51B54C5F /* Sources */,
 				A66D1306FD49CF6110E3DE61 /* Resources */,
+				413D030851466CD865C83F21 /* Frameworks */,
+				989F303732246E4DC37FA9C7 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				4F1EC5FDC02E34C68D815953 /* PBXTargetDependency */,
 			);
 			name = TripDataHub;
 			packageProductDependencies = (
@@ -411,6 +654,24 @@
 			productReference = F518C211127FA260E6247ED8 /* TripDataHub.app */;
 			productType = "com.apple.product-type.application";
 		};
+		DD875065125E525A79261256 /* TripDataShareActionExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9E811B4864FE6FE7063BCD35 /* Build configuration list for PBXNativeTarget "TripDataShareActionExtension" */;
+			buildPhases = (
+				56ABAA8F9EAB0145E083F4FE /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				2AF288003D06B79CDDB1F060 /* PBXTargetDependency */,
+			);
+			name = TripDataShareActionExtension;
+			packageProductDependencies = (
+			);
+			productName = TripDataShareActionExtension;
+			productReference = 6DB6247591FD18389FEA8F71 /* TripDataShareActionExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -418,23 +679,32 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 2650;
+				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					06F2AF4905B951E2C0FF528F = {
+						DevelopmentTeam = 54WZM2U9MK;
 						ProvisioningStyle = Automatic;
 					};
-					4D5E6F708192A3B4C5D6E7F8 = {
+					2E91B7925779B508EFEEB211 = {
+						DevelopmentTeam = 54WZM2U9MK;
+						ProvisioningStyle = Automatic;
+						TestTargetID = 9CDD311DB999C310E3ADCC73;
+					};
+					629B3D6DDB789EA0AAE1A672 = {
+						DevelopmentTeam = 54WZM2U9MK;
+						ProvisioningStyle = Automatic;
+					};
+					661ED6C655BEF35C62D213A7 = {
+						DevelopmentTeam = 54WZM2U9MK;
 						ProvisioningStyle = Automatic;
 					};
 					9CDD311DB999C310E3ADCC73 = {
-						SystemCapabilities = {
-							com.apple.ApplicationGroups.iOS = {
-								enabled = 1;
-							};
-							com.apple.iCloud = {
-								enabled = 1;
-							};
-						};
+						DevelopmentTeam = 54WZM2U9MK;
+						ProvisioningStyle = Automatic;
+					};
+					DD875065125E525A79261256 = {
+						DevelopmentTeam = 54WZM2U9MK;
+						ProvisioningStyle = Automatic;
 					};
 				};
 			};
@@ -452,9 +722,12 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				629B3D6DDB789EA0AAE1A672 /* TripDataCountdownWidgetExtension */,
 				9CDD311DB999C310E3ADCC73 /* TripDataHub */,
 				06F2AF4905B951E2C0FF528F /* TripDataHubTests */,
-				4D5E6F708192A3B4C5D6E7F8 /* TripDataHubUITests */,
+				2E91B7925779B508EFEEB211 /* TripDataHubUITests */,
+				661ED6C655BEF35C62D213A7 /* TripDataHubWatch */,
+				DD875065125E525A79261256 /* TripDataShareActionExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -471,31 +744,80 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		BDAC2FE8A9D05526684D1AFE /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				25006D6D82CEBB8DD918C398 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		1A633D8D740DE09AAA71BD9B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				94D6405C334A97CF691121BA /* TripDataCountdownWidget.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		2CFED1ECABF6AF8EABDAADFD /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1212BF43E98EB31FB58E9A8F /* AppViewModelDeviceSyncTests.swift in Sources */,
+				68AE24D4DC9200A316B42E55 /* AppViewModelLogTenExportTests.swift in Sources */,
 				BCA4AE729D06B2ACB035CB39 /* CalendarSupportTests.swift in Sources */,
-				51A7C9D1E2F3456789ABC011 /* AppViewModelLogTenExportTests.swift in Sources */,
-				51A7C9D1E2F3456789ABC005 /* CrewAccessParserRegressionTests.swift in Sources */,
-				51A7C9D1E2F3456789ABC007 /* ExternalOpenImportCoordinatorTests.swift in Sources */,
-				51A7C9D1E2F3456789ABC003 /* FriendScheduleMatchingTests.swift in Sources */,
-				51A7C9D1E2F3456789ABD003 /* GEMSVerificationCloudKitServiceTests.swift in Sources */,
-				BB01CC01DD01EE01FF010005 /* DeviceScheduleCloudKitServiceTests.swift in Sources */,
-				BB01CC01DD01EE01FF010007 /* AppViewModelDeviceSyncTests.swift in Sources */,
+				95EA363B67369FCF2A615031 /* CrewAccessImportCloudKitServiceTests.swift in Sources */,
+				659F96191E8496BC418E8015 /* CrewAccessParserRegressionTests.swift in Sources */,
+				8A6763FD9E2EE3410248A68C /* DeviceScheduleCloudKitServiceTests.swift in Sources */,
+				6B9506F2B4875F005E21D1A7 /* ExternalOpenImportCoordinatorTests.swift in Sources */,
 				9599AC8B5334199EAAC4FC49 /* FlightCountdownTests.swift in Sources */,
-				51A7C9D1E2F3456789ABCF13 /* TripScheduleSnapshotEncoderTests.swift in Sources */,
+				E60E5972A4C84425D3942CFD /* FriendScheduleMatchingTests.swift in Sources */,
+				10FDE18BDE05FE8F1C1CFBF1 /* GEMSVerificationCloudKitServiceTests.swift in Sources */,
+				560C6AC50CBE2C357746B607 /* TripScheduleSnapshotEncoderTests.swift in Sources */,
+				7B58BDB3AFE1E62EC76B82CA /* WatchSnapshotGeneratorTests.swift in Sources */,
+				A7A1FA26E099D58187C6D27E /* WatchSnapshotTests.swift in Sources */,
+				786032686B5FE3D6C0D56A09 /* WatchTransportTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		6F708192A3B4C5D6E7F8091A /* Sources */ = {
+		56ABAA8F9EAB0145E083F4FE /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				8AE54C1B2D3E4F5061728392 /* LaunchBehaviorUITests.swift in Sources */,
+				67D77849AA568A57737B8039 /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5D0CECBCDEA84A29EAE9C2C0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FA08B0701796126497AB43BE /* LaunchBehaviorUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B10EDC56A24975C982A052CD /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				64B12838A132EC7DCB59EDB8 /* TripDataHubWatchApp.swift in Sources */,
+				29B12A11ADFA831DE009B36A /* WatchClockText.swift in Sources */,
+				3ECBB48FE6C7191F26D374C0 /* WatchEmptyStateView.swift in Sources */,
+				4880AC5677EDBF3B9668B2F3 /* WatchOffDutyModeView.swift in Sources */,
+				A58218652FAADAC038FC07E6 /* WatchOperationalMode.swift in Sources */,
+				C873F9D6C312A4C790E89630 /* WatchOperationalSnapshot.swift in Sources */,
+				D066058D150074B8B23AC5B0 /* WatchProgressRing.swift in Sources */,
+				2CD13A5C79CC96B4FD748A7D /* WatchReserveModeView.swift in Sources */,
+				E8D881766B246E8CFF442BB1 /* WatchRootView.swift in Sources */,
+				0265797D079B5C6759E4E85A /* WatchSessionReceiver.swift in Sources */,
+				99DA5AB7758A88455C929BBF /* WatchSnapshotStore.swift in Sources */,
+				0816E8851BD201BF2DF8AC31 /* WatchTrainingModeView.swift in Sources */,
+				9CD0181D8868373BC6D57B69 /* WatchTransportKey.swift in Sources */,
+				D3B46D762C2CE89BD8162A32 /* WatchTripModeView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -504,30 +826,32 @@
 			buildActionMask = 2147483647;
 			files = (
 				7DCBF996FF525485AECDAF4C /* AdminSections.swift in Sources */,
-				0F4A1B2C3D4E5F60718293A4 /* AppEnvironment.swift in Sources */,
 				5BF750A9EB06E31DED48688D /* AdminTabView.swift in Sources */,
+				D50EEB6012D9F93407B92FE0 /* AppEnvironment.swift in Sources */,
 				F4130D36B01FE4896582FC2F /* AppViewModel+PreviewData.swift in Sources */,
 				DEA186B6F8256B4A0B01C291 /* AppViewModel.swift in Sources */,
 				5C839E2F9397C27B75B962A9 /* BidPeriodService.swift in Sources */,
-				51A7C9D1E2F3456789ABD007 /* DomicileSupport.swift in Sources */,
+				1322F51E683F63D579467CC2 /* BrowserTabView.swift in Sources */,
+				0286C7D60F7772DFCFDB8797 /* BrowserViewModel.swift in Sources */,
+				3B9167DA193C6012D96B3376 /* BrowserWebView.swift in Sources */,
 				D7CF5354C3F636A38CCA3C27 /* CalendarModels.swift in Sources */,
 				6EC416FDFC26261153D10DD5 /* CalendarSupport.swift in Sources */,
+				C5194577FDCCA8F6FD89109E /* CrewAccessImportCloudKitService.swift in Sources */,
 				E1BDA32E3801BEDCB3C9A9E3 /* CrewAccessImportHelpView.swift in Sources */,
 				B52957FE513ECC9639B99496 /* CrewAccessPDFImportService.swift in Sources */,
+				0F605A8C9A8E2FF5A5CEC334 /* CrewAccessTripSummaryStore.swift in Sources */,
+				0B16D7ED1D2710ED3D2B006E /* DeviceScheduleCloudKitService.swift in Sources */,
+				708D64ABB3483E4BB24A0E10 /* DeviceScheduleModels.swift in Sources */,
+				7B628B2A32893468E96EAD80 /* DomicileSupport.swift in Sources */,
 				27B924E6CA6484B9156032EC /* FlightCountdownCoordinator.swift in Sources */,
 				1413F694AAE3B23F47C3C436 /* FlightCountdownSharedModels.swift in Sources */,
 				F6354A96AD43D1B5043CF4E3 /* FlightCountdownSupport.swift in Sources */,
-				51A7C9D1E2F3456789ABC009 /* FriendScheduleCloudKitService.swift in Sources */,
-				51A7C9D1E2F3456789ABC001 /* FriendScheduleMatching.swift in Sources */,
-				51A7C9D1E2F3456789ABD001 /* GEMSVerificationCloudKitService.swift in Sources */,
-				BB01CC01DD01EE01FF010001 /* DeviceScheduleModels.swift in Sources */,
-				BB01CC01DD01EE01FF010003 /* DeviceScheduleCloudKitService.swift in Sources */,
-				CC02DD02EE02FF02AA020003 /* CrewAccessImportCloudKitService.swift in Sources */,
-				DD03EE03FF03AA03BB030003 /* CrewAccessTripSummaryStore.swift in Sources */,
-				51A7C9D1E2F3456789ABD005 /* GEMSIDNormalizer.swift in Sources */,
-				51A7C9D1E2F3456789ABCF11 /* TripScheduleSnapshotEncoder.swift in Sources */,
+				235EF66A04B56236E1DFB575 /* FriendScheduleCloudKitService.swift in Sources */,
+				86F8A20621DA16666563F01C /* FriendScheduleMatching.swift in Sources */,
 				770DDB243CCA709322ED76E2 /* FriendsSupport.swift in Sources */,
 				3922CFC31FEDE9EC3DFB97BC /* FriendsTabView.swift in Sources */,
+				8410F992AB2AB4380AE193D2 /* GEMSIDNormalizer.swift in Sources */,
+				FA94D0C6D17D66FB42335FF5 /* GEMSVerificationCloudKitService.swift in Sources */,
 				4C5EC0A3F2B851101A6DF46D /* IATATimeZoneResolver.swift in Sources */,
 				F7B3BF9F00B694A47A128868 /* ImportFileSniffer.swift in Sources */,
 				CE0849FD7F7F3F22C65211EE /* ImportPreviewView.swift in Sources */,
@@ -538,12 +862,14 @@
 				A1D82A544C65FC9E6F2AB004 /* OpenTimeSupport.swift in Sources */,
 				3A2F50E0D4536F59A322FEAB /* OpenTimeTabView.swift in Sources */,
 				EBA28E56AF2F56DCDE5095FA /* OpenTimeTripDetailView.swift in Sources */,
+				A4ED9ABB8F67870FDF6DC827 /* PDFTripParser.swift in Sources */,
 				D62D823638EA9042B84575C1 /* RootTabView.swift in Sources */,
+				9CC4DBFF8DD7A807E39DE379 /* RosterParsingModels.swift in Sources */,
 				0E0B9373BE80E5F6829F98D6 /* ScheduleCacheService.swift in Sources */,
+				E9B2B40C2DFECBEBF71B41E9 /* ScheduleTimelineRendererView.swift in Sources */,
 				4016A931F2EA6DCF07900791 /* SettingsSections.swift in Sources */,
 				C6DAD0A1BE825FB0BA256D13 /* SettingsTabView.swift in Sources */,
-				51A7C9D1E2F3456789ABE001 /* ScheduleTimelineRendererView.swift in Sources */,
-				51A7C9D1E2F3456789ABF001 /* TimelineRowViews.swift in Sources */,
+				719410C44B68713EC3242D79 /* TimelineRowViews.swift in Sources */,
 				95B113CB364AA3060CA5D213 /* TimelineSupport.swift in Sources */,
 				FCAF8CC3DA62D71F1FCBE6B8 /* TimelineTabView.swift in Sources */,
 				118967E43FF2203DAB98B97C /* TripBoardAuthService.swift in Sources */,
@@ -552,36 +878,140 @@
 				C8D9B5BF0F2E0E10EFC1355F /* TripDataHubApp.swift in Sources */,
 				32AB31ECA2C3DA85192193E3 /* TripLegDisplaySupport.swift in Sources */,
 				E72B7C0A1DA5134DAF4551D7 /* TripModels.swift in Sources */,
-				A1B2C3D4E5F60001AABBCC01 /* BrowserViewModel.swift in Sources */,
-				A1B2C3D4E5F60001AABBCC02 /* BrowserWebView.swift in Sources */,
-				A1B2C3D4E5F60001AABBCC03 /* BrowserTabView.swift in Sources */,
-				AA010101BB010101CC010102 /* iPadWorkspaceModels.swift in Sources */,
-				AA020202BB020202CC020202B /* iPadOperationalWorkspaceView.swift in Sources */,
-				AA030303BB030303CC030303B /* iPadBidPeriodCalendarView.swift in Sources */,
-				AA040404BB040404CC040404B /* iPadTripBarView.swift in Sources */,
-				AA050505BB050505CC050505B /* iPadTimelineSidebarView.swift in Sources */,
-				67A567A25FC047F6B0E1810E /* PDFTripParser.swift in Sources */,
-				95CC4D2499E74AA4A2CACDDE /* RosterParsingModels.swift in Sources */,
+				657CE0BD8328A988EB6D9DAF /* TripScheduleSnapshotEncoder.swift in Sources */,
 				060126BA99293293402CEC00 /* ViewShared.swift in Sources */,
+				309AE65AD8BCD28B3CB7D877 /* WatchOperationalMode.swift in Sources */,
+				39637DBE2DA5BE117BB324E9 /* WatchOperationalSnapshot.swift in Sources */,
+				35E055F7469305749B843618 /* WatchSessionManager.swift in Sources */,
+				2BA380C403967D35505963E1 /* WatchSnapshotCoordinator.swift in Sources */,
+				F454F43CAE37B445048E622E /* WatchSnapshotGenerator.swift in Sources */,
+				5D6FCE60DE22F8F2D15DEB20 /* WatchTransportKey.swift in Sources */,
+				BDB5E75E3F22104CE4F4E4BA /* iPadBidPeriodCalendarView.swift in Sources */,
+				EBF81EC14EC47BBD406A4912 /* iPadOperationalWorkspaceView.swift in Sources */,
+				CE14183F65070B2295103E1C /* iPadTimelineSidebarView.swift in Sources */,
+				87418240871BAEDE8B2124F2 /* iPadTripBarView.swift in Sources */,
+				D699779CEC9D10066F5AF038 /* iPadWorkspaceModels.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		7A8192A3B4C5D6E7F8091A2B /* PBXTargetDependency */ = {
+		2AF288003D06B79CDDB1F060 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 9CDD311DB999C310E3ADCC73 /* TripDataHub */;
-			targetProxy = 30A401B24E2279426942B203 /* PBXContainerItemProxy */;
+			targetProxy = CF45968C2728032AE5858E80 /* PBXContainerItemProxy */;
+		};
+		4F1EC5FDC02E34C68D815953 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 661ED6C655BEF35C62D213A7 /* TripDataHubWatch */;
+			targetProxy = 5328BFFFB604553C82EBC412 /* PBXContainerItemProxy */;
+		};
+		7B3B1B256DEA999C438FDD88 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9CDD311DB999C310E3ADCC73 /* TripDataHub */;
+			targetProxy = 127FF9DDB7833EA6C3E6CF7E /* PBXContainerItemProxy */;
 		};
 		ACCF85D1355AE5B839C9740B /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 9CDD311DB999C310E3ADCC73 /* TripDataHub */;
 			targetProxy = 30A401B24E2279426942B203 /* PBXContainerItemProxy */;
 		};
+		BF3D95AB0458FADD6102DF03 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9CDD311DB999C310E3ADCC73 /* TripDataHub */;
+			targetProxy = A1817BA7C7786FFF291C4F81 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		0BD4BF1EB315B28575D9E791 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = TripDataCountdownWidgetExtension/TripDataCountdownWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 55;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
+				INFOPLIST_FILE = TripDataCountdownWidgetExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.3;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule.CountdownWidget;
+				PRODUCT_NAME = TripDataCountdownWidgetExtension;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		0E47E1412269279455E023D0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = TripDataShareActionExtension/TripDataShareActionExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 55;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
+				INFOPLIST_FILE = TripDataShareActionExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.3;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule.ShareAction;
+				PRODUCT_NAME = TripDataShareActionExtension;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		1677A20E58D2CFF6248F2D99 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = TripDataShareActionExtension/TripDataShareActionExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 55;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
+				INFOPLIST_FILE = TripDataShareActionExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.3;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule.ShareAction;
+				PRODUCT_NAME = TripDataShareActionExtension;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		18232A930F57239BD1E49B6D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 55;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "TripData Hub";
+				INFOPLIST_KEY_WKApplication = YES;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.sfune.BidProSchedule;
+				MARKETING_VERSION = 1.0.3;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule.watchkitapp;
+				PRODUCT_NAME = TripDataHubWatch;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Debug;
+		};
 		35CA3FDA39F4D03F6D829BDE /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -617,10 +1047,8 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -633,11 +1061,31 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
+		};
+		376663631713CAEF11376F58 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = TripDataCountdownWidgetExtension/TripDataCountdownWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 55;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
+				INFOPLIST_FILE = TripDataCountdownWidgetExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.3;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule.CountdownWidget;
+				PRODUCT_NAME = TripDataCountdownWidgetExtension;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
@@ -646,6 +1094,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -663,23 +1112,32 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = TripDataHub/TripDataHub.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 54;
+				CURRENT_PROJECT_VERSION = 55;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TripDataHub/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = TripDataHub;
+				INFOPLIST_KEY_CFBundleDisplayName = "TripData Hub";
 				INFOPLIST_KEY_CFBundleIconName = AppIcon;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
-				INFOPLIST_KEY_UIAppFonts = Resources/Fonts/MaterialIcons.ttf;
+				INFOPLIST_KEY_UIAppFonts = (
+					Resources/Fonts/MaterialIcons.ttf,
+				);
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = (
+					UIInterfaceOrientationPortrait,
+					UIInterfaceOrientationPortraitUpsideDown,
+					UIInterfaceOrientationLandscapeLeft,
+					UIInterfaceOrientationLandscapeRight,
+				);
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = (
+					UIInterfaceOrientationLandscapeLeft,
+					UIInterfaceOrientationLandscapeRight,
+				);
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -693,11 +1151,18 @@
 			};
 			name = Debug;
 		};
-		93A4B5C6D7E8F90123456789 /* Debug */ = {
+		9C543DBF8942358A758CD59B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule.UITests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -740,10 +1205,8 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -763,8 +1226,6 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.9;
@@ -775,24 +1236,32 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
-				CODE_SIGN_ENTITLEMENTS = TripDataHub/TripDataHubRelease.entitlements;
-				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_ENTITLEMENTS = TripDataHub/TripDataHub.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 54;
+				CURRENT_PROJECT_VERSION = 55;
 				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TripDataHub/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = TripDataHub;
+				INFOPLIST_KEY_CFBundleDisplayName = "TripData Hub";
 				INFOPLIST_KEY_CFBundleIconName = AppIcon;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
-				INFOPLIST_KEY_UIAppFonts = Resources/Fonts/MaterialIcons.ttf;
+				INFOPLIST_KEY_UIAppFonts = (
+					Resources/Fonts/MaterialIcons.ttf,
+				);
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = (
+					UIInterfaceOrientationPortrait,
+					UIInterfaceOrientationPortraitUpsideDown,
+					UIInterfaceOrientationLandscapeLeft,
+					UIInterfaceOrientationLandscapeRight,
+				);
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = (
+					UIInterfaceOrientationLandscapeLeft,
+					UIInterfaceOrientationLandscapeRight,
+				);
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -801,9 +1270,29 @@
 				MARKETING_VERSION = 1.0.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule;
 				PRODUCT_NAME = TripDataHub;
-				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		AD9BCCEE313C656E73419310 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 55;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "TripData Hub";
+				INFOPLIST_KEY_WKApplication = YES;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.sfune.BidProSchedule;
+				MARKETING_VERSION = 1.0.3;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule.watchkitapp;
+				PRODUCT_NAME = TripDataHubWatch;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
 			};
 			name = Release;
 		};
@@ -812,6 +1301,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -825,11 +1315,18 @@
 			};
 			name = Debug;
 		};
-		C4D5E6F708192A3B4C5D6E7F /* Release */ = {
+		FE7A9FC5F905887B1E6A1A7A /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule.UITests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -858,11 +1355,38 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
-		5E6F708192A3B4C5D6E7F809 /* Build configuration list for PBXNativeTarget "TripDataHubUITests" */ = {
+		718846603A6D36F0CAC24AE6 /* Build configuration list for PBXNativeTarget "TripDataHubUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				93A4B5C6D7E8F90123456789 /* Debug */,
-				C4D5E6F708192A3B4C5D6E7F /* Release */,
+				9C543DBF8942358A758CD59B /* Debug */,
+				FE7A9FC5F905887B1E6A1A7A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		914DD24198492A44EC526FD0 /* Build configuration list for PBXNativeTarget "TripDataHubWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				18232A930F57239BD1E49B6D /* Debug */,
+				AD9BCCEE313C656E73419310 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		984304DC475E6F7CB5D6F9A2 /* Build configuration list for PBXNativeTarget "TripDataCountdownWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0BD4BF1EB315B28575D9E791 /* Debug */,
+				376663631713CAEF11376F58 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		9E811B4864FE6FE7063BCD35 /* Build configuration list for PBXNativeTarget "TripDataShareActionExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1677A20E58D2CFF6248F2D99 /* Debug */,
+				0E47E1412269279455E023D0 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

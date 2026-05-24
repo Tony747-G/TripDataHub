@@ -467,6 +467,8 @@ final class FlightCountdownLegConversionTests: XCTestCase {
         arrAirport: String = "NRT",
         depUTC: String? = FlightCountdownLegConversionTests.depUTCString,
         arrUTC: String? = FlightCountdownLegConversionTests.arrUTCString,
+        stdUTC: String? = nil,
+        staUTC: String? = nil,
         status: String = "-"
     ) -> TripLeg {
         TripLeg(
@@ -481,7 +483,9 @@ final class FlightCountdownLegConversionTests: XCTestCase {
             depUTC: depUTC,
             arrUTC: arrUTC,
             status: status,
-            block: "9:00"
+            block: "9:00",
+            stdUTC: stdUTC,
+            staUTC: staUTC
         )
     }
 
@@ -493,8 +497,18 @@ final class FlightCountdownLegConversionTests: XCTestCase {
         XCTAssertNil(makeTripLeg(depUTC: nil).countdownLeg())
     }
 
+    func test_countdownLeg_missingDepUTC_usesStdUTC() {
+        let leg = makeTripLeg(depUTC: nil, stdUTC: Self.depUTCString).countdownLeg()
+        XCTAssertEqual(leg?.scheduledDepartureUTC, LegConnectionTextBuilder.parseUTC(Self.depUTCString))
+    }
+
     func test_countdownLeg_missingArrUTC_returnsNil() {
         XCTAssertNil(makeTripLeg(arrUTC: nil).countdownLeg())
+    }
+
+    func test_countdownLeg_missingArrUTC_usesStaUTC() {
+        let leg = makeTripLeg(arrUTC: nil, staUTC: Self.arrUTCString).countdownLeg()
+        XCTAssertEqual(leg?.scheduledArrivalUTC, LegConnectionTextBuilder.parseUTC(Self.arrUTCString))
     }
 
     func test_countdownLeg_unknownDepartureAirport_returnsNil() {

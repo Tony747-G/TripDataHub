@@ -186,8 +186,8 @@ extension TripLeg {
     }
 
     func countdownLeg(tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared) -> FlightCountdownLeg? {
-        guard let scheduledDepartureUTC = LegConnectionTextBuilder.parseUTC(depUTC),
-              let scheduledArrivalUTC = LegConnectionTextBuilder.parseUTC(arrUTC),
+        guard let scheduledDepartureUTC = LegConnectionTextBuilder.parseUTC(depUTC) ?? LegConnectionTextBuilder.parseUTC(stdUTC),
+              let scheduledArrivalUTC = LegConnectionTextBuilder.parseUTC(arrUTC) ?? LegConnectionTextBuilder.parseUTC(staUTC),
               let departureTimeZoneID = tzResolver.resolve(depAirport),
               let arrivalTimeZoneID = tzResolver.resolve(arrAirport)
         else {

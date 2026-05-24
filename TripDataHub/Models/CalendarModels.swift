@@ -82,6 +82,7 @@ enum CrewBase: String, CaseIterable, Identifiable, Codable, Hashable {
 enum OperationalSettings {
     static let crewBaseKey = "crew_base"
     static let defaultCrewBase = CrewBase.anc
+    static let crewBaseDidChangeNotification = Notification.Name("OperationalSettingsCrewBaseDidChange")
 
     static func selectedCrewBase(defaults: UserDefaults = .standard) -> CrewBase {
         CrewBase(rawValue: defaults.string(forKey: crewBaseKey) ?? "") ?? defaultCrewBase
@@ -89,6 +90,7 @@ enum OperationalSettings {
 
     static func setSelectedCrewBase(_ crewBase: CrewBase, defaults: UserDefaults = .standard) {
         defaults.set(crewBase.rawValue, forKey: crewBaseKey)
+        NotificationCenter.default.post(name: crewBaseDidChangeNotification, object: nil)
     }
 }
 

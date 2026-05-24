@@ -324,7 +324,10 @@ struct SettingsCrewBaseSection: View {
     private var crewBaseBinding: Binding<CrewBase> {
         Binding(
             get: { CrewBase(rawValue: crewBaseRawValue) ?? OperationalSettings.defaultCrewBase },
-            set: { crewBaseRawValue = $0.rawValue }
+            set: {
+                crewBaseRawValue = $0.rawValue
+                OperationalSettings.setSelectedCrewBase($0)
+            }
         )
     }
 
@@ -377,6 +380,15 @@ private enum ManualEventClockDisplay: String, CaseIterable, Identifiable {
     case utc = "UTC"
 
     var id: String { rawValue }
+
+    func displayLabel(for crewBase: CrewBase) -> String {
+        switch self {
+        case .ldt:
+            return crewBase.rawValue
+        case .utc:
+            return "UTC"
+        }
+    }
 }
 
 struct ManualEventAddSheet: View {
@@ -569,7 +581,7 @@ struct ManualEventAddSheet: View {
             if let range = defaultOperationalRange, let autoEvent = autoFilledOperationalEvent {
                 DatePicker("Start Date", selection: $startDate, displayedComponents: .date)
                 LabeledContent("Auto Fill") {
-                    Text("\(range.start.displayHHMM) - \(range.end.displayHHMM) LDT")
+                    Text("\(range.start.displayHHMM) - \(range.end.displayHHMM) \(selectedCrewBase.rawValue)")
                 }
                 DatePicker(
                     "End Date",
@@ -587,7 +599,7 @@ struct ManualEventAddSheet: View {
             } else {
                 DatePicker("Start", selection: $startDate, displayedComponents: [.date, .hourAndMinute])
                 DatePicker("End", selection: $endDate, displayedComponents: [.date, .hourAndMinute])
-                Text("No default time range is defined for \(selectedCrewBase.rawValue) + \(operationalCode.rawValue). Enter start and end time in LDT.")
+                Text("No default time range is defined for \(selectedCrewBase.rawValue) + \(operationalCode.rawValue). Enter start and end time in \(selectedCrewBase.rawValue).")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -608,7 +620,7 @@ struct ManualEventAddSheet: View {
                 set: { manualEventClockDisplayRawValue = $0.rawValue }
             )) {
                 ForEach(ManualEventClockDisplay.allCases) { mode in
-                    Text(mode.rawValue).tag(mode)
+                    Text(mode.displayLabel(for: selectedCrewBase)).tag(mode)
                 }
             }
             .pickerStyle(.segmented)
@@ -616,7 +628,7 @@ struct ManualEventAddSheet: View {
                 .environment(\.timeZone, selectedInputTimeZone)
             DatePicker("End", selection: $endDate, displayedComponents: [.date, .hourAndMinute])
                 .environment(\.timeZone, selectedInputTimeZone)
-            Text(selectedManualEventClockDisplay == .utc ? "Times are entered in UTC." : "Times are entered in Crew Domicile LDT.")
+            Text(selectedManualEventClockDisplay == .utc ? "Times are entered in UTC." : "Times are entered in \(selectedCrewBase.rawValue).")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         } header: {
@@ -731,9 +743,19 @@ struct ManualEventDetailSheet: View {
                     detailRow("Code", title)
                     if let operationalEvent {
                         detailRow("Crew Domicile", operationalEvent.crewBase.displayName)
-                        detailRow("Time", timeRangeText(start: operationalEvent.startUTC, end: operationalEvent.endUTC, timeZone: operationalEvent.crewBase.timeZone))
+                        detailRow("Time", timeRangeText(
+                            start: operationalEvent.startUTC,
+                            end: operationalEvent.endUTC,
+                            timeZone: operationalEvent.crewBase.timeZone,
+                            displayBase: operationalEvent.crewBase
+                        ))
                     } else if let personalEvent {
-                        detailRow("Time", timeRangeText(start: personalEvent.startUTC, end: personalEvent.endUTC, timeZone: selectedCrewBase.timeZone))
+                        detailRow("Time", timeRangeText(
+                            start: personalEvent.startUTC,
+                            end: personalEvent.endUTC,
+                            timeZone: selectedCrewBase.timeZone,
+                            displayBase: selectedCrewBase
+                        ))
                     }
                     if let notes = operationalEvent?.notes ?? personalEvent?.notes, !notes.isEmpty {
                         detailRow("Notes", notes)
@@ -809,13 +831,14 @@ struct ManualEventDetailSheet: View {
         }
     }
 
-    private func timeRangeText(start: Date, end: Date, timeZone: TimeZone) -> String {
+    private func timeRangeText(start: Date, end: Date, timeZone: TimeZone, displayBase: CrewBase) -> String {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = selectedManualEventClockDisplay == .utc ? (TimeZone(secondsFromGMT: 0) ?? .gmt) : timeZone
         formatter.dateFormat = "MMM d HH:mm"
-        return "\(formatter.string(from: start)) - \(formatter.string(from: end)) \(selectedManualEventClockDisplay.rawValue)"
+        let suffix = selectedManualEventClockDisplay.displayLabel(for: displayBase)
+        return "\(formatter.string(from: start)) - \(formatter.string(from: end)) \(suffix)"
     }
 
     private func detailRow(_ label: String, _ value: String) -> some View {

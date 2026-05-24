@@ -50,6 +50,11 @@ enum ExternalOpenLaunchGate {
 @main
 struct TripDataHubApp: App {
     private let viewModel = AppViewModel.shared
+    private let watchCoordinator = WatchSnapshotCoordinator()
+
+    init() {
+        WatchSessionManager.shared.activate()
+    }
 
     var body: some Scene {
         WindowGroup {
