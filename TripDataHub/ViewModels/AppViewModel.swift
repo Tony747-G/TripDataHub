@@ -1245,9 +1245,15 @@ final class AppViewModel: ObservableObject {
             var writtenCount = 0
             for record in records {
                 let url = dir.appendingPathComponent(record.fileName)
-                if record.deletedAt != nil {
-                    // Tombstoned: remove local file if present.
-                    if fm.fileExists(atPath: url.path) { try? fm.removeItem(at: url) }
+                let localModifiedAt = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                if let deletedAt = record.deletedAt {
+                    // Tombstoned remotely: remove local file only when the tombstone is
+                    // newer than the local JSON. A re-import can recreate the same file
+                    // name after an older tombstone; in that case local import wins.
+                    if fm.fileExists(atPath: url.path),
+                       localModifiedAt.map({ deletedAt >= $0 }) ?? true {
+                        try? fm.removeItem(at: url)
+                    }
                     continue
                 }
                 if Self.crewAccessTripKey(fromCloudKitRecord: record).map({ deletedCrewAccessTripKeys.contains($0) }) == true {
@@ -1257,7 +1263,6 @@ final class AppViewModel: ObservableObject {
                 }
                 try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
                 let fileURL = url
-                let localModifiedAt = (try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
                 guard localModifiedAt == nil || record.updatedAt > localModifiedAt! else { continue }
                 try? record.jsonData.write(to: fileURL)
                 writtenCount += 1

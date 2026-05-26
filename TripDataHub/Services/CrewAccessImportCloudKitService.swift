@@ -98,6 +98,10 @@ final class CrewAccessImportCloudKitService: CrewAccessImportCloudKitServicing, 
         if let dep = firstDepartureUTC {
             record[Field.firstDepartureUTC] = dep as CKRecordValue
         }
+        // A re-import can reuse the same CloudKit record after a previous local delete
+        // tombstoned it. Clear the tombstone so startup fetch does not delete the
+        // freshly imported local JSON again.
+        record[Field.deletedAt] = nil
         record[Field.updatedAt] = Date() as CKRecordValue
         record[Field.schemaVersion] = Int64(Self.schemaVersion) as CKRecordValue
 
