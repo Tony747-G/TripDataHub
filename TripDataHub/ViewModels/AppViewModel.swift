@@ -4053,11 +4053,14 @@ final class AppViewModel: ObservableObject {
     }
 
     func deleteLocalProfileAccount() {
+        // Reset local updatedAt to epoch so this device's stale data
+        // cannot win a future last-write-wins conflict.
+        UserDefaults.standard.set(0.0, forKey: ProfileStorageKeys.updatedAt)
         verifiedIdentity = nil
         identityActionMessage = nil
         clearVerifiedIdentity()
         Task {
-            await deleteProfileFromCloudKit()
+            await writeProfileTombstoneToCloudKit()
         }
     }
 
@@ -4084,7 +4087,7 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    /// Uploads current local profile to CloudKit. Called after the user edits profile fields.
+    /// Uploads current local profile to CloudKit. Called on ProfileTabView dismiss.
     func uploadProfileToCloudKit() async {
         let snapshot = ProfileSnapshot.loadFromLocalStorage()
         guard snapshot.hasContent else { return }
@@ -4095,18 +4098,27 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    /// Marks the profile as edited now and uploads to CloudKit.
-    /// Call when any user-editable profile field changes.
-    func markProfileUpdatedAndUpload() {
+    /// Updates `updatedAt` in UserDefaults only — no CloudKit call.
+    /// Use on per-field onChange. The actual upload fires on view dismiss.
+    func markProfileUpdated() {
         UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: ProfileStorageKeys.updatedAt)
-        Task { await uploadProfileToCloudKit() }
     }
 
-    private func deleteProfileFromCloudKit() async {
+    /// Writes an empty profile tombstone to CloudKit so other devices detect the
+    /// deletion via last-write-wins (`tombstone.updatedAt > their local.updatedAt`).
+    /// Does NOT call CKDatabase.delete — the record stays, content is cleared.
+    private func writeProfileTombstoneToCloudKit() async {
+        let tombstone = ProfileSnapshot(
+            gemsID: "", displayName: "", fleet: "", base: "", position: "",
+            avatarImageData: nil,
+            updatedAt: Date(),   // must be newer than any device's local updatedAt
+            lastSeenAt: nil
+        )
         do {
-            try await profileCloudKitService.deleteProfile()
+            try await profileCloudKitService.saveProfile(tombstone)
         } catch {
-            logNonFatal("Profile CloudKit delete failed (non-fatal): \(error.localizedDescription)")
+            // Non-fatal: local delete already succeeded.
+            logNonFatal("Profile CloudKit tombstone write failed: \(error.localizedDescription)")
         }
     }
 

@@ -138,11 +138,15 @@ struct ProfileTabView: View {
                 // Upload any edits made during this session.
                 Task { await viewModel.uploadProfileToCloudKit() }
             }
-            .onChange(of: displayName) { _, _ in viewModel.markProfileUpdatedAndUpload() }
-            .onChange(of: fleetRawValue) { _, _ in viewModel.markProfileUpdatedAndUpload() }
-            .onChange(of: baseRawValue) { _, _ in viewModel.markProfileUpdatedAndUpload() }
-            .onChange(of: qualificationRawValue) { _, _ in viewModel.markProfileUpdatedAndUpload() }
-            .onChange(of: avatarImageData) { _, _ in viewModel.markProfileUpdatedAndUpload() }
+            // Per-field changes: stamp updatedAt immediately so the timestamp
+            // is accurate even if the app is killed before onDisappear fires.
+            // The CloudKit upload itself is batched to onDisappear to avoid
+            // per-keystroke network calls while the user is still typing.
+            .onChange(of: displayName) { _, _ in viewModel.markProfileUpdated() }
+            .onChange(of: fleetRawValue) { _, _ in viewModel.markProfileUpdated() }
+            .onChange(of: baseRawValue) { _, _ in viewModel.markProfileUpdated() }
+            .onChange(of: qualificationRawValue) { _, _ in viewModel.markProfileUpdated() }
+            .onChange(of: avatarImageData) { _, _ in viewModel.markProfileUpdated() }
             .alert("Delete Account?", isPresented: $isShowingDeleteAccountConfirmation) {
                 Button("Cancel", role: .cancel) {}
                 Button("Delete Account", role: .destructive) {
