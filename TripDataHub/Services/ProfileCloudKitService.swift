@@ -1,0 +1,145 @@
+import CloudKit
+import Foundation
+
+// MARK: - Database protocol (injectable for testing)
+
+protocol ProfileCloudKitDatabase {
+    func record(for recordID: CKRecord.ID) async throws -> CKRecord
+    func save(_ record: CKRecord) async throws -> CKRecord
+    @discardableResult
+    func deleteRecord(withID recordID: CKRecord.ID) async throws -> CKRecord.ID
+}
+
+extension CKDatabase: ProfileCloudKitDatabase {}
+
+// MARK: - Service protocol
+
+protocol ProfileCloudKitServicing: Sendable {
+    func fetchProfile() async throws -> ProfileSnapshot?
+    func saveProfile(_ snapshot: ProfileSnapshot) async throws
+    func deleteProfile() async throws
+}
+
+// MARK: - Implementation
+
+final class ProfileCloudKitService: ProfileCloudKitServicing, @unchecked Sendable {
+
+    private enum RecordType {
+        static let profile = "Profile"
+    }
+
+    private enum Field {
+        static let gemsID = "gemsID"
+        static let displayName = "displayName"
+        static let fleet = "fleet"
+        static let base = "base"
+        static let position = "position"
+        static let avatarAsset = "avatarAsset"
+        static let updatedAt = "updatedAt"
+        static let lastSeenAt = "lastSeenAt"
+    }
+
+    /// Fixed record ID — one profile per iCloud user.
+    /// GEMS ID is NOT used in the record ID to protect privacy.
+    static let recordID = CKRecord.ID(recordName: "currentUserProfile")
+
+    private let containerIdentifier: String
+    private let databaseProvider: () -> ProfileCloudKitDatabase
+
+    init(containerIdentifier: String) {
+        self.containerIdentifier = containerIdentifier
+        self.databaseProvider = {
+            CKContainer(identifier: containerIdentifier).privateCloudDatabase
+        }
+    }
+
+    init(databaseProvider: @escaping () -> ProfileCloudKitDatabase) {
+        self.containerIdentifier = "test"
+        self.databaseProvider = databaseProvider
+    }
+
+    // MARK: - Fetch
+
+    func fetchProfile() async throws -> ProfileSnapshot? {
+        let database = databaseProvider()
+        let record: CKRecord
+        do {
+            record = try await database.record(for: Self.recordID)
+        } catch let error as CKError where error.code == .unknownItem {
+            return nil
+        }
+        return profileSnapshot(from: record)
+    }
+
+    // MARK: - Save
+
+    func saveProfile(_ snapshot: ProfileSnapshot) async throws {
+        let database = databaseProvider()
+        let record: CKRecord
+        do {
+            record = try await database.record(for: Self.recordID)
+        } catch let error as CKError where error.code == .unknownItem {
+            record = CKRecord(recordType: RecordType.profile, recordID: Self.recordID)
+        }
+
+        record[Field.gemsID] = snapshot.gemsID as CKRecordValue
+        record[Field.displayName] = snapshot.displayName as CKRecordValue
+        record[Field.fleet] = snapshot.fleet as CKRecordValue
+        record[Field.base] = snapshot.base as CKRecordValue
+        record[Field.position] = snapshot.position as CKRecordValue
+        record[Field.updatedAt] = snapshot.updatedAt as CKRecordValue
+        if let lastSeen = snapshot.lastSeenAt {
+            record[Field.lastSeenAt] = lastSeen as CKRecordValue
+        }
+
+        // Avatar: write to a temp file, create CKAsset, clean up after save.
+        var tempURL: URL?
+        if let avatarData = snapshot.avatarImageData, !avatarData.isEmpty {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("profile_avatar_\(UUID().uuidString).jpg")
+            try avatarData.write(to: url)
+            record[Field.avatarAsset] = CKAsset(fileURL: url)
+            tempURL = url
+        } else {
+            record[Field.avatarAsset] = nil
+        }
+
+        defer {
+            if let url = tempURL {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+
+        try await database.save(record)
+    }
+
+    // MARK: - Delete
+
+    func deleteProfile() async throws {
+        let database = databaseProvider()
+        do {
+            try await database.deleteRecord(withID: Self.recordID)
+        } catch let error as CKError where error.code == .unknownItem {
+            // Already gone — treat as success.
+        }
+    }
+
+    // MARK: - Mapping
+
+    private func profileSnapshot(from record: CKRecord) -> ProfileSnapshot {
+        let avatarData: Data? = (record[Field.avatarAsset] as? CKAsset)
+            .flatMap { $0.fileURL }
+            .flatMap { try? Data(contentsOf: $0) }
+
+        return ProfileSnapshot(
+            gemsID: record[Field.gemsID] as? String ?? "",
+            displayName: record[Field.displayName] as? String ?? "",
+            fleet: record[Field.fleet] as? String ?? ProfileFleet.fleet757.rawValue,
+            base: record[Field.base] as? String ?? OperationalSettings.defaultCrewBase.rawValue,
+            position: record[Field.position] as? String ?? ProfilePosition.ca.rawValue,
+            avatarImageData: avatarData,
+            updatedAt: record[Field.updatedAt] as? Date ?? Date(timeIntervalSince1970: 0),
+            lastSeenAt: record[Field.lastSeenAt] as? Date
+        )
+    }
+}

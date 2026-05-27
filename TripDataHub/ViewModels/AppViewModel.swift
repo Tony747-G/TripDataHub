@@ -205,6 +205,7 @@ final class AppViewModel: ObservableObject {
     private let deviceScheduleCloudKitService: DeviceScheduleCloudKitServicing
     private let manualEventCloudKitService: ManualEventCloudKitServicing
     private let crewAccessImportCloudKitService: CrewAccessImportCloudKitServicing
+    let profileCloudKitService: ProfileCloudKitServicing
     private let tzResolver: IATATimeZoneResolving
     private let keychainService: KeychainServiceProtocol
     private let manualEventStore: ManualEventStoring
@@ -296,6 +297,9 @@ final class AppViewModel: ObservableObject {
         crewAccessImportCloudKitService: CrewAccessImportCloudKitServicing = CrewAccessImportCloudKitService(
             containerIdentifier: "iCloud.com.sfune.TimelineSchedule"
         ),
+        profileCloudKitService: ProfileCloudKitServicing = ProfileCloudKitService(
+            containerIdentifier: "iCloud.com.sfune.TimelineSchedule"
+        ),
         tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared,
         keychainService: KeychainServiceProtocol = KeychainService(),
         manualEventStore: ManualEventStoring = ManualEventStore()
@@ -310,6 +314,7 @@ final class AppViewModel: ObservableObject {
         self.deviceScheduleCloudKitService = deviceScheduleCloudKitService
         self.manualEventCloudKitService = manualEventCloudKitService
         self.crewAccessImportCloudKitService = crewAccessImportCloudKitService
+        self.profileCloudKitService = profileCloudKitService
         self.tzResolver = tzResolver
         self.keychainService = keychainService
         self.manualEventStore = manualEventStore
@@ -396,6 +401,7 @@ final class AppViewModel: ObservableObject {
             // Fetch remote import files before reconcile so iPad gets iOS-imported files.
             await self?.fetchCrewAccessImportFilesIfNeeded(reason: "startup")
             await self?.applyCrewAccessRetentionPolicy()
+            await self?.syncProfileWithCloudKit()
         }
 
         foregroundObserver = NotificationCenter.default.addObserver(
@@ -407,6 +413,7 @@ final class AppViewModel: ObservableObject {
                 await self?.fetchCrewAccessImportFilesIfNeeded(reason: "foreground")
                 await self?.fetchDeviceScheduleIfNeeded(reason: "foreground")
                 await self?.fetchManualEventsIfNeeded(reason: "foreground")
+                await self?.syncProfileWithCloudKit()
             }
         }
 
@@ -4042,6 +4049,64 @@ final class AppViewModel: ObservableObject {
         } catch {
             verifiedAppUsersMessage = "Failed to load verified app users: \(error.localizedDescription)"
             logNonFatal("Failed to load verified app users: \(error.localizedDescription)")
+        }
+    }
+
+    func deleteLocalProfileAccount() {
+        verifiedIdentity = nil
+        identityActionMessage = nil
+        clearVerifiedIdentity()
+        Task {
+            await deleteProfileFromCloudKit()
+        }
+    }
+
+    // MARK: - Profile CloudKit sync
+
+    /// Syncs profile between local UserDefaults and CloudKit private database.
+    /// last-write-wins on `updatedAt`. Non-blocking; errors are logged, not surfaced.
+    func syncProfileWithCloudKit() async {
+        let local = ProfileSnapshot.loadFromLocalStorage()
+        do {
+            if let remote = try await profileCloudKitService.fetchProfile() {
+                if remote.updatedAt > local.updatedAt {
+                    remote.saveToLocalStorage()
+                } else if local.updatedAt > remote.updatedAt {
+                    try await profileCloudKitService.saveProfile(local)
+                }
+                // Equal updatedAt → no-op (avoid churn)
+            } else if local.hasContent {
+                // No remote record yet — upload local profile.
+                try await profileCloudKitService.saveProfile(local)
+            }
+        } catch {
+            logNonFatal("Profile CloudKit sync failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Uploads current local profile to CloudKit. Called after the user edits profile fields.
+    func uploadProfileToCloudKit() async {
+        let snapshot = ProfileSnapshot.loadFromLocalStorage()
+        guard snapshot.hasContent else { return }
+        do {
+            try await profileCloudKitService.saveProfile(snapshot)
+        } catch {
+            logNonFatal("Profile CloudKit upload failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Marks the profile as edited now and uploads to CloudKit.
+    /// Call when any user-editable profile field changes.
+    func markProfileUpdatedAndUpload() {
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: ProfileStorageKeys.updatedAt)
+        Task { await uploadProfileToCloudKit() }
+    }
+
+    private func deleteProfileFromCloudKit() async {
+        do {
+            try await profileCloudKitService.deleteProfile()
+        } catch {
+            logNonFatal("Profile CloudKit delete failed (non-fatal): \(error.localizedDescription)")
         }
     }
 

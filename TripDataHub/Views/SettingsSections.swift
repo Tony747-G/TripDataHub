@@ -1,7 +1,4 @@
 import SwiftUI
-#if canImport(UIKit)
-import UIKit
-#endif
 
 struct SettingsAccountSection: View {
     @EnvironmentObject private var viewModel: AppViewModel
@@ -247,30 +244,58 @@ private struct CrewAccessImportRow: View {
 struct SettingsDisplaySection: View {
     @Binding var appearanceMode: AppearanceMode
     @Binding var fontSizeOption: AppFontSizeOption
+    @Binding var bidTransitionTimelineEnabled: Bool
 
     var body: some View {
-        Group {
-            Section {
-                Picker("Appearance", selection: $appearanceMode) {
+        Section {
+            HStack {
+                Text("Display Theme")
+                Spacer()
+
+                Menu {
                     ForEach(AppearanceMode.allCases) { mode in
-                        Text(mode.label).tag(mode)
+                        Button {
+                            appearanceMode = mode
+                        } label: {
+                            if appearanceMode == mode {
+                                Label(mode.label, systemImage: "checkmark")
+                            } else {
+                                Text(mode.label)
+                            }
+                        }
                     }
+                } label: {
+                    Text(appearanceMode.label)
+                        .font(.body.weight(.medium))
                 }
-                .pickerStyle(.segmented)
-            } header: {
-                sectionHeader("Display Theme")
+                .buttonStyle(.plain)
             }
 
-            Section {
-                Picker("Font Size", selection: $fontSizeOption) {
+            HStack {
+                Text("Font Size")
+                Spacer()
+                Menu {
                     ForEach(AppFontSizeOption.allCases) { size in
-                        Text(size.label).tag(size)
+                        Button {
+                            fontSizeOption = size
+                        } label: {
+                            if fontSizeOption == size {
+                                Label(size.label, systemImage: "checkmark")
+                            } else {
+                                Text(size.label)
+                            }
+                        }
                     }
+                } label: {
+                    Text(fontSizeOption.label)
+                        .font(.body.weight(.medium))
                 }
-                .pickerStyle(.segmented)
-            } header: {
-                sectionHeader("Font Size")
+                .buttonStyle(.plain)
             }
+
+            Toggle("Bid Transition Timeline", isOn: $bidTransitionTimelineEnabled)
+        } header: {
+            sectionHeader("Display")
         }
     }
 }
@@ -291,29 +316,14 @@ enum PilotQualification: String, CaseIterable, Identifiable {
     }
 }
 
-struct SettingsQualificationSection: View {
-    @Binding var qualificationRawValue: String
+struct SettingsBidTransitionTimelineSection: View {
     @Binding var bidTransitionTimelineEnabled: Bool
-
-    private var qualificationBinding: Binding<PilotQualification> {
-        Binding(
-            get: { PilotQualification(rawValue: qualificationRawValue) ?? .captain },
-            set: { qualificationRawValue = $0.rawValue }
-        )
-    }
 
     var body: some View {
         Section {
-            Picker("Qualification", selection: qualificationBinding) {
-                ForEach(PilotQualification.allCases) { qualification in
-                    Text(qualification.label).tag(qualification)
-                }
-            }
-            .pickerStyle(.segmented)
-
             Toggle("Bid Transition Timeline", isOn: $bidTransitionTimelineEnabled)
         } header: {
-            sectionHeader("Qualification")
+            sectionHeader("Bid Layer")
         }
     }
 }
@@ -1079,6 +1089,57 @@ struct SettingsSupportSection: View {
             sectionHeader("Support TripDataHub")
         }
     }
+}
+
+struct SettingsProfileSection: View {
+    @EnvironmentObject private var viewModel: AppViewModel
+    @AppStorage(ProfileStorageKeys.avatarImageData) private var avatarImageData = Data()
+    @AppStorage(ProfileStorageKeys.displayName) private var displayName = ""
+    @State private var isShowingProfile = false
+
+    var body: some View {
+        Section {
+            Button {
+                isShowingProfile = true
+            } label: {
+                if viewModel.isIdentityVerified {
+                    verifiedProfileSummary
+                } else {
+                    HStack {
+                        Text("Create Account")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .listRowInsets(EdgeInsets(top: 6, leading: 24, bottom: 6, trailing: 16))
+        }
+        .sheet(isPresented: $isShowingProfile) {
+            ProfileTabView(showsCloseButton: true)
+                .environmentObject(viewModel)
+        }
+    }
+
+    private var verifiedProfileSummary: some View {
+        ProfileCard(
+            avatarImageData: avatarImageData,
+            displayName: profileName,
+            showsChevron: true
+        )
+        .padding(.vertical, 1)
+    }
+
+    private var profileName: String {
+        let trimmedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedDisplayName.isEmpty {
+            return trimmedDisplayName
+        }
+        return viewModel.verifiedIdentity?.name ?? "Name"
+    }
+
 }
 
 private func sectionHeader(_ title: String) -> some View {
