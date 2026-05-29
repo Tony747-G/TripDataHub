@@ -47,6 +47,15 @@ extension ProfileSnapshot {
 
     /// Persists the snapshot to UserDefaults.
     func saveToLocalStorage(defaults: UserDefaults = .standard) {
+        if isTombstone {
+            defaults.set("", forKey: ProfileStorageKeys.gemsID)
+            defaults.set("", forKey: ProfileStorageKeys.displayName)
+            defaults.removeObject(forKey: ProfileStorageKeys.avatarImageData)
+            defaults.set(updatedAt.timeIntervalSince1970, forKey: ProfileStorageKeys.updatedAt)
+            defaults.removeObject(forKey: ProfileStorageKeys.lastSeenAt)
+            return
+        }
+
         defaults.set(gemsID, forKey: ProfileStorageKeys.gemsID)
         defaults.set(displayName, forKey: ProfileStorageKeys.displayName)
         defaults.set(fleet, forKey: ProfileStorageKeys.fleet)
@@ -66,11 +75,23 @@ extension ProfileSnapshot {
         defaults.set(updatedAt.timeIntervalSince1970, forKey: ProfileStorageKeys.updatedAt)
         if let lastSeen = lastSeenAt {
             defaults.set(lastSeen.timeIntervalSince1970, forKey: ProfileStorageKeys.lastSeenAt)
+        } else {
+            defaults.removeObject(forKey: ProfileStorageKeys.lastSeenAt)
         }
     }
 
     /// True when the user has set at least one profile field (updatedAt > epoch).
     var hasContent: Bool {
         updatedAt.timeIntervalSince1970 > 0
+    }
+
+    private var isTombstone: Bool {
+        gemsID.isEmpty
+            && displayName.isEmpty
+            && fleet.isEmpty
+            && base.isEmpty
+            && position.isEmpty
+            && avatarImageData == nil
+            && updatedAt.timeIntervalSince1970 > 0
     }
 }

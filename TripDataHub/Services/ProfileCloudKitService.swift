@@ -45,16 +45,22 @@ final class ProfileCloudKitService: ProfileCloudKitServicing, @unchecked Sendabl
 
     private let containerIdentifier: String
     private let databaseProvider: () -> ProfileCloudKitDatabase
+    private let avatarTemporaryDirectory: URL
 
     init(containerIdentifier: String) {
         self.containerIdentifier = containerIdentifier
+        self.avatarTemporaryDirectory = FileManager.default.temporaryDirectory
         self.databaseProvider = {
             CKContainer(identifier: containerIdentifier).privateCloudDatabase
         }
     }
 
-    init(databaseProvider: @escaping () -> ProfileCloudKitDatabase) {
+    init(
+        databaseProvider: @escaping () -> ProfileCloudKitDatabase,
+        avatarTemporaryDirectory: URL = FileManager.default.temporaryDirectory
+    ) {
         self.containerIdentifier = "test"
+        self.avatarTemporaryDirectory = avatarTemporaryDirectory
         self.databaseProvider = databaseProvider
     }
 
@@ -90,16 +96,22 @@ final class ProfileCloudKitService: ProfileCloudKitServicing, @unchecked Sendabl
         record[Field.updatedAt] = snapshot.updatedAt as CKRecordValue
         if let lastSeen = snapshot.lastSeenAt {
             record[Field.lastSeenAt] = lastSeen as CKRecordValue
+        } else {
+            record[Field.lastSeenAt] = nil
         }
 
         // Avatar: write to a temp file, create CKAsset, clean up after save.
         var tempURL: URL?
         if let avatarData = snapshot.avatarImageData, !avatarData.isEmpty {
-            let url = FileManager.default.temporaryDirectory
+            let url = avatarTemporaryDirectory
                 .appendingPathComponent("profile_avatar_\(UUID().uuidString).jpg")
-            try avatarData.write(to: url)
-            record[Field.avatarAsset] = CKAsset(fileURL: url)
-            tempURL = url
+            do {
+                try avatarData.write(to: url)
+                record[Field.avatarAsset] = CKAsset(fileURL: url)
+                tempURL = url
+            } catch {
+                record[Field.avatarAsset] = nil
+            }
         } else {
             record[Field.avatarAsset] = nil
         }
@@ -110,7 +122,7 @@ final class ProfileCloudKitService: ProfileCloudKitServicing, @unchecked Sendabl
             }
         }
 
-        try await database.save(record)
+        _ = try await database.save(record)
     }
 
     // MARK: - Delete

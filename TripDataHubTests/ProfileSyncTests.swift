@@ -41,6 +41,24 @@ final class ProfileSyncTests: XCTestCase {
         XCTAssertEqual(original, decoded)
     }
 
+    func test_profileSnapshot_saveNilLastSeen_clearsStoredLastSeen() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "profile_last_seen_clear_\(UUID())"))
+        defaults.set(1_700_000_100.0, forKey: ProfileStorageKeys.lastSeenAt)
+
+        ProfileSnapshot(
+            gemsID: "G1",
+            displayName: "Pilot",
+            fleet: "757",
+            base: "ANC",
+            position: "CA",
+            avatarImageData: nil,
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            lastSeenAt: nil
+        ).saveToLocalStorage(defaults: defaults)
+
+        XCTAssertEqual(defaults.double(forKey: ProfileStorageKeys.lastSeenAt), 0)
+    }
+
     // MARK: - Conflict resolution
 
     func test_syncProfile_remoteNewer_updatesLocal() async throws {
@@ -70,7 +88,6 @@ final class ProfileSyncTests: XCTestCase {
             position: "CA", avatarImageData: nil,
             updatedAt: Date(timeIntervalSince1970: 1_000), lastSeenAt: nil
         )
-        let mockService = MockProfileCloudKitService(fetchResult: remote)
         let defaults = UserDefaults(suiteName: "test_local_newer_\(UUID())")!
         local.saveToLocalStorage(defaults: defaults)
 
@@ -158,6 +175,269 @@ final class ProfileSyncTests: XCTestCase {
                           "Deleted device must not re-upload stale empty profile over a newer tombstone")
     }
 
+    // MARK: - iPhone/iPad regression
+
+    func test_profileSync_iPhoneAndIPad_roundTripsLatestProfileAcrossDevices() async throws {
+        let iPhoneDefaultsName = "profile_sync_iphone_\(UUID())"
+        let iPadDefaultsName = "profile_sync_ipad_\(UUID())"
+        let iPhoneDefaults = try XCTUnwrap(UserDefaults(suiteName: iPhoneDefaultsName))
+        let iPadDefaults = try XCTUnwrap(UserDefaults(suiteName: iPadDefaultsName))
+        defer {
+            iPhoneDefaults.removePersistentDomain(forName: iPhoneDefaultsName)
+            iPadDefaults.removePersistentDomain(forName: iPadDefaultsName)
+        }
+
+        var cloudProfile: ProfileSnapshot?
+        let iPhoneProfile = ProfileSnapshot(
+            gemsID: "G12345",
+            displayName: "iPhone Pilot",
+            fleet: ProfileFleet.fleet747.rawValue,
+            base: ProfileBase.sdf.rawValue,
+            position: ProfilePosition.ca.rawValue,
+            avatarImageData: Data([0xFF, 0xD8, 0xAA]),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            lastSeenAt: Date(timeIntervalSince1970: 1_700_000_100)
+        )
+        iPhoneProfile.saveToLocalStorage(defaults: iPhoneDefaults)
+
+        let firstIPhoneDecision = try await syncProfile(defaults: iPhoneDefaults, cloudProfile: &cloudProfile)
+        XCTAssertEqual(firstIPhoneDecision, .uploadLocal)
+        XCTAssertEqual(cloudProfile, iPhoneProfile)
+
+        let firstIPadDecision = try await syncProfile(defaults: iPadDefaults, cloudProfile: &cloudProfile)
+        XCTAssertEqual(firstIPadDecision, .updateLocalFromRemote)
+        XCTAssertEqual(ProfileSnapshot.loadFromLocalStorage(defaults: iPadDefaults), iPhoneProfile)
+
+        let iPadProfile = ProfileSnapshot(
+            gemsID: "G12345",
+            displayName: "iPad Pilot",
+            fleet: ProfileFleet.fleet757.rawValue,
+            base: ProfileBase.anc.rawValue,
+            position: ProfilePosition.fo.rawValue,
+            avatarImageData: Data([0x01, 0x02, 0x03]),
+            updatedAt: Date(timeIntervalSince1970: 1_700_010_000),
+            lastSeenAt: Date(timeIntervalSince1970: 1_700_010_100)
+        )
+        iPadProfile.saveToLocalStorage(defaults: iPadDefaults)
+
+        let secondIPadDecision = try await syncProfile(defaults: iPadDefaults, cloudProfile: &cloudProfile)
+        XCTAssertEqual(secondIPadDecision, .uploadLocal)
+        XCTAssertEqual(cloudProfile, iPadProfile)
+
+        let secondIPhoneDecision = try await syncProfile(defaults: iPhoneDefaults, cloudProfile: &cloudProfile)
+        XCTAssertEqual(secondIPhoneDecision, .updateLocalFromRemote)
+        XCTAssertEqual(ProfileSnapshot.loadFromLocalStorage(defaults: iPhoneDefaults), iPadProfile)
+    }
+
+    func test_profileSync_iPhoneDelete_clearsIPadProfileFromCloudTombstone() async throws {
+        let iPhoneDefaultsName = "profile_delete_sync_iphone_\(UUID())"
+        let iPadDefaultsName = "profile_delete_sync_ipad_\(UUID())"
+        let iPhoneDefaults = try XCTUnwrap(UserDefaults(suiteName: iPhoneDefaultsName))
+        let iPadDefaults = try XCTUnwrap(UserDefaults(suiteName: iPadDefaultsName))
+        defer {
+            iPhoneDefaults.removePersistentDomain(forName: iPhoneDefaultsName)
+            iPadDefaults.removePersistentDomain(forName: iPadDefaultsName)
+        }
+
+        var cloudProfile: ProfileSnapshot?
+        let originalProfile = ProfileSnapshot(
+            gemsID: "G12345",
+            displayName: "Pilot",
+            fleet: ProfileFleet.fleet747.rawValue,
+            base: ProfileBase.sdf.rawValue,
+            position: ProfilePosition.ca.rawValue,
+            avatarImageData: Data([0xFF, 0xD8]),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            lastSeenAt: nil
+        )
+        originalProfile.saveToLocalStorage(defaults: iPhoneDefaults)
+        _ = try await syncProfile(defaults: iPhoneDefaults, cloudProfile: &cloudProfile)
+        _ = try await syncProfile(defaults: iPadDefaults, cloudProfile: &cloudProfile)
+
+        let tombstone = ProfileSnapshot(
+            gemsID: "",
+            displayName: "",
+            fleet: "",
+            base: "",
+            position: "",
+            avatarImageData: nil,
+            updatedAt: Date(timeIntervalSince1970: 1_700_010_000),
+            lastSeenAt: nil
+        )
+        cloudProfile = tombstone
+
+        let iPadDeleteDecision = try await syncProfile(defaults: iPadDefaults, cloudProfile: &cloudProfile)
+        let clearedIPadProfile = ProfileSnapshot.loadFromLocalStorage(defaults: iPadDefaults)
+        XCTAssertEqual(iPadDeleteDecision, .updateLocalFromRemote)
+        XCTAssertEqual(clearedIPadProfile.gemsID, "")
+        XCTAssertEqual(clearedIPadProfile.displayName, "")
+        XCTAssertNil(clearedIPadProfile.avatarImageData)
+        XCTAssertEqual(clearedIPadProfile.updatedAt, tombstone.updatedAt)
+    }
+
+    func test_profileSync_tombstoneDoesNotOverwriteOperationalCrewBase() async throws {
+        let defaultsName = "profile_tombstone_base_\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+        defer { defaults.removePersistentDomain(forName: defaultsName) }
+
+        defaults.set(ProfileBase.sdf.rawValue, forKey: OperationalSettings.crewBaseKey)
+        let tombstone = ProfileSnapshot(
+            gemsID: "",
+            displayName: "",
+            fleet: "",
+            base: "",
+            position: "",
+            avatarImageData: nil,
+            updatedAt: Date(timeIntervalSince1970: 1_700_010_000),
+            lastSeenAt: nil
+        )
+
+        tombstone.saveToLocalStorage(defaults: defaults)
+
+        XCTAssertEqual(defaults.string(forKey: OperationalSettings.crewBaseKey), ProfileBase.sdf.rawValue)
+        XCTAssertEqual(defaults.string(forKey: ProfileStorageKeys.gemsID), "")
+        XCTAssertEqual(defaults.string(forKey: ProfileStorageKeys.displayName), "")
+        XCTAssertEqual(defaults.double(forKey: ProfileStorageKeys.updatedAt), 1_700_010_000)
+    }
+
+    func test_syncProfileWithCloudKit_uploadsFreshLocalSnapshotAfterFetchAwait() async throws {
+        clearStandardProfileDefaults()
+        defer { clearStandardProfileDefaults() }
+
+        let remote = ProfileSnapshot(
+            gemsID: "G1",
+            displayName: "Remote Old",
+            fleet: ProfileFleet.fleet757.rawValue,
+            base: ProfileBase.anc.rawValue,
+            position: ProfilePosition.ca.rawValue,
+            avatarImageData: nil,
+            updatedAt: Date(timeIntervalSince1970: 900),
+            lastSeenAt: nil
+        )
+        let staleLocal = ProfileSnapshot(
+            gemsID: "G1",
+            displayName: "Alice",
+            fleet: ProfileFleet.fleet757.rawValue,
+            base: ProfileBase.anc.rawValue,
+            position: ProfilePosition.ca.rawValue,
+            avatarImageData: nil,
+            updatedAt: Date(timeIntervalSince1970: 1_000),
+            lastSeenAt: nil
+        )
+        let editedLocal = ProfileSnapshot(
+            gemsID: "G1",
+            displayName: "Bob",
+            fleet: ProfileFleet.fleet747.rawValue,
+            base: ProfileBase.sdf.rawValue,
+            position: ProfilePosition.fo.rawValue,
+            avatarImageData: nil,
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            lastSeenAt: nil
+        )
+        staleLocal.saveToLocalStorage()
+        let mockService = MockProfileCloudKitService(fetchResult: remote, fetchDelayNanoseconds: 100_000_000)
+        let vm = AppViewModel(profileCloudKitService: mockService)
+
+        let syncTask = Task { await vm.syncProfileWithCloudKit() }
+        try await Task.sleep(nanoseconds: 30_000_000)
+        editedLocal.saveToLocalStorage()
+        await syncTask.value
+
+        XCTAssertEqual(mockService.lastSavedSnapshot, editedLocal)
+    }
+
+    func test_deleteAccount_blocksForegroundSyncUntilTombstoneWriteCompletes() async throws {
+        clearStandardProfileDefaults()
+        defer { clearStandardProfileDefaults() }
+
+        let oldRemote = ProfileSnapshot(
+            gemsID: "G1",
+            displayName: "Should Not Resurrect",
+            fleet: ProfileFleet.fleet747.rawValue,
+            base: ProfileBase.sdf.rawValue,
+            position: ProfilePosition.ca.rawValue,
+            avatarImageData: Data([0xFF]),
+            updatedAt: Date(timeIntervalSince1970: 1_000),
+            lastSeenAt: nil
+        )
+        oldRemote.saveToLocalStorage()
+        let mockService = MockProfileCloudKitService(fetchResult: oldRemote, saveDelayNanoseconds: 100_000_000)
+        let vm = AppViewModel(profileCloudKitService: mockService)
+
+        vm.deleteLocalProfileAccount()
+        await vm.syncProfileWithCloudKit()
+
+        XCTAssertEqual(ProfileSnapshot.loadFromLocalStorage().displayName, "")
+        XCTAssertNil(ProfileSnapshot.loadFromLocalStorage().avatarImageData)
+
+        try await Task.sleep(nanoseconds: 150_000_000)
+        XCTAssertTrue(mockService.saveCalled)
+    }
+
+    func test_syncProfileWithCloudKit_deduplicatesConcurrentCalls() async throws {
+        clearStandardProfileDefaults()
+        defer { clearStandardProfileDefaults() }
+
+        let local = ProfileSnapshot(
+            gemsID: "G1",
+            displayName: "Local",
+            fleet: ProfileFleet.fleet757.rawValue,
+            base: ProfileBase.anc.rawValue,
+            position: ProfilePosition.ca.rawValue,
+            avatarImageData: nil,
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            lastSeenAt: nil
+        )
+        let remote = ProfileSnapshot(
+            gemsID: "G1",
+            displayName: "Remote",
+            fleet: ProfileFleet.fleet757.rawValue,
+            base: ProfileBase.anc.rawValue,
+            position: ProfilePosition.ca.rawValue,
+            avatarImageData: nil,
+            updatedAt: Date(timeIntervalSince1970: 1_000),
+            lastSeenAt: nil
+        )
+        local.saveToLocalStorage()
+        let mockService = MockProfileCloudKitService(fetchResult: remote, fetchDelayNanoseconds: 100_000_000)
+        let vm = AppViewModel(profileCloudKitService: mockService)
+
+        async let first: Void = vm.syncProfileWithCloudKit()
+        async let second: Void = vm.syncProfileWithCloudKit()
+        _ = await (first, second)
+
+        XCTAssertEqual(mockService.saveCallCount, 1)
+    }
+
+    func test_profileCloudKitSave_clearsLastSeenAndStillSavesWhenAvatarTempWriteFails() async throws {
+        let database = FakeProfileCloudKitDatabase()
+        let existingRecord = CKRecord(recordType: "Profile", recordID: ProfileCloudKitService.recordID)
+        existingRecord["lastSeenAt"] = Date(timeIntervalSince1970: 1_000) as CKRecordValue
+        database.seed(existingRecord)
+        let service = ProfileCloudKitService(
+            databaseProvider: { database },
+            avatarTemporaryDirectory: URL(fileURLWithPath: "/dev/null")
+        )
+        let snapshot = ProfileSnapshot(
+            gemsID: "G1",
+            displayName: "Text Must Save",
+            fleet: ProfileFleet.fleet747.rawValue,
+            base: ProfileBase.sdf.rawValue,
+            position: ProfilePosition.fo.rawValue,
+            avatarImageData: Data([0xFF, 0xD8]),
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            lastSeenAt: nil
+        )
+
+        try await service.saveProfile(snapshot)
+
+        let saved = try XCTUnwrap(database.savedRecord)
+        XCTAssertEqual(saved["displayName"] as? String, "Text Must Save")
+        XCTAssertNil(saved["lastSeenAt"])
+        XCTAssertNil(saved["avatarAsset"])
+        XCTAssertEqual(database.saveCallCount, 1)
+    }
+
     // MARK: - Record ID safety
 
     func test_recordID_isNotGEMSID() {
@@ -191,6 +471,29 @@ final class ProfileSyncTests: XCTestCase {
         }
     }
 
+    func test_deleteAccount_clearsLocalProfileStorage() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "profile_delete_clear_\(UUID())"))
+        defaults.set(Data([0xFF, 0xD8]), forKey: ProfileStorageKeys.avatarImageData)
+        defaults.set("Pilot", forKey: ProfileStorageKeys.displayName)
+        defaults.set("1234567", forKey: ProfileStorageKeys.gemsID)
+        defaults.set(ProfileFleet.fleet747.rawValue, forKey: ProfileStorageKeys.fleet)
+        defaults.set(ProfileBase.sdf.rawValue, forKey: OperationalSettings.crewBaseKey)
+        defaults.set(PilotQualification.firstOfficer.rawValue, forKey: "pilot_qualification")
+        defaults.set(1_700_000_100.0, forKey: ProfileStorageKeys.lastSeenAt)
+        defaults.set(1_700_000_000.0, forKey: ProfileStorageKeys.updatedAt)
+
+        AppViewModel.clearLocalProfileStorageForDelete(defaults: defaults)
+
+        XCTAssertNil(defaults.data(forKey: ProfileStorageKeys.avatarImageData))
+        XCTAssertEqual(defaults.string(forKey: ProfileStorageKeys.displayName), "")
+        XCTAssertEqual(defaults.string(forKey: ProfileStorageKeys.gemsID), "")
+        XCTAssertEqual(defaults.string(forKey: ProfileStorageKeys.fleet), ProfileFleet.fleet757.rawValue)
+        XCTAssertEqual(defaults.string(forKey: OperationalSettings.crewBaseKey), OperationalSettings.defaultCrewBase.rawValue)
+        XCTAssertEqual(defaults.string(forKey: "pilot_qualification"), PilotQualification.captain.rawValue)
+        XCTAssertEqual(defaults.double(forKey: ProfileStorageKeys.lastSeenAt), 0)
+        XCTAssertEqual(defaults.double(forKey: ProfileStorageKeys.updatedAt), 0)
+    }
+
     // MARK: - Sync policy pure function helper
 
     enum SyncDecision: Equatable {
@@ -210,28 +513,105 @@ final class ProfileSyncTests: XCTestCase {
         if local.updatedAt > remote.updatedAt { return .uploadLocal }
         return .noOp
     }
+
+    @discardableResult
+    private func syncProfile(
+        defaults: UserDefaults,
+        cloudProfile: inout ProfileSnapshot?
+    ) async throws -> SyncDecision {
+        let local = ProfileSnapshot.loadFromLocalStorage(defaults: defaults)
+        let decision = try await Self.resolveSyncPolicy(local: local, remote: cloudProfile)
+        switch decision {
+        case .uploadLocal:
+            cloudProfile = local
+        case .updateLocalFromRemote:
+            cloudProfile?.saveToLocalStorage(defaults: defaults)
+        case .noOp:
+            break
+        }
+        return decision
+    }
+
+    private func clearStandardProfileDefaults() {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: ProfileStorageKeys.avatarImageData)
+        defaults.removeObject(forKey: ProfileStorageKeys.displayName)
+        defaults.removeObject(forKey: ProfileStorageKeys.gemsID)
+        defaults.removeObject(forKey: ProfileStorageKeys.fleet)
+        defaults.removeObject(forKey: OperationalSettings.crewBaseKey)
+        defaults.removeObject(forKey: "pilot_qualification")
+        defaults.removeObject(forKey: ProfileStorageKeys.lastSeenAt)
+        defaults.removeObject(forKey: ProfileStorageKeys.updatedAt)
+    }
 }
 
 // MARK: - Mock
 
-final class MockProfileCloudKitService: ProfileCloudKitServicing {
-    let fetchResult: ProfileSnapshot?
+final class MockProfileCloudKitService: ProfileCloudKitServicing, @unchecked Sendable {
+    var fetchResult: ProfileSnapshot?
+    let fetchDelayNanoseconds: UInt64
+    let saveDelayNanoseconds: UInt64
     private(set) var saveCalled = false
+    private(set) var saveCallCount = 0
     private(set) var deleteCalled = false
     private(set) var lastSavedSnapshot: ProfileSnapshot?
 
-    init(fetchResult: ProfileSnapshot?) {
+    init(
+        fetchResult: ProfileSnapshot?,
+        fetchDelayNanoseconds: UInt64 = 0,
+        saveDelayNanoseconds: UInt64 = 0
+    ) {
         self.fetchResult = fetchResult
+        self.fetchDelayNanoseconds = fetchDelayNanoseconds
+        self.saveDelayNanoseconds = saveDelayNanoseconds
     }
 
-    func fetchProfile() async throws -> ProfileSnapshot? { fetchResult }
+    func fetchProfile() async throws -> ProfileSnapshot? {
+        if fetchDelayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: fetchDelayNanoseconds)
+        }
+        return fetchResult
+    }
 
     func saveProfile(_ snapshot: ProfileSnapshot) async throws {
+        if saveDelayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: saveDelayNanoseconds)
+        }
         saveCalled = true
+        saveCallCount += 1
         lastSavedSnapshot = snapshot
     }
 
     func deleteProfile() async throws {
         deleteCalled = true
+    }
+}
+
+final class FakeProfileCloudKitDatabase: ProfileCloudKitDatabase, @unchecked Sendable {
+    private var record: CKRecord?
+    private(set) var savedRecord: CKRecord?
+    private(set) var saveCallCount = 0
+
+    func seed(_ record: CKRecord) {
+        self.record = record
+    }
+
+    func record(for recordID: CKRecord.ID) async throws -> CKRecord {
+        if let record {
+            return record
+        }
+        throw CKError(.unknownItem)
+    }
+
+    func save(_ record: CKRecord) async throws -> CKRecord {
+        saveCallCount += 1
+        self.record = record
+        savedRecord = record
+        return record
+    }
+
+    func deleteRecord(withID recordID: CKRecord.ID) async throws -> CKRecord.ID {
+        record = nil
+        return recordID
     }
 }

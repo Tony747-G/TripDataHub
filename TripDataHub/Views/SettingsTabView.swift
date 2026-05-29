@@ -5,11 +5,11 @@ import UIKit
 
 struct SettingsTabView: View {
     @EnvironmentObject private var viewModel: AppViewModel
+    @AppStorage("auto_fetch_on_open_enabled") private var autoFetchOnOpen = true
     @AppStorage("appearance_mode") private var appearanceModeRawValue = AppearanceMode.system.rawValue
     @AppStorage("app_font_size_option") private var appFontSizeOptionRawValue = AppFontSizeOption.medium.rawValue
-    @AppStorage(OperationalSettings.crewBaseKey) private var crewBaseRawValue = OperationalSettings.defaultCrewBase.rawValue
-    @AppStorage("pilot_qualification") private var pilotQualificationRawValue = PilotQualification.captain.rawValue
     @AppStorage("bid_transition_timeline_enabled") private var bidTransitionTimelineEnabled = true
+    @AppStorage(OperationalSettings.crewBaseKey) private var crewBaseRawValue = OperationalSettings.defaultCrewBase.rawValue
     @AppStorage("notification_48h_enabled") private var notify48h = false
     @AppStorage("notification_24h_enabled") private var notify24h = false
     @AppStorage("notification_12h_enabled") private var notify12h = false
@@ -19,10 +19,6 @@ struct SettingsTabView: View {
     @State private var showNotificationDeniedAlert = false
     @State private var showLogTenExportWarning = false
     @State private var logTenExportOutput: LogTenExportOutput?
-#if DEBUG
-    @State private var verifyGemsIDInput = ""
-    @State private var verifyDOBDate = Date()
-#endif
 
     private var appearanceModeBinding: Binding<AppearanceMode> {
         Binding(
@@ -62,24 +58,16 @@ struct SettingsTabView: View {
         List {
             SettingsSupportSection()
 
-#if DEBUG
-            SettingsAccountSection(
-                verifyGemsIDInput: $verifyGemsIDInput,
-                verifyDOBDate: $verifyDOBDate,
-                formatDOB: formatDOB
-            )
-#endif
+            SettingsProfileSection()
 
-            SettingsCrewBaseSection(crewBaseRawValue: $crewBaseRawValue)
-
-            SettingsQualificationSection(
-                qualificationRawValue: $pilotQualificationRawValue,
-                bidTransitionTimelineEnabled: $bidTransitionTimelineEnabled
-            )
+            if AppEnvironment.isTripBoardFetchVisible {
+                SettingsTripBoardFetchSection(autoFetchOnOpen: $autoFetchOnOpen)
+            }
 
             SettingsDisplaySection(
                 appearanceMode: appearanceModeBinding,
-                fontSizeOption: fontSizeOptionBinding
+                fontSizeOption: fontSizeOptionBinding,
+                bidTransitionTimelineEnabled: $bidTransitionTimelineEnabled
             )
 
             SettingsReadinessExpirySection(
@@ -105,17 +93,6 @@ struct SettingsTabView: View {
         }
         .scrollDismissesKeyboard(.interactively)
     }
-
-#if DEBUG
-    private func formatDOB(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: date)
-    }
-#endif
 
     var body: some View {
         NavigationStack {

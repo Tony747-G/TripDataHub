@@ -9,6 +9,15 @@ enum AppEnvironment {
 #endif
     }()
 
+    static let isTripBoardFetchVisible: Bool = {
+#if DEBUG
+        return !isAppStoreReviewMode
+#else
+        return false
+#endif
+    }()
+
     static let reviewModeMessage = "Demo Mode: GEMS verification is disabled for App Store review."
     static let tripBoardUnavailableMessage = "TripBoard Fetch is unavailable in Demo Mode. Please use manual PDF import."
+    static let noTripBoardDataMessage = "No fetched data yet. Please use CrewAccess PDF import."
 }
