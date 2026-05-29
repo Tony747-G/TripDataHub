@@ -101,7 +101,7 @@ struct IPadOperationalWorkspaceView: View {
             viewModel.consumePendingAppGroupImportIfAvailable()
             await viewModel.fetchCrewAccessImportFilesIfNeeded(reason: "ipad workspace")
             await viewModel.fetchDeviceScheduleIfNeeded(reason: "ipad workspace")
-            if !AppEnvironment.isAppStoreReviewMode {
+            if AppEnvironment.isTripBoardFetchVisible {
                 await viewModel.syncFriendCloudKit(reason: "ipad workspace opened")
             }
         }
@@ -109,7 +109,7 @@ struct IPadOperationalWorkspaceView: View {
             if newPhase == .active {
                 viewModel.consumePendingAppGroupImportIfAvailable()
                 Task {
-                    if !AppEnvironment.isAppStoreReviewMode {
+                    if AppEnvironment.isTripBoardFetchVisible {
                         await viewModel.syncFriendCloudKit(reason: "ipad workspace active")
                     }
                 }
@@ -147,7 +147,7 @@ struct IPadOperationalWorkspaceView: View {
                 // it to the workspace (parent) while Settings is already open
                 // produces "only presenting a single sheet is supported".
                 .sheet(isPresented: Binding(
-                    get: { viewModel.isShowingLoginSheet && !AppEnvironment.isAppStoreReviewMode },
+                    get: { viewModel.isShowingLoginSheet && AppEnvironment.isTripBoardFetchVisible },
                     set: { viewModel.isShowingLoginSheet = $0 }
                 )) {
                     TripBoardLoginView(

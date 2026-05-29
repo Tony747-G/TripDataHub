@@ -31,7 +31,7 @@ struct RootTabView: View {
                 }
                 .tag(0)
 
-            if !AppEnvironment.isAppStoreReviewMode {
+            if AppEnvironment.isTripBoardFetchVisible {
                 OpenTimeTabView()
                     .tabItem {
                         Label("OpenTime", systemImage: "clock")
@@ -39,7 +39,7 @@ struct RootTabView: View {
                     .tag(1)
             }
 
-            if !AppEnvironment.isAppStoreReviewMode {
+            if AppEnvironment.isTripBoardFetchVisible {
                 FriendsTabView()
                     .tabItem {
                         Label("Friends", systemImage: "person.2")
@@ -68,7 +68,7 @@ struct RootTabView: View {
                 .tag(5)
         }
         .sheet(isPresented: Binding(
-            get: { viewModel.isShowingLoginSheet && !AppEnvironment.isAppStoreReviewMode },
+            get: { viewModel.isShowingLoginSheet && AppEnvironment.isTripBoardFetchVisible },
             set: { viewModel.isShowingLoginSheet = $0 }
         )) {
             TripBoardLoginView(
@@ -86,23 +86,25 @@ struct RootTabView: View {
             }
         }
         .onAppear {
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: ProfileStorageKeys.lastSeenAt)
             migrateFontSizeDefaultIfNeeded()
             viewModel.consumePendingAppGroupImportIfAvailable()
             viewModel.refreshFlightCountdownPresentation()
             Task {
                 await viewModel.autoFetchOnAppActiveIfEnabled(autoFetchOnOpen)
-                if !AppEnvironment.isAppStoreReviewMode {
+                if AppEnvironment.isTripBoardFetchVisible {
                     await viewModel.syncFriendCloudKit(reason: "app opened")
                 }
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
+                UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: ProfileStorageKeys.lastSeenAt)
                 viewModel.consumePendingAppGroupImportIfAvailable()
                 viewModel.refreshFlightCountdownPresentation()
                 Task {
                     await viewModel.autoFetchOnAppActiveIfEnabled(autoFetchOnOpen)
-                    if !AppEnvironment.isAppStoreReviewMode {
+                    if AppEnvironment.isTripBoardFetchVisible {
                         await viewModel.syncFriendCloudKit(reason: "app active")
                     }
                 }

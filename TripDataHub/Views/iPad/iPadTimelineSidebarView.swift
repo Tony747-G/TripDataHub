@@ -846,7 +846,7 @@ struct IPadTimelineSidebarView: View {
     }
 
     private func refreshFriendScheduleMatches() {
-        guard !AppEnvironment.isAppStoreReviewMode else {
+        guard AppEnvironment.isTripBoardFetchVisible else {
             friendScheduleMatches = .empty
             return
         }

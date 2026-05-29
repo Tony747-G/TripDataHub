@@ -63,7 +63,7 @@ struct OpenTimeTabView: View {
                 LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                     Color.clear.frame(height: 0).id(topAnchorID)
                     if ppSections.isEmpty {
-                        Text(AppEnvironment.isAppStoreReviewMode ? AppEnvironment.tripBoardUnavailableMessage : "No fetched data yet. Pull to refresh or tap Fetch in Settings.")
+                        Text(AppEnvironment.isTripBoardFetchVisible ? "No fetched data yet. Pull to refresh or tap Fetch in Settings." : AppEnvironment.noTripBoardDataMessage)
                             .appScaledFont(.footnote, scale: effScale)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -149,7 +149,7 @@ struct OpenTimeTabView: View {
                             .id(topAnchorID)
 
                         if ppSections.isEmpty {
-                            Text(AppEnvironment.isAppStoreReviewMode ? AppEnvironment.tripBoardUnavailableMessage : "No fetched data yet. Pull to refresh or use Settings to fetch from TripBoard.")
+                            Text(AppEnvironment.isTripBoardFetchVisible ? "No fetched data yet. Pull to refresh or use Settings to fetch from TripBoard." : AppEnvironment.noTripBoardDataMessage)
                                 .appScaledFont(.footnote, scale: fontScale)
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -265,7 +265,7 @@ struct OpenTimeTabView: View {
     }
 
     private func refreshOpenTime(using proxy: ScrollViewProxy) async {
-        if AppEnvironment.isAppStoreReviewMode {
+        if !AppEnvironment.isTripBoardFetchVisible {
             await MainActor.run {
                 refreshMessage = AppEnvironment.tripBoardUnavailableMessage
                 refreshMessageIsError = false

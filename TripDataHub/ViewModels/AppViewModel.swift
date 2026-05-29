@@ -147,6 +147,8 @@ final class AppViewModel: ObservableObject {
     private static let persistentFingerprintTTL: TimeInterval = 30
     /// Primary execution gate. Set before any system call; cleared on confirm/discard.
     private var importInProgress = false
+    private var isProfileCloudKitSyncing = false
+    private var isDeletingProfileAccount = false
 
     @Published var isSyncing = false
     @Published var isShowingLoginSheet = false
@@ -205,6 +207,7 @@ final class AppViewModel: ObservableObject {
     private let deviceScheduleCloudKitService: DeviceScheduleCloudKitServicing
     private let manualEventCloudKitService: ManualEventCloudKitServicing
     private let crewAccessImportCloudKitService: CrewAccessImportCloudKitServicing
+    let profileCloudKitService: ProfileCloudKitServicing
     private let tzResolver: IATATimeZoneResolving
     private let keychainService: KeychainServiceProtocol
     private let manualEventStore: ManualEventStoring
@@ -296,6 +299,9 @@ final class AppViewModel: ObservableObject {
         crewAccessImportCloudKitService: CrewAccessImportCloudKitServicing = CrewAccessImportCloudKitService(
             containerIdentifier: "iCloud.com.sfune.TimelineSchedule"
         ),
+        profileCloudKitService: ProfileCloudKitServicing = ProfileCloudKitService(
+            containerIdentifier: "iCloud.com.sfune.TimelineSchedule"
+        ),
         tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared,
         keychainService: KeychainServiceProtocol = KeychainService(),
         manualEventStore: ManualEventStoring = ManualEventStore()
@@ -310,6 +316,7 @@ final class AppViewModel: ObservableObject {
         self.deviceScheduleCloudKitService = deviceScheduleCloudKitService
         self.manualEventCloudKitService = manualEventCloudKitService
         self.crewAccessImportCloudKitService = crewAccessImportCloudKitService
+        self.profileCloudKitService = profileCloudKitService
         self.tzResolver = tzResolver
         self.keychainService = keychainService
         self.manualEventStore = manualEventStore
@@ -386,7 +393,8 @@ final class AppViewModel: ObservableObject {
             //   and would clear the seeded crewAccessSchedules
             let isUITest = ProcessInfo.processInfo.arguments.contains("UITEST_TIMELINE_SEED")
                 || ProcessInfo.processInfo.arguments.contains("UITEST_LOGGED_OUT_VERIFIED")
-            if isUITest { return }
+            let isXCTest = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            if isUITest || isXCTest { return }
 #endif
             await MainActor.run {
                 self?.refreshCloudKitIdentity()
@@ -396,6 +404,7 @@ final class AppViewModel: ObservableObject {
             // Fetch remote import files before reconcile so iPad gets iOS-imported files.
             await self?.fetchCrewAccessImportFilesIfNeeded(reason: "startup")
             await self?.applyCrewAccessRetentionPolicy()
+            await self?.syncProfileWithCloudKit()
         }
 
         foregroundObserver = NotificationCenter.default.addObserver(
@@ -407,6 +416,7 @@ final class AppViewModel: ObservableObject {
                 await self?.fetchCrewAccessImportFilesIfNeeded(reason: "foreground")
                 await self?.fetchDeviceScheduleIfNeeded(reason: "foreground")
                 await self?.fetchManualEventsIfNeeded(reason: "foreground")
+                await self?.syncProfileWithCloudKit()
             }
         }
 
@@ -1730,6 +1740,16 @@ final class AppViewModel: ObservableObject {
                 if !resolvedOverlapIDs.isEmpty {
                     await deleteCrewAccessTrips(ids: resolvedOverlapIDs)
                 }
+                let overlapTripIDs = overlapPairings.map(Self.normalizedCrewAccessTripID)
+                if !overlapTripIDs.isEmpty {
+                    _ = await Task.detached(priority: .utility) {
+                        Self.deleteCrewAccessImportFilesBestEffort(
+                            scheduleIDs: Array(resolvedOverlapIDs),
+                            tripIDs: overlapTripIDs,
+                            tripKeys: []
+                        )
+                    }.value
+                }
             }
 
             lastImportDidReplaceExistingTrip = replacing
@@ -1810,7 +1830,8 @@ final class AppViewModel: ObservableObject {
         let newEnd = incomingJSON.items
             .compactMap { LegConnectionTextBuilder.parseUTC($0.endUtc) }.max()
         let reportWindowStart = newStart.map { $0.addingTimeInterval(-90 * 60) }
-        let incomingDayKeys = Self.baseLocalDayKeys(startUTC: newStart, endUTC: newEnd, domicile: domicile)
+        var incomingDayKeys = Self.baseLocalDayKeys(startUTC: newStart, endUTC: newEnd, domicile: domicile)
+        incomingDayKeys.formUnion(Self.tripInformationDayKeys(incomingJSON.tripInformationDate))
 
         var candidates: [TripImportReplacementCandidate] = []
         for existing in crewAccessSchedules {
@@ -1894,6 +1915,12 @@ final class AppViewModel: ObservableObject {
             guardCount += 1
         }
         return keys
+    }
+
+    private nonisolated static func tripInformationDayKeys(_ raw: String?) -> Set<String> {
+        let normalized = normalizeTripInformationDateForDisplay(raw, fallbackDate: nil)
+        guard !normalized.usedFallback, normalized.dateString != "UnknownDate" else { return [] }
+        return [normalized.dateString]
     }
 
     private struct CrewAccessScheduleReference: Hashable {
@@ -2217,6 +2244,7 @@ final class AppViewModel: ObservableObject {
         let fileDeleteResult = await Task.detached(priority: .utility) {
             Self.deleteCrewAccessImportFilesBestEffort(
                 scheduleIDs: scheduleIDsToDelete,
+                tripIDs: Array(Set(toDelete.flatMap { $0.legs.map(\.pairing) })),
                 tripKeys: tripKeysToDelete
             )
         }.value
@@ -3703,11 +3731,13 @@ final class AppViewModel: ObservableObject {
 
     private nonisolated static func deleteCrewAccessImportFilesBestEffort(
         scheduleIDs: [String],
+        tripIDs: [String] = [],
         tripKeys: [String]
     ) -> (deleted: Int, failures: Int, deletedFileNames: [String]) {
         struct ImportFileHeader {
             let url: URL
             let name: String
+            let tripID: String?
             let tripKey: String?
         }
 
@@ -3732,6 +3762,7 @@ final class AppViewModel: ObservableObject {
         }
 
         let tripKeySet = Set(tripKeys)
+        let tripIDSet = Set(tripIDs.map(normalizedCrewAccessTripID))
         let files = urls.compactMap { url -> ImportFileHeader? in
             guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
                   values.isRegularFile == true else {
@@ -3747,10 +3778,11 @@ final class AppViewModel: ObservableObject {
                     tripInformationDate: header.tripInformationDate,
                     fallbackDate: nil
                 )
+                return ImportFileHeader(url: url, name: url.lastPathComponent, tripID: payloadTripID, tripKey: headerTripKey)
             } else {
                 headerTripKey = nil
             }
-            return ImportFileHeader(url: url, name: url.lastPathComponent, tripKey: headerTripKey)
+            return ImportFileHeader(url: url, name: url.lastPathComponent, tripID: nil, tripKey: headerTripKey)
         }
 
         var deletedCount = 0
@@ -3762,8 +3794,14 @@ final class AppViewModel: ObservableObject {
                 let safeID = scheduleID.replacingOccurrences(of: "/", with: "-")
                 return name.hasPrefix("\(safeID)_") || name.contains(scheduleID) || name.contains(safeID)
             }
+            let matchesPayloadTripID = file.tripID.map { tripID in
+                let normalizedTripID = normalizedCrewAccessTripID(tripID)
+                return tripIDSet.contains(normalizedTripID) || scheduleIDs.contains { scheduleID in
+                    scheduleID == tripID || scheduleID.contains(tripID)
+                }
+            } ?? false
             let matchesPayloadTripKey = file.tripKey.map { tripKeySet.contains($0) } ?? false
-            let shouldDelete = matchesScheduleID || matchesPayloadTripKey
+            let shouldDelete = matchesScheduleID || matchesPayloadTripID || matchesPayloadTripKey
             guard shouldDelete else { continue }
 
             do {
@@ -4042,6 +4080,95 @@ final class AppViewModel: ObservableObject {
         } catch {
             verifiedAppUsersMessage = "Failed to load verified app users: \(error.localizedDescription)"
             logNonFatal("Failed to load verified app users: \(error.localizedDescription)")
+        }
+    }
+
+    func deleteLocalProfileAccount() {
+        isDeletingProfileAccount = true
+        Self.clearLocalProfileStorageForDelete()
+        verifiedIdentity = nil
+        identityActionMessage = nil
+        clearVerifiedIdentity()
+        Task {
+            await writeProfileTombstoneToCloudKit()
+            isDeletingProfileAccount = false
+        }
+    }
+
+    // MARK: - Profile CloudKit sync
+
+    nonisolated static func clearLocalProfileStorageForDelete(defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: ProfileStorageKeys.avatarImageData)
+        defaults.set("", forKey: ProfileStorageKeys.displayName)
+        defaults.set("", forKey: ProfileStorageKeys.gemsID)
+        defaults.set(ProfileFleet.fleet757.rawValue, forKey: ProfileStorageKeys.fleet)
+        defaults.set(OperationalSettings.defaultCrewBase.rawValue, forKey: OperationalSettings.crewBaseKey)
+        defaults.set(PilotQualification.captain.rawValue, forKey: "pilot_qualification")
+        defaults.removeObject(forKey: ProfileStorageKeys.lastSeenAt)
+        // Reset local updatedAt to epoch so this device's stale data cannot win
+        // a future last-write-wins conflict against the CloudKit tombstone.
+        defaults.set(0.0, forKey: ProfileStorageKeys.updatedAt)
+    }
+
+    /// Syncs profile between local UserDefaults and CloudKit private database.
+    /// last-write-wins on `updatedAt`. Non-blocking; errors are logged, not surfaced.
+    func syncProfileWithCloudKit() async {
+        guard !isProfileCloudKitSyncing, !isDeletingProfileAccount else { return }
+        isProfileCloudKitSyncing = true
+        defer { isProfileCloudKitSyncing = false }
+
+        do {
+            if let remote = try await profileCloudKitService.fetchProfile() {
+                let local = ProfileSnapshot.loadFromLocalStorage()
+                if remote.updatedAt > local.updatedAt {
+                    remote.saveToLocalStorage()
+                } else if local.updatedAt > remote.updatedAt {
+                    try await profileCloudKitService.saveProfile(local)
+                }
+                // Equal updatedAt → no-op (avoid churn)
+            } else {
+                let local = ProfileSnapshot.loadFromLocalStorage()
+                guard local.hasContent else { return }
+                // No remote record yet — upload local profile.
+                try await profileCloudKitService.saveProfile(local)
+            }
+        } catch {
+            logNonFatal("Profile CloudKit sync failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Uploads current local profile to CloudKit. Called on ProfileTabView dismiss.
+    func uploadProfileToCloudKit() async {
+        let snapshot = ProfileSnapshot.loadFromLocalStorage()
+        guard snapshot.hasContent else { return }
+        do {
+            try await profileCloudKitService.saveProfile(snapshot)
+        } catch {
+            logNonFatal("Profile CloudKit upload failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Updates `updatedAt` in UserDefaults only — no CloudKit call.
+    /// Use on per-field onChange. The actual upload fires on view dismiss.
+    func markProfileUpdated() {
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: ProfileStorageKeys.updatedAt)
+    }
+
+    /// Writes an empty profile tombstone to CloudKit so other devices detect the
+    /// deletion via last-write-wins (`tombstone.updatedAt > their local.updatedAt`).
+    /// Does NOT call CKDatabase.delete — the record stays, content is cleared.
+    private func writeProfileTombstoneToCloudKit() async {
+        let tombstone = ProfileSnapshot(
+            gemsID: "", displayName: "", fleet: "", base: "", position: "",
+            avatarImageData: nil,
+            updatedAt: Date(),   // must be newer than any device's local updatedAt
+            lastSeenAt: nil
+        )
+        do {
+            try await profileCloudKitService.saveProfile(tombstone)
+        } catch {
+            // Non-fatal: local delete already succeeded.
+            logNonFatal("Profile CloudKit tombstone write failed: \(error.localizedDescription)")
         }
     }
 
