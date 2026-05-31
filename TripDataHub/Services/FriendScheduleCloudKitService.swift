@@ -129,10 +129,13 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
                     pair: pair
                 )
 
-                let saved: CKRecord
                 do {
-                    saved = try await database.save(record)
-                } catch let error as CKError where error.code == .permissionFailure {
+                    let saved = try await database.save(record)
+                    return link(from: saved, myGEMSID: my, friendGEMSID: friend)
+                } catch let error as CKError where Self.shouldRetryFriendLinkSave(error) {
+                    throw error
+                } catch {
+                    logger.error("[TDHFriendLink] canonical friend link save failed; saving user-owned approval: \(error.localizedDescription, privacy: .public)")
                     return try await saveUserOwnedFriendApproval(
                         myGEMSID: my,
                         friendGEMSID: friend,
@@ -141,7 +144,6 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
                         database: database
                     )
                 }
-                return link(from: saved, myGEMSID: my, friendGEMSID: friend)
             } catch let error as CKError where Self.shouldRetryFriendLinkSave(error) {
                 guard attempt < 2 else { throw error }
                 try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 150_000_000)
@@ -174,12 +176,12 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         record[Field.updatedAt] = Date() as CKRecordValue
 
         let friendApprovedCanonical = hasApproval(from: friendGEMSID, in: canonicalRecord, pair: pair)
-        let friendApprovedUserOwned = try await reciprocalUserOwnedApprovalExists(
+        let friendApprovedUserOwned = (try? await reciprocalUserOwnedApprovalExists(
                 myGEMSID: myGEMSID,
                 friendGEMSID: friendGEMSID,
                 pair: pair,
                 database: database
-        )
+        )) ?? false
         if friendApprovedCanonical || friendApprovedUserOwned {
             record[Field.approvedA] = true as CKRecordValue
             record[Field.approvedB] = true as CKRecordValue
