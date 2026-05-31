@@ -75,7 +75,7 @@ struct ScheduleTimelineRendererView: View {
             timeRangeText: timeRangeText(for: leg),
             dayDiff: dayShift(for: leg),
             blockText: blockText(for: leg, nextLegByID: nextLegByID)
-            // iconColor and onIconTap omitted: Friends Timeline uses defaults (no highlights)
+            // iconColor and onFriendMatchTap omitted: Friends Timeline uses defaults (no highlights)
         )
     }
 
@@ -94,7 +94,7 @@ struct ScheduleTimelineRendererView: View {
                 nextLeg: connectionMap[leg.id]
             ),
             fontScale: fontScale
-            // iconColor and onIconTap omitted: Friends Timeline uses defaults (no highlights)
+            // iconColor and onFriendMatchTap omitted: Friends Timeline uses defaults (no highlights)
         )
     }
 

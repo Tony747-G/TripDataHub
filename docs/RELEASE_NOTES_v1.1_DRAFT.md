@@ -1,14 +1,31 @@
 # TDH v1.1 Draft Release Notes
 
-This draft summarizes the v1.1 manual event and calendar layer work. It is intended for release preparation and future implementation context.
+This draft summarizes the v1.1 release candidate scope. Friend Sharing is in release-readiness freeze; only bug fixes and review-readiness changes should be accepted before submission.
 
 ## Highlights
 
+- Ships optional Friend Sharing with mutual GEMS-ID approval.
+- Keeps shared schedules read-only for receiving friends.
+- Hardens Friend Sharing privacy boundaries for App Review.
 - Added Crew Base selection in Settings.
 - Added Manual Operational Event entry for reserve, call-out, training, and hold-style duty codes.
 - Added Personal Event entry for lightweight non-duty calendar context.
 - Extended Timeline into a Crew Duty Chronology.
 - Hardened iPad Calendar layer separation between Operational, Bid, and Personal content.
+
+## Friend Sharing RC Notes
+
+- Friend requests are blocked for self-requests and duplicate pending requests.
+- Existing accepted friends cannot be re-requested.
+- Friend removal clears local visibility and removes the user's CloudKit approval.
+- Mutual approval is required before shared schedules are visible.
+- If a friend link is missing or no longer mutually approved, cached shared schedules are cleared.
+- Empty schedule uploads are allowed so deleted local schedules clear the remote shared schedule.
+- `TDHSharedSchedule` no longer persists internal CloudKit record names.
+
+## App Review Notes
+
+Friend Sharing has no public discovery, no messaging, no public profiles, and no online status or presence indicator. The feature is optional and does not affect local schedule import, Timeline, Calendar, or Settings.
 
 ## Operational Layer Manual Events
 

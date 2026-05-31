@@ -264,18 +264,20 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertEqual((record["approvedB"] as? NSNumber)?.boolValue, true)
     }
 
-    func test_friendCloudKitCancel_deletesSingleSidedPendingRequest() async throws {
+    func test_friendCloudKitCancel_marksSingleSidedPendingRequestCanceled() async throws {
         let database = FriendCloudKitFakeDatabase()
         let service = FriendScheduleCloudKitService(databaseProvider: { database })
 
         _ = try await service.requestFriend(myGEMSID: "222222", friendGEMSID: "111111")
         try await service.cancelFriendRequest(myGEMSID: "222222", friendGEMSID: "111111")
 
-        let recordNames = await database.friendLinkRecordNames()
-        XCTAssertTrue(recordNames.isEmpty)
+        let recordSnapshot = await database.recordSnapshot(named: "tdh_friend_0111111_0222222")
+        let record = try XCTUnwrap(recordSnapshot)
+        XCTAssertEqual(record["status"] as? String, "canceled")
+        XCTAssertNil(record["linkedAt"])
     }
 
-    func test_friendCloudKitCancel_preservesOtherPilotsApproval() async throws {
+    func test_friendCloudKitCancel_clearsBothApprovalBits() async throws {
         let database = FriendCloudKitFakeDatabase()
         let service = FriendScheduleCloudKitService(databaseProvider: { database })
 
@@ -286,8 +288,406 @@ final class FriendScheduleMatchingTests: XCTestCase {
         let recordSnapshot = await database.recordSnapshot(named: "tdh_friend_0111111_0222222")
         let record = try XCTUnwrap(recordSnapshot)
         XCTAssertEqual((record["approvedA"] as? NSNumber)?.boolValue, false)
-        XCTAssertEqual((record["approvedB"] as? NSNumber)?.boolValue, true)
+        XCTAssertEqual((record["approvedB"] as? NSNumber)?.boolValue, false)
+        XCTAssertEqual(record["status"] as? String, "canceled")
         XCTAssertNil(record["linkedAt"])
+    }
+
+    func test_friendCloudKitRequest_afterCancelRevivesAsPendingWithoutGhostApproval() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+
+        _ = try await service.requestFriend(myGEMSID: "222222", friendGEMSID: "111111")
+        _ = try await service.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
+        try await service.cancelFriendRequest(myGEMSID: "111111", friendGEMSID: "222222")
+
+        let link = try await service.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
+
+        XCTAssertFalse(link.isAccepted)
+        XCTAssertNil(link.linkedAt)
+        let recordSnapshot = await database.recordSnapshot(named: "tdh_friend_0111111_0222222")
+        let record = try XCTUnwrap(recordSnapshot)
+        XCTAssertEqual((record["approvedA"] as? NSNumber)?.boolValue, true)
+        XCTAssertEqual((record["approvedB"] as? NSNumber)?.boolValue, false)
+        XCTAssertEqual(record["status"] as? String, "pending")
+        XCTAssertNil(record["linkedAt"])
+    }
+
+    func test_refreshConnections_treatsCanceledLinkWithStaleLinkedAtAsPending() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+        await database.insertFriendLink(
+            gemsA: "0111111",
+            gemsB: "0222222",
+            approvedA: true,
+            approvedB: true,
+            status: "canceled",
+            linkedAt: Date(timeIntervalSince1970: 10)
+        )
+
+        let refreshed = try await service.refreshConnections(
+            myGEMSID: "111111",
+            connections: []
+        )
+
+        XCTAssertEqual(refreshed.count, 1)
+        XCTAssertEqual(refreshed.first?.status, .pending)
+        XCTAssertNil(refreshed.first?.linkedAt)
+        XCTAssertNil(refreshed.first?.acceptedAt)
+    }
+
+    func test_refreshConnections_preservesAcceptedLocalConnectionWhenCloudLinkMissingWithoutAcceptedAt() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+        var local = FriendConnection(
+            employeeID: "222222",
+            status: .accepted,
+            requestedAt: Date(timeIntervalSince1970: 1),
+            linkedAt: nil
+        )
+        local.acceptedAt = nil
+
+        let refreshed = try await service.refreshConnections(
+            myGEMSID: "111111",
+            connections: [local]
+        )
+
+        XCTAssertEqual(refreshed.count, 1)
+        XCTAssertEqual(refreshed.first?.status, .accepted)
+        XCTAssertEqual(refreshed.first?.linkedAt, Date(timeIntervalSince1970: 1))
+        let migratedRecord = await database.recordSnapshot(named: "tdh_friend_0111111_0222222")
+        XCTAssertEqual(migratedRecord?["status"] as? String, "accepted")
+        XCTAssertEqual(migratedRecord?["linkedAt"] as? Date, Date(timeIntervalSince1970: 1))
+    }
+
+    func test_refreshConnections_doesNotForceAcceptExistingPendingLinkFromLocalAcceptedAt() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+        await database.insertFriendLink(
+            gemsA: "0111111",
+            gemsB: "0222222",
+            approvedA: false,
+            approvedB: false,
+            status: "pending",
+            linkedAt: nil
+        )
+        let local = FriendConnection(
+            employeeID: "222222",
+            status: .accepted,
+            requestedAt: Date(timeIntervalSince1970: 1),
+            linkedAt: Date(timeIntervalSince1970: 2),
+            acceptedAt: Date(timeIntervalSince1970: 2)
+        )
+
+        let refreshed = try await service.refreshConnections(
+            myGEMSID: "111111",
+            connections: [local]
+        )
+
+        XCTAssertEqual(refreshed.count, 1)
+        XCTAssertEqual(refreshed.first?.status, .pending)
+        let record = await database.recordSnapshot(named: "tdh_friend_0111111_0222222")
+        XCTAssertEqual(record?["status"] as? String, "pending")
+        XCTAssertNil(record?["linkedAt"])
+    }
+
+    func test_friendCloudKitRequest_keepsOriginalRequestedAtWhenHealedLater() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+
+        let first = try await service.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
+        let originalRequestedAt = try XCTUnwrap(first.requestedAt)
+        let recordSnapshot = await database.recordSnapshot(named: "tdh_friend_0111111_0222222")
+        let record = try XCTUnwrap(recordSnapshot)
+        record["updatedAt"] = originalRequestedAt.addingTimeInterval(60) as CKRecordValue
+        _ = try await database.save(record)
+
+        let second = try await service.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
+
+        XCTAssertEqual(second.requestedAt, originalRequestedAt)
+    }
+
+    func test_friendCloudKitUploadSchedule_doesNotPersistOwnerRecordName() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+
+        try await service.uploadSchedule(
+            gemsID: "111111",
+            cloudKitRecordName: "_internal_cloudkit_record",
+            schedules: [makeSchedule(legs: [])]
+        )
+
+        let record = await database.recordSnapshot(named: "tdh_schedule_0111111")
+        XCTAssertNotNil(record)
+        XCTAssertNil(record?["ownerRecordName"])
+        XCTAssertEqual(record?["ownerGEMSID"] as? String, "0111111")
+    }
+
+    func test_friendCloudKitUploadSchedule_allowsEmptyScheduleToClearRemoteData() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+
+        try await service.uploadSchedule(
+            gemsID: "111111",
+            cloudKitRecordName: "_internal_cloudkit_record",
+            schedules: [makeSchedule(legs: [makeLeg(leg: 1, flight: "100", depAirport: "ANC", arrAirport: "SDF", depUTC: "2026-05-01T06:00:00Z", arrUTC: "2026-05-01T10:00:00Z")])]
+        )
+        try await service.uploadSchedule(
+            gemsID: "111111",
+            cloudKitRecordName: "_internal_cloudkit_record",
+            schedules: []
+        )
+
+        let recordSnapshot = await database.recordSnapshot(named: "tdh_schedule_0111111")
+        let record = try XCTUnwrap(recordSnapshot)
+        let data = try XCTUnwrap(record["schedulesData"] as? Data)
+        let schedules = try JSONDecoder().decode([PayPeriodSchedule].self, from: data)
+        XCTAssertTrue(schedules.isEmpty)
+    }
+
+    func test_deleteSharedScheduleData_removesScheduleAndSnapshotRecords() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+
+        try await service.uploadSchedule(
+            gemsID: "111111",
+            cloudKitRecordName: "_internal_cloudkit_record",
+            schedules: [makeSchedule(legs: [])]
+        )
+        try await service.uploadScheduleSnapshot(
+            gemsID: "111111",
+            ownerDisplayName: "Test Pilot",
+            crewAccessTrips: []
+        )
+
+        try await service.deleteSharedScheduleData(gemsID: "111111")
+
+        let scheduleRecord = await database.recordSnapshot(named: "tdh_schedule_0111111")
+        let snapshotRecord = await database.recordSnapshot(named: "tdh_snapshot_0111111")
+        XCTAssertNil(scheduleRecord)
+        XCTAssertNil(snapshotRecord)
+    }
+
+    func test_deleteFriendSharingData_cancelsLinksAndDeletesSharedScheduleData() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+        await database.insertFriendLink(
+            gemsA: "0111111",
+            gemsB: "0222222",
+            approvedA: true,
+            approvedB: true,
+            status: "accepted",
+            linkedAt: Date(timeIntervalSince1970: 2)
+        )
+        await database.insertFriendLink(
+            gemsA: "0111111",
+            gemsB: "0333333",
+            approvedA: true,
+            approvedB: true,
+            status: "accepted",
+            linkedAt: Date(timeIntervalSince1970: 3)
+        )
+        try await service.uploadSchedule(
+            gemsID: "111111",
+            cloudKitRecordName: "_internal_cloudkit_record",
+            schedules: [makeSchedule(legs: [])]
+        )
+        try await service.uploadScheduleSnapshot(
+            gemsID: "111111",
+            ownerDisplayName: "Test Pilot",
+            crewAccessTrips: []
+        )
+
+        try await service.deleteFriendSharingData(gemsID: "111111")
+
+        let firstRecord = await database.recordSnapshot(named: "tdh_friend_0111111_0222222")
+        let first = try XCTUnwrap(firstRecord)
+        XCTAssertEqual(first["status"] as? String, "canceled")
+        XCTAssertEqual((first["approvedA"] as? NSNumber)?.boolValue, false)
+        XCTAssertEqual((first["approvedB"] as? NSNumber)?.boolValue, false)
+        XCTAssertNil(first["linkedAt"])
+        let secondRecord = await database.recordSnapshot(named: "tdh_friend_0111111_0333333")
+        let second = try XCTUnwrap(secondRecord)
+        XCTAssertEqual(second["status"] as? String, "canceled")
+        let scheduleRecord = await database.recordSnapshot(named: "tdh_schedule_0111111")
+        let snapshotRecord = await database.recordSnapshot(named: "tdh_snapshot_0111111")
+        XCTAssertNil(scheduleRecord)
+        XCTAssertNil(snapshotRecord)
+    }
+
+    func test_refreshConnections_restoresAcceptedConnectionWhenFriendLinkMissing() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+        let local = FriendConnection(
+            employeeID: "222222",
+            status: .accepted,
+            requestedAt: Date(timeIntervalSince1970: 1),
+            linkedAt: Date(timeIntervalSince1970: 2),
+            sharedSchedules: [makeSchedule(legs: [makeLeg(leg: 1, flight: "100", depAirport: "ANC", arrAirport: "SDF", depUTC: "2026-05-01T06:00:00Z", arrUTC: "2026-05-01T10:00:00Z")])]
+        )
+
+        let refreshed = try await service.refreshConnections(
+            myGEMSID: "111111",
+            connections: [local]
+        )
+
+        XCTAssertEqual(refreshed.count, 1)
+        XCTAssertEqual(refreshed.first?.status, .accepted)
+        XCTAssertEqual(refreshed.first?.linkedAt, Date(timeIntervalSince1970: 2))
+        XCTAssertEqual(refreshed.first?.acceptedAt, Date(timeIntervalSince1970: 2))
+        XCTAssertFalse(refreshed.first?.sharedSchedules.isEmpty == true)
+
+        let migratedRecord = await database.recordSnapshot(named: "tdh_friend_0111111_0222222")
+        XCTAssertEqual(migratedRecord?["gemsA"] as? String, "0111111")
+        XCTAssertEqual(migratedRecord?["gemsB"] as? String, "0222222")
+        XCTAssertEqual(migratedRecord?["approvedA"] as? Bool, true)
+        XCTAssertEqual(migratedRecord?["approvedB"] as? Bool, true)
+        XCTAssertEqual(migratedRecord?["status"] as? String, "accepted")
+    }
+
+    func test_refreshConnections_clearsSharedSchedulesWhenFriendLinkIsCanceled() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+        await database.insertFriendLink(
+            gemsA: "0111111",
+            gemsB: "0222222",
+            approvedA: true,
+            approvedB: false,
+            status: "canceled",
+            linkedAt: nil
+        )
+        let local = FriendConnection(
+            employeeID: "222222",
+            status: .accepted,
+            requestedAt: Date(timeIntervalSince1970: 1),
+            linkedAt: Date(timeIntervalSince1970: 2),
+            sharedSchedules: [makeSchedule(legs: [makeLeg(leg: 1, flight: "100", depAirport: "ANC", arrAirport: "SDF", depUTC: "2026-05-01T06:00:00Z", arrUTC: "2026-05-01T10:00:00Z")])]
+        )
+
+        let refreshed = try await service.refreshConnections(
+            myGEMSID: "111111",
+            connections: [local]
+        )
+
+        XCTAssertEqual(refreshed.count, 1)
+        XCTAssertEqual(refreshed.first?.status, .pending)
+        XCTAssertNil(refreshed.first?.linkedAt)
+        XCTAssertTrue(refreshed.first?.sharedSchedules.isEmpty == true)
+    }
+
+    @MainActor
+    func test_submitFriendRequest_rejectsSelfRequestBeforeCloudKitCall() async throws {
+        let service = CapturingFriendCloudKitService()
+        let vm = AppViewModel(friendScheduleCloudKitService: service)
+        setVerifiedIdentity(on: vm, gemsID: "111111")
+        vm.friendConnections = []
+
+        await vm.submitFriendRequest(employeeID: "111111")
+
+        XCTAssertEqual(service.requestCallCount, 0)
+        XCTAssertEqual(vm.friendActionMessage, "You cannot add yourself as a friend.")
+    }
+
+    @MainActor
+    func test_submitFriendRequest_reappliesDuplicatePendingRequestWithoutAddingLocalDuplicate() async throws {
+        let service = CapturingFriendCloudKitService()
+        let vm = AppViewModel(friendScheduleCloudKitService: service)
+        setVerifiedIdentity(on: vm, gemsID: "111111")
+        vm.friendConnections = [
+            FriendConnection(employeeID: "0222222", status: .pending)
+        ]
+
+        await vm.submitFriendRequest(employeeID: "222222")
+
+        XCTAssertEqual(service.requestCallCount, 1)
+        XCTAssertEqual(vm.friendConnections.count, 1)
+        XCTAssertEqual(vm.friendConnections.first?.employeeID, "0222222")
+        XCTAssertEqual(vm.friendActionMessage, "Request saved. Ask GEMS 0222222 to add your GEMS ID too.")
+    }
+
+    @MainActor
+    func test_submitFriendRequest_doesNotUploadSharedScheduleForSingleSidedPendingRequest() async throws {
+        let service = CapturingFriendCloudKitService()
+        let vm = AppViewModel(friendScheduleCloudKitService: service)
+        setVerifiedIdentity(on: vm, gemsID: "111111")
+
+        await vm.submitFriendRequest(employeeID: "222222")
+
+        XCTAssertEqual(vm.friendConnections.first?.status, .pending)
+        XCTAssertFalse(vm.isScheduleSharingEnabled)
+        XCTAssertEqual(service.uploadScheduleCallCount, 0)
+    }
+
+    @MainActor
+    func test_submitFriendRequest_uploadsSharedScheduleOnlyAfterMutualAcceptance() async throws {
+        let service = CapturingFriendCloudKitService()
+        service.nextRequestIsAccepted = true
+        let vm = AppViewModel(friendScheduleCloudKitService: service)
+        setVerifiedIdentity(on: vm, gemsID: "111111")
+        vm.crewAccessSchedules = [makeSchedule(legs: [])]
+
+        await vm.submitFriendRequest(employeeID: "222222")
+
+        XCTAssertEqual(vm.friendConnections.first?.status, .accepted)
+        XCTAssertTrue(vm.isScheduleSharingEnabled)
+        XCTAssertEqual(service.uploadScheduleCallCount, 1)
+    }
+
+    @MainActor
+    func test_syncFriendCloudKit_doesNotAutoResumeSharingAfterFreshInstall() async throws {
+        let service = CapturingFriendCloudKitService()
+        service.refreshedConnections = [
+            FriendConnection(employeeID: "0222222", status: .accepted)
+        ]
+        let vm = AppViewModel(friendScheduleCloudKitService: service)
+        setVerifiedIdentity(on: vm, gemsID: "111111")
+        vm.friendConnections = []
+        vm.isScheduleSharingEnabled = false
+        vm.crewAccessSchedules = [makeSchedule(legs: [])]
+
+        await vm.syncFriendCloudKit(reason: "identity verified")
+
+        XCTAssertEqual(service.refreshCallCount, 1)
+        XCTAssertEqual(vm.friendConnections.first?.status, .accepted)
+        XCTAssertFalse(vm.isScheduleSharingEnabled)
+        XCTAssertEqual(service.uploadScheduleCallCount, 0)
+    }
+
+    @MainActor
+    func test_removeFriend_cancelsCloudKitApprovalAndRemovesLocalConnection() async throws {
+        let service = CapturingFriendCloudKitService()
+        let vm = AppViewModel(friendScheduleCloudKitService: service)
+        setVerifiedIdentity(on: vm, gemsID: "111111")
+        let friend = FriendConnection(employeeID: "0222222", status: .accepted)
+        vm.friendConnections = [friend]
+
+        await vm.removeFriend(friend.id)
+
+        XCTAssertEqual(service.cancelCallCount, 1)
+        XCTAssertEqual(service.lastCanceledMyGEMSID, "111111")
+        XCTAssertEqual(service.lastCanceledFriendGEMSID, "0222222")
+        XCTAssertTrue(vm.friendConnections.isEmpty)
+        XCTAssertEqual(service.deleteSharedScheduleCallCount, 1)
+        XCTAssertEqual(service.lastDeletedSharedScheduleGEMSID, "111111")
+    }
+
+    @MainActor
+    func test_deleteAccount_removesFriendSharingPublicDataAndLocalFriendCache() async throws {
+        let service = CapturingFriendCloudKitService()
+        let vm = AppViewModel(friendScheduleCloudKitService: service)
+        setVerifiedIdentity(on: vm, gemsID: "111111")
+        vm.friendConnections = [
+            FriendConnection(employeeID: "0222222", status: .accepted)
+        ]
+        vm.isScheduleSharingEnabled = true
+
+        vm.deleteLocalProfileAccount()
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertTrue(vm.friendConnections.isEmpty)
+        XCTAssertFalse(vm.isScheduleSharingEnabled)
+        XCTAssertEqual(service.deleteFriendSharingDataCallCount, 1)
+        XCTAssertEqual(service.lastDeletedFriendSharingGEMSID, "111111")
     }
 
     // test_refreshConnections_loadsFriendTimelineCardsFromSnapshot was removed:
@@ -476,6 +876,76 @@ final class FriendScheduleMatchingTests: XCTestCase {
             ataUtc: nil,
             tailNumber: nil
         )
+    }
+
+    @MainActor
+    private func setVerifiedIdentity(on vm: AppViewModel, gemsID: String) {
+        let recordName = "_cloudkit_record_\(gemsID)"
+        vm.verifiedIdentity = VerifiedIdentityProfile(
+            cloudKitRecordName: recordName,
+            name: "Test Pilot",
+            gemsID: gemsID,
+            domicile: "ANC",
+            equipment: "747",
+            seat: "CA",
+            dateOfHire: "2000-01-01",
+            isAdminEligible: false,
+            adminPolicyFingerprint: nil,
+            verifiedAt: Date()
+        )
+        vm.currentCloudKitRecordName = recordName
+    }
+}
+
+private final class CapturingFriendCloudKitService: FriendScheduleCloudKitServicing, @unchecked Sendable {
+    private(set) var requestCallCount = 0
+    private(set) var cancelCallCount = 0
+    private(set) var refreshCallCount = 0
+    private(set) var uploadScheduleCallCount = 0
+    private(set) var deleteSharedScheduleCallCount = 0
+    private(set) var deleteFriendSharingDataCallCount = 0
+    private(set) var lastCanceledMyGEMSID: String?
+    private(set) var lastCanceledFriendGEMSID: String?
+    private(set) var lastDeletedSharedScheduleGEMSID: String?
+    private(set) var lastDeletedFriendSharingGEMSID: String?
+    var refreshedConnections: [FriendConnection]?
+    var nextRequestIsAccepted = false
+
+    func uploadSchedule(gemsID: String, cloudKitRecordName: String, schedules: [PayPeriodSchedule]) async throws {
+        uploadScheduleCallCount += 1
+    }
+
+    func uploadScheduleSnapshot(gemsID: String, ownerDisplayName: String, crewAccessTrips: [CrewAccessTripJSON]) async throws {}
+
+    func requestFriend(myGEMSID: String, friendGEMSID: String) async throws -> FriendScheduleCloudKitLink {
+        requestCallCount += 1
+        return FriendScheduleCloudKitLink(
+            friendGEMSID: GEMSIDNormalizer.normalize(friendGEMSID),
+            isAccepted: nextRequestIsAccepted,
+            linkedAt: nextRequestIsAccepted ? Date(timeIntervalSince1970: 2) : nil,
+            requestedAt: Date(timeIntervalSince1970: 1)
+        )
+    }
+
+    func cancelFriendRequest(myGEMSID: String, friendGEMSID: String) async throws {
+        cancelCallCount += 1
+        lastCanceledMyGEMSID = myGEMSID
+        lastCanceledFriendGEMSID = friendGEMSID
+    }
+
+    func deleteSharedScheduleData(gemsID: String) async throws {
+        deleteSharedScheduleCallCount += 1
+        lastDeletedSharedScheduleGEMSID = gemsID
+    }
+
+    func deleteFriendSharingData(gemsID: String) async throws {
+        deleteFriendSharingDataCallCount += 1
+        lastDeletedFriendSharingGEMSID = gemsID
+    }
+
+    func refreshConnections(myGEMSID: String, connections: [FriendConnection]) async throws -> [FriendConnection] {
+        refreshCallCount += 1
+        return refreshedConnections ?? connections
     }
 }
 

@@ -16,6 +16,8 @@ protocol FriendScheduleCloudKitServicing: Sendable {
     func uploadScheduleSnapshot(gemsID: String, ownerDisplayName: String, crewAccessTrips: [CrewAccessTripJSON]) async throws
     func requestFriend(myGEMSID: String, friendGEMSID: String) async throws -> FriendScheduleCloudKitLink
     func cancelFriendRequest(myGEMSID: String, friendGEMSID: String) async throws
+    func deleteSharedScheduleData(gemsID: String) async throws
+    func deleteFriendSharingData(gemsID: String) async throws
     func refreshConnections(myGEMSID: String, connections: [FriendConnection]) async throws -> [FriendConnection]
 }
 
@@ -53,6 +55,7 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         static let approvedA = "approvedA"
         static let approvedB = "approvedB"
         static let linkedAt = "linkedAt"
+        static let requestedAt = "requestedAt"
         static let status = "status"
     }
 
@@ -84,7 +87,7 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
             ?? CKRecord(recordType: RecordType.sharedSchedule, recordID: recordID)
         let data = try JSONEncoder().encode(schedules)
         record[Field.ownerGEMSID] = GEMSIDNormalizer.normalize(gemsID) as CKRecordValue
-        record[Field.ownerRecordName] = cloudKitRecordName as CKRecordValue
+        record[Field.ownerRecordName] = nil
         record[Field.schedulesData] = data as CKRecordValue
         record[Field.updatedAt] = Date() as CKRecordValue
         _ = try await database.save(record)
@@ -114,7 +117,6 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         let pair = Self.orderedPair(my, friend)
         let recordID = CKRecord.ID(recordName: Self.friendLinkRecordName(first: pair.first, second: pair.second))
 
-        var lastError: Error?
         for attempt in 0..<3 {
             do {
                 let record = try await friendLinkRecord(recordID: recordID, database: database)
@@ -126,15 +128,15 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
 
                 let saved = try await database.save(record)
                 return link(from: saved, myGEMSID: my, friendGEMSID: friend)
-            } catch let error as CKError where Self.shouldRetryFriendLinkSave(error) && attempt < 2 {
-                lastError = error
+            } catch let error as CKError where Self.shouldRetryFriendLinkSave(error) {
+                guard attempt < 2 else { throw error }
                 try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 150_000_000)
             } catch {
                 throw error
             }
         }
 
-        throw lastError ?? CKError(.serverRecordChanged)
+        throw CKError(.serverRecordChanged)
     }
 
     func cancelFriendRequest(myGEMSID: String, friendGEMSID: String) async throws {
@@ -144,7 +146,6 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         let pair = Self.orderedPair(my, friend)
         let recordID = CKRecord.ID(recordName: Self.friendLinkRecordName(first: pair.first, second: pair.second))
 
-        var lastError: Error?
         for attempt in 0..<3 {
             do {
                 let record: CKRecord
@@ -154,26 +155,57 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
                     return
                 }
 
-                record[approvalField(for: my, pair: pair)] = false as CKRecordValue
+                record[Field.approvedA] = false as CKRecordValue
+                record[Field.approvedB] = false as CKRecordValue
                 record[Field.linkedAt] = nil
                 record[Field.updatedAt] = Date() as CKRecordValue
 
-                if !boolValue(record[Field.approvedA]) && !boolValue(record[Field.approvedB]) {
-                    _ = try await database.deleteRecord(withID: recordID)
-                } else {
-                    record[Field.status] = LinkStatus.pending as CKRecordValue
-                    _ = try await database.save(record)
-                }
+                record[Field.status] = LinkStatus.canceled as CKRecordValue
+                _ = try await database.save(record)
                 return
-            } catch let error as CKError where Self.shouldRetryFriendLinkSave(error) && attempt < 2 {
-                lastError = error
+            } catch let error as CKError where Self.shouldRetryFriendLinkSave(error) {
+                guard attempt < 2 else { throw error }
                 try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 150_000_000)
             } catch {
                 throw error
             }
         }
 
-        throw lastError ?? CKError(.serverRecordChanged)
+        throw CKError(.serverRecordChanged)
+    }
+
+    func deleteSharedScheduleData(gemsID: String) async throws {
+        let normalizedGEMSID = GEMSIDNormalizer.normalize(gemsID)
+        let database = databaseProvider()
+        try await deleteRecordIfExists(
+            CKRecord.ID(recordName: Self.scheduleRecordName(for: normalizedGEMSID)),
+            database: database
+        )
+        try await deleteRecordIfExists(
+            CKRecord.ID(recordName: Self.snapshotRecordName(for: normalizedGEMSID)),
+            database: database
+        )
+    }
+
+    func deleteFriendSharingData(gemsID: String) async throws {
+        let normalizedGEMSID = GEMSIDNormalizer.normalize(gemsID)
+        let database = databaseProvider()
+
+        async let firstSide = friendLinkRecords(field: Field.gemsA, gemsID: normalizedGEMSID, database: database)
+        async let secondSide = friendLinkRecords(field: Field.gemsB, gemsID: normalizedGEMSID, database: database)
+        let linkRecords = try await firstSide + secondSide
+        var seenRecordNames: Set<String> = []
+
+        for record in linkRecords where seenRecordNames.insert(record.recordID.recordName).inserted {
+            record[Field.approvedA] = false as CKRecordValue
+            record[Field.approvedB] = false as CKRecordValue
+            record[Field.linkedAt] = nil
+            record[Field.status] = LinkStatus.canceled as CKRecordValue
+            record[Field.updatedAt] = Date() as CKRecordValue
+            _ = try await database.save(record)
+        }
+
+        try await deleteSharedScheduleData(gemsID: normalizedGEMSID)
     }
 
     func refreshConnections(myGEMSID: String, connections: [FriendConnection]) async throws -> [FriendConnection] {
@@ -263,24 +295,36 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         } catch {
             throw error
         }
-        // If the record was not found in CloudKit (.unknownItem → record = nil),
-        // preserve the existing connection status. For accepted connections, still
-        // attempt to fetch the friend's shared schedule — the link record lookup
-        // may miss due to GEMS ID normalisation differences, but the schedule record
-        // name is derived independently and may still resolve correctly.
         logger.info("[TDHFriendLink] refreshConnection: friend=\(friend, privacy: .private) recordFound=\(record != nil, privacy: .public) connectionStatus=\(connection.status.rawValue, privacy: .public)")
 
         guard let record else {
             var fallback = connection
+            if let restored = try await restoreAcceptedLinkIfPossible(
+                connection,
+                myGEMSID: myGEMSID,
+                pair: pair,
+                record: CKRecord(recordType: RecordType.friendLink, recordID: recordID),
+                canCreateAcceptedRecord: true,
+                database: database
+            ) {
+                return restored
+            }
             if connection.status == .accepted {
-                logger.info("[TDHFriendLink] refreshConnection: link record missing, trying fetchSchedule for accepted friend")
+                return connection
+            }
+            if connection.status == .pending {
+                let migratedRecord = CKRecord(recordType: RecordType.friendLink, recordID: recordID)
+                applyApproval(to: migratedRecord, myGEMSID: myGEMSID, pair: pair)
                 do {
-                    fallback.sharedSchedules = try await fetchSchedule(gemsID: friend, database: database)
+                    _ = try await database.save(migratedRecord)
+                    logger.info("[TDHFriendLink] refreshConnection: re-applied local approval to pending CloudKit link")
                 } catch {
-                    logger.error("[TDHFriendLink] refreshConnection: fetchSchedule failed (no link record): \(error.localizedDescription, privacy: .public)")
-                    fallback.sharedSchedules = connection.sharedSchedules
+                    logger.error("[TDHFriendLink] local approval re-apply failed: \(error.localizedDescription, privacy: .public)")
                 }
             }
+            fallback.status = .pending
+            fallback.linkedAt = nil
+            fallback.sharedSchedules = []
             return fallback
         }
 
@@ -296,6 +340,7 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         if link.isAccepted {
             updated.status = .accepted
             updated.linkedAt = link.linkedAt ?? updated.linkedAt ?? Date()
+            updated.acceptedAt = updated.acceptedAt ?? updated.linkedAt ?? Date()
             do {
                 updated.sharedSchedules = try await fetchSchedule(gemsID: friend, database: database)
             } catch {
@@ -305,6 +350,16 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         } else {
             let isExplicitlyCanceled = (record[Field.status] as? String) == LinkStatus.canceled
             if !isExplicitlyCanceled {
+                if let restored = try await restoreAcceptedLinkIfPossible(
+                    connection,
+                    myGEMSID: myGEMSID,
+                    pair: pair,
+                    record: record,
+                    canCreateAcceptedRecord: false,
+                    database: database
+                ) {
+                    return restored
+                }
                 applyApproval(to: record, myGEMSID: myGEMSID, pair: pair)
                 let healedLink: FriendScheduleCloudKitLink?
                 do {
@@ -318,27 +373,69 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
                 if healedLink?.isAccepted == true {
                     updated.status = .accepted
                     updated.linkedAt = healedLink?.linkedAt ?? updated.linkedAt ?? Date()
+                    updated.acceptedAt = updated.acceptedAt ?? updated.linkedAt ?? Date()
                     do {
                         updated.sharedSchedules = try await fetchSchedule(gemsID: friend, database: database)
                     } catch {
                         logger.error("[TDHFriendLink] refreshConnection: fetchSchedule failed (healed): \(error.localizedDescription, privacy: .public)")
                         updated.sharedSchedules = connection.sharedSchedules
                     }
-                } else if connection.status == .accepted {
-                    do {
-                        updated.sharedSchedules = try await fetchSchedule(gemsID: friend, database: database)
-                    } catch {
-                        logger.error("[TDHFriendLink] refreshConnection: fetchSchedule failed (preserved-accepted): \(error.localizedDescription, privacy: .public)")
-                        updated.sharedSchedules = connection.sharedSchedules
-                    }
                 } else {
                     updated.status = .pending
+                    updated.linkedAt = nil
+                    updated.acceptedAt = nil
+                    updated.sharedSchedules = []
                 }
             } else {
                 updated.status = .pending
+                updated.linkedAt = nil
+                updated.acceptedAt = nil
+                updated.sharedSchedules = []
             }
         }
         return updated
+    }
+
+    private func restoreAcceptedLinkIfPossible(
+        _ connection: FriendConnection,
+        myGEMSID: String,
+        pair: (first: String, second: String),
+        record: CKRecord,
+        canCreateAcceptedRecord: Bool,
+        database: FriendScheduleCloudKitDatabase
+    ) async throws -> FriendConnection? {
+        guard let acceptedAt = connection.acceptedAt ?? (connection.status == .accepted ? connection.linkedAt : nil) else {
+            return nil
+        }
+        guard canCreateAcceptedRecord || isAccepted(record) else {
+            return nil
+        }
+        record[Field.gemsA] = pair.first as CKRecordValue
+        record[Field.gemsB] = pair.second as CKRecordValue
+        record[Field.approvedA] = true as CKRecordValue
+        record[Field.approvedB] = true as CKRecordValue
+        record[Field.status] = LinkStatus.accepted as CKRecordValue
+        record[Field.linkedAt] = acceptedAt as CKRecordValue
+        if record[Field.requestedAt] == nil {
+            record[Field.requestedAt] = connection.requestedAt as CKRecordValue
+        }
+        record[Field.updatedAt] = Date() as CKRecordValue
+        let saved = try await database.save(record)
+        let friend = pair.first == myGEMSID ? pair.second : pair.first
+        let link = self.link(from: saved, myGEMSID: myGEMSID, friendGEMSID: friend)
+        guard link.isAccepted else { return nil }
+        var restored = connection
+        restored.status = .accepted
+        restored.linkedAt = link.linkedAt ?? acceptedAt
+        restored.acceptedAt = acceptedAt
+        do {
+            restored.sharedSchedules = try await fetchSchedule(gemsID: friend, database: database)
+        } catch {
+            logger.error("[TDHFriendLink] refreshConnection: fetchSchedule failed (accepted-restore): \(error.localizedDescription, privacy: .public)")
+            restored.sharedSchedules = connection.sharedSchedules
+        }
+        logger.info("[TDHFriendLink] restored accepted friend link from local acceptedAt proof")
+        return restored
     }
 
     private func fetchSchedule(gemsID: String, database: FriendScheduleCloudKitDatabase) async throws -> [PayPeriodSchedule] {
@@ -370,6 +467,17 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         }
     }
 
+    private func deleteRecordIfExists(
+        _ recordID: CKRecord.ID,
+        database: FriendScheduleCloudKitDatabase
+    ) async throws {
+        do {
+            _ = try await database.deleteRecord(withID: recordID)
+        } catch let error as CKError where error.code == .unknownItem {
+            return
+        }
+    }
+
     private func applyApproval(
         to record: CKRecord,
         myGEMSID: String,
@@ -378,14 +486,18 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         record[Field.gemsA] = pair.first as CKRecordValue
         record[Field.gemsB] = pair.second as CKRecordValue
         record[approvalField(for: myGEMSID, pair: pair)] = true as CKRecordValue
-        record[Field.updatedAt] = Date() as CKRecordValue
+        let now = Date()
+        if record[Field.requestedAt] == nil || (record[Field.status] as? String) == LinkStatus.canceled {
+            record[Field.requestedAt] = now as CKRecordValue
+        }
+        record[Field.updatedAt] = now as CKRecordValue
 
         if isAccepted(record) {
             record[Field.status] = LinkStatus.accepted as CKRecordValue
             if record[Field.linkedAt] == nil {
-                record[Field.linkedAt] = Date() as CKRecordValue
+                record[Field.linkedAt] = now as CKRecordValue
             }
-        } else if record[Field.status] == nil {
+        } else if record[Field.status] == nil || (record[Field.status] as? String) == LinkStatus.canceled {
             record[Field.status] = LinkStatus.pending as CKRecordValue
         }
     }
@@ -395,7 +507,7 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
             friendGEMSID: friendGEMSID,
             isAccepted: isAccepted(record),
             linkedAt: record[Field.linkedAt] as? Date,
-            requestedAt: (record[Field.updatedAt] as? Date) ?? record.creationDate
+            requestedAt: (record[Field.requestedAt] as? Date) ?? record.creationDate ?? (record[Field.updatedAt] as? Date)
         )
     }
 
@@ -420,6 +532,9 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
     }
 
     private func isAccepted(_ record: CKRecord) -> Bool {
+        if (record[Field.status] as? String) == LinkStatus.canceled {
+            return false
+        }
         if (record[Field.status] as? String) == LinkStatus.accepted {
             return true
         }
@@ -438,9 +553,11 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
                 id: connection.id,
                 employeeID: employeeID,
                 nickname: connection.nickname,
+                avatarImageData: connection.avatarImageData,
                 status: connection.status,
                 requestedAt: connection.requestedAt,
                 linkedAt: connection.linkedAt,
+                acceptedAt: connection.acceptedAt,
                 sharedSchedules: connection.sharedSchedules,
                 sharedTimelineCards: connection.sharedTimelineCards
             )
@@ -455,13 +572,16 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
 
     private func mergedConnection(_ lhs: FriendConnection, _ rhs: FriendConnection) -> FriendConnection {
         let accepted = lhs.status == .accepted || rhs.status == .accepted
+        let acceptedAt = lhs.acceptedAt ?? rhs.acceptedAt
         return FriendConnection(
             id: lhs.id,
             employeeID: lhs.employeeID,
             nickname: lhs.nickname ?? rhs.nickname,
-            status: accepted ? .accepted : .pending,
-            requestedAt: max(lhs.requestedAt, rhs.requestedAt),
+            avatarImageData: lhs.avatarImageData ?? rhs.avatarImageData,
+            status: (accepted || acceptedAt != nil) ? .accepted : .pending,
+            requestedAt: min(lhs.requestedAt, rhs.requestedAt),
             linkedAt: lhs.linkedAt ?? rhs.linkedAt,
+            acceptedAt: acceptedAt,
             sharedSchedules: lhs.sharedSchedules.isEmpty ? rhs.sharedSchedules : lhs.sharedSchedules,
             sharedTimelineCards: lhs.sharedTimelineCards.isEmpty ? rhs.sharedTimelineCards : lhs.sharedTimelineCards
         )

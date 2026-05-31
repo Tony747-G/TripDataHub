@@ -101,7 +101,7 @@ struct IPadOperationalWorkspaceView: View {
             viewModel.consumePendingAppGroupImportIfAvailable()
             await viewModel.fetchCrewAccessImportFilesIfNeeded(reason: "ipad workspace")
             await viewModel.fetchDeviceScheduleIfNeeded(reason: "ipad workspace")
-            if AppEnvironment.isTripBoardFetchVisible {
+            if AppEnvironment.isFriendSharingVisible {
                 await viewModel.syncFriendCloudKit(reason: "ipad workspace opened")
             }
         }
@@ -109,7 +109,7 @@ struct IPadOperationalWorkspaceView: View {
             if newPhase == .active {
                 viewModel.consumePendingAppGroupImportIfAvailable()
                 Task {
-                    if AppEnvironment.isTripBoardFetchVisible {
+                    if AppEnvironment.isFriendSharingVisible {
                         await viewModel.syncFriendCloudKit(reason: "ipad workspace active")
                     }
                 }
@@ -395,7 +395,10 @@ private struct IPadFriendsSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                FriendsManagementSection()
+                FriendsManagementSection { friend in
+                    editingFriend = friend
+                    nicknameInput = friend.nickname ?? ""
+                }
             }
             .navigationTitle("Friends")
             .navigationBarTitleDisplayMode(.inline)
@@ -430,8 +433,11 @@ private struct IPadFriendsSheet: View {
 private struct FriendsManagementSection: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @State private var employeeIDInput = ""
+    @State private var friendPendingRemoval: FriendConnection?
+    let onRenameFriend: (FriendConnection) -> Void
 
     var body: some View {
+        Group {
         Section("View Friend's Schedule") {
             if viewModel.acceptedFriendConnections.isEmpty {
                 Text("No friends yet.")
@@ -462,6 +468,18 @@ private struct FriendsManagementSection: View {
                             }
                         }
                     }
+                    .simultaneousGesture(
+                        LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                            onRenameFriend(friend)
+                        }
+                    )
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            friendPendingRemoval = friend
+                        } label: {
+                            Label("Unfriend", systemImage: "person.crop.circle.badge.xmark")
+                        }
+                    }
                 }
             }
         }
@@ -475,6 +493,15 @@ private struct FriendsManagementSection: View {
                         Text("Pending")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    }
+                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            Task {
+                                await viewModel.cancelPendingFriendRequest(friend.id)
+                            }
+                        } label: {
+                            Label("Cancel", systemImage: "xmark.circle")
+                        }
                     }
                 }
             }
@@ -500,6 +527,31 @@ private struct FriendsManagementSection: View {
                 Task { await viewModel.syncFriendCloudKit(reason: "ipad manual") }
             }
             .disabled(viewModel.isSyncingFriendCloudKit)
+        }
+        }
+        .confirmationDialog(
+            friendPendingRemoval.map { "Unfriend \($0.displayName)?" } ?? "Unfriend?",
+            isPresented: Binding(
+                get: { friendPendingRemoval != nil },
+                set: { if !$0 { friendPendingRemoval = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Unfriend", role: .destructive) {
+                if let friend = friendPendingRemoval {
+                    Task {
+                        await viewModel.removeFriend(friend.id)
+                    }
+                }
+                friendPendingRemoval = nil
+            }
+            Button("Cancel", role: .cancel) {
+                friendPendingRemoval = nil
+            }
+        } message: {
+            if let friend = friendPendingRemoval {
+                Text("This removes \(friend.displayName) from Friends and stops sharing schedules with this pilot.")
+            }
         }
     }
 }

@@ -25,17 +25,17 @@ T*
 T*
 (Trip Information) Tj
 T*
-(Date:         01Jun2026) Tj
+(Date:         14Jun2026) Tj
 T*
 () Tj
 T*
-(Trip Id: A00001 01Jun2026) Tj
+(Trip Id: A00001 14Jun2026) Tj
 T*
 (Day             Flight           Departure-Arrival                            Start               Start\(LT\)            End            End\(LT\)   Block A/C Cnx PNR DH Remark) Tj
 T*
 (                Duty start                                                    12:00               04:00) Tj
 T*
-(1 Mo            001              ANC-CVG                                      13:00               05:00                19:00          15:00     06:00   747) Tj
+(1 Su            001              ANC-CVG                                      13:00               05:00                19:00          15:00     06:00   747) Tj
 T*
 (                Duty end                                                                                               19:30          15:30) Tj
 T*
@@ -45,7 +45,7 @@ T*
 T*
 (                Duty start                                                    09:00               05:00) Tj
 T*
-(2 Tu            002              CVG-HND                                      10:00               06:00                22:00          07:00     12:00   747) Tj
+(2 Mo            002              CVG-HND                                      10:00               06:00                22:00          07:00     12:00   747) Tj
 T*
 (                Duty end                                                                                               22:30          07:30) Tj
 T*
@@ -55,7 +55,7 @@ T*
 T*
 (                Duty start                                                    23:00               08:00) Tj
 T*
-(3 We            DH 003           HND-ANC                                      00:30               09:30                09:30          01:30     09:00   747) Tj
+(3 We            DH 5X003         HND-ANC                                      00:30               09:30                09:30          01:30     09:00   747) Tj
 T*
 (                Duty end                                                                                               10:00          02:00) Tj
 T*
@@ -67,7 +67,7 @@ T*
 T*
 (No crew assigned for this sample. GEMS ID and Name: None) Tj
 T*
-(Created 01Jun2026 00:00 \(UTC\) by TripDataHub) Tj
+(Created 14Jun2026 00:00 \(UTC\) by TripDataHub) Tj
 T*
 () Tj
 T*

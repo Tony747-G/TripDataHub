@@ -31,7 +31,7 @@ struct RootTabView: View {
                 }
                 .tag(0)
 
-            if AppEnvironment.isTripBoardFetchVisible {
+            if AppEnvironment.isOpenTimeVisible {
                 OpenTimeTabView()
                     .tabItem {
                         Label("OpenTime", systemImage: "clock")
@@ -39,7 +39,7 @@ struct RootTabView: View {
                     .tag(1)
             }
 
-            if AppEnvironment.isTripBoardFetchVisible {
+            if AppEnvironment.isFriendSharingVisible {
                 FriendsTabView()
                     .tabItem {
                         Label("Friends", systemImage: "person.2")
@@ -92,7 +92,7 @@ struct RootTabView: View {
             viewModel.refreshFlightCountdownPresentation()
             Task {
                 await viewModel.autoFetchOnAppActiveIfEnabled(autoFetchOnOpen)
-                if AppEnvironment.isTripBoardFetchVisible {
+                if AppEnvironment.isFriendSharingVisible {
                     await viewModel.syncFriendCloudKit(reason: "app opened")
                 }
             }
@@ -104,7 +104,7 @@ struct RootTabView: View {
                 viewModel.refreshFlightCountdownPresentation()
                 Task {
                     await viewModel.autoFetchOnAppActiveIfEnabled(autoFetchOnOpen)
-                    if AppEnvironment.isTripBoardFetchVisible {
+                    if AppEnvironment.isFriendSharingVisible {
                         await viewModel.syncFriendCloudKit(reason: "app active")
                     }
                 }

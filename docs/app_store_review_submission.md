@@ -4,7 +4,11 @@ Use this checklist when submitting the App Store Review / Demo Mode build.
 
 ## Build Mode
 
-Archive the review build with the `APPSTORE_REVIEW` Swift compilation flag enabled.
+For v1.1.0 Friend Sharing review, archive a normal Release build unless you intentionally want the legacy Demo Mode build.
+
+Do not use the `APPSTORE_REVIEW` Swift compilation flag when Friend Sharing itself must be visible to App Review.
+
+Legacy Demo Mode can still be produced with the `APPSTORE_REVIEW` Swift compilation flag enabled.
 
 This enables Demo Mode:
 
@@ -39,14 +43,22 @@ Do not provide airline, CrewAccess, TripBoard, GEMS, or employer credentials.
 
 ## Review Notes
 
-Paste the following into App Review Notes:
+For v1.1.0 and later, paste the following into App Review Notes:
 
 ```text
 TripDataHub is a personal schedule viewer that uses manually imported PDF schedule files provided by the user.
 
-For App Store review, the submitted build runs in Demo Mode. GEMS verification is disabled, TripBoard Fetch is unavailable, and Friends / advanced schedule sharing is hidden and disabled. The app does not require sign-in for review.
+TripDataHub includes optional Friend Sharing. Friend Sharing uses CloudKit Public Database records keyed by verified GEMS IDs. It does not use CloudKit Sharing / CKShare.
 
-The app does not connect to airline systems, crew systems, employer databases, or TripBoard during review. Manual PDF import remains available so reviewers can inspect the core schedule viewer experience.
+Users must mutually add each other's GEMS ID before any schedule information becomes visible. Adding another user's GEMS ID only records one side of approval. The friend connection becomes active only after both users have added each other.
+
+There is no public user search, public profile directory, messaging, social feed, or one-way following.
+
+TripDataHub uploads shared schedule records only after a mutual friend connection is accepted. After acceptance, both users can view each other's shared schedule. If either user removes the friend connection, the link is marked as canceled, approval flags are cleared, and the other user's schedule is no longer displayed. When a user disables sharing by removing their last friend or deletes their account, TripDataHub removes that user's shared schedule records from CloudKit Public Database and cancels their friend links.
+
+The shared Friend schedule is read-only to the receiving user. The feature shares only the user's display name/profile picture where configured and parsed schedule data needed for the schedule timeline. It does not expose internal CloudKit IDs, device identifiers, CloudKit metadata, last-sync timestamps, online status, or hidden profile attributes.
+
+The app does not connect to airline systems, crew systems, employer databases, or TripBoard during review. Manual PDF import remains available so reviewers can inspect the core schedule viewer experience. TripBoard Fetch remains unavailable in App Store builds.
 
 Sample schedule PDF:
 https://tripdatahub.app/sample/
@@ -57,6 +69,12 @@ Review steps:
 3. Use iOS Share and choose TripDataHub.
 4. Confirm the import in TripDataHub.
 5. Review the imported trip in Timeline, Calendar, and flight detail views.
+
+Friend Sharing review test account:
+1. Verify with test GEMS ID `0000001` and DOB `01/01/1990`.
+2. Open Friends and add friend GEMS ID `0000002`.
+3. Test account `0000002` is preconfigured and has already approved the relationship for App Review. After adding `0000002`, the mutual friend connection becomes active and the sample shared schedule becomes visible.
+4. Swipe the friend row and choose Unfriend, then confirm. The friend schedule disappears and the link is canceled.
 
 The sample screenshots and sample schedule data used for App Store review are synthetic demo data created specifically for review purposes only. No real crew data, employee identifiers, airline credentials, or operational company data are included in the sample content.
 ```
@@ -73,5 +91,4 @@ Fresh install with `APPSTORE_REVIEW` enabled:
 - Flight detail / trip timeline sheet is reviewable.
 - Settings shows Demo Mode and a TripBoard unavailable message.
 - No GEMS verification form is shown.
-- No Friends / advanced sharing UI is shown.
-- No advanced sharing CloudKit sync/upload/request is performed.
+- If Friend Sharing is enabled for the submitted build, it remains optional and requires iCloud plus mutual GEMS-ID approval before any shared schedule appears.

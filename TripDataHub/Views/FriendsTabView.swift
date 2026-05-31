@@ -7,6 +7,7 @@ struct FriendsTabView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @State private var employeeIDInput = ""
     @State private var editingFriend: FriendConnection?
+    @State private var friendPendingRemoval: FriendConnection?
     @State private var nicknameInput = ""
 
     var body: some View {
@@ -65,6 +66,13 @@ struct FriendsTabView: View {
                                     nicknameInput = friend.nickname ?? ""
                                 }
                             )
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    friendPendingRemoval = friend
+                                } label: {
+                                    Label("Unfriend", systemImage: "person.crop.circle.badge.xmark")
+                                }
+                            }
                         }
                     }
                 }
@@ -169,6 +177,30 @@ struct FriendsTabView: View {
                     Text("GEMS: \(friend.employeeID)")
                 }
             }
+            .confirmationDialog(
+                friendPendingRemoval.map { "Unfriend \($0.displayName)?" } ?? "Unfriend?",
+                isPresented: Binding(
+                    get: { friendPendingRemoval != nil },
+                    set: { if !$0 { friendPendingRemoval = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Unfriend", role: .destructive) {
+                    if let friend = friendPendingRemoval {
+                        Task {
+                            await viewModel.removeFriend(friend.id)
+                        }
+                    }
+                    friendPendingRemoval = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    friendPendingRemoval = nil
+                }
+            } message: {
+                if let friend = friendPendingRemoval {
+                    Text("This removes \(friend.displayName) from Friends and stops sharing schedules with this pilot.")
+                }
+            }
         }
     }
 
@@ -197,11 +229,11 @@ struct FriendsTabView: View {
         if !viewModel.acceptedFriendConnections.isEmpty {
             return (.green, "Schedule sharing active")
         }
-        if viewModel.isScheduleSharingEnabled {
-            return (.orange, "Waiting for mutual approval")
-        }
         if !viewModel.pendingFriendConnections.isEmpty {
             return (.gray, "Mutual approval needed")
+        }
+        if viewModel.isScheduleSharingEnabled {
+            return (.gray, "Schedule sharing on")
         }
         return (.gray, "Schedule sharing off")
     }

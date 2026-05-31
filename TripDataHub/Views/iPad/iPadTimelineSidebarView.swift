@@ -8,7 +8,7 @@ struct IPadTimelineSidebarView: View {
     @State private var tripDataByTripID: [String: CrewAccessTripSummary] = [:]
     @State private var deleteTripConfirmPairing: String? = nil
     @State private var friendScheduleMatches: FriendScheduleMatches = .empty
-    @State private var friendMatchAlert: (title: String, message: String)? = nil
+    @State private var friendMatchAlert: FriendMatchPresentation? = nil
     @State private var selectedManualOperationalEvent: ManualOperationalEvent?
     // Cached per-schedule-update data — computed once in refreshLegData(), not on every body eval.
     @State private var legData = TimelineLegData(schedules: [])
@@ -146,12 +146,8 @@ struct IPadTimelineSidebarView: View {
                                                     dayDiff: dayShift(for: leg),
                                                     blockText: blockText(for: leg),
                                                     iconColor: hasFlightMatch ? friendMatchAmber : .primary,
-                                                    onIconTap: hasFlightMatch ? {
-                                                        let lines = flightMatches.map { "GEMS \($0.friendGEMSID): \($0.departureAirport)-\($0.arrivalAirport)" }
-                                                        friendMatchAlert = (
-                                                            title: "Friends on \(leg.flight)",
-                                                            message: lines.joined(separator: "\n")
-                                                        )
+                                                    onFriendMatchTap: hasFlightMatch ? {
+                                                        friendMatchAlert = flightMatchPresentation(for: leg, matches: flightMatches)
                                                     } : nil
                                                 )
                                             }
@@ -198,12 +194,8 @@ struct IPadTimelineSidebarView: View {
                                                         ),
                                                         fontScale: timelineFontScale,
                                                         iconColor: hasRestOverlap ? friendMatchAmber : .primary,
-                                                        onIconTap: hasRestOverlap ? {
-                                                            let lines = restOverlaps.map { "GEMS \($0.friendGEMSID) at \($0.station)" }
-                                                            friendMatchAlert = (
-                                                                title: "Friends at \(station)",
-                                                                message: lines.joined(separator: "\n")
-                                                            )
+                                                        onFriendMatchTap: hasRestOverlap ? {
+                                                            friendMatchAlert = restOverlapPresentation(station: station, overlaps: restOverlaps)
                                                         } : nil
                                                     )
                                                     .background(isHighlighted ? Color.red.opacity(0.10) : (isSelected ? Color.accentColor.opacity(0.12) : Color.clear))
@@ -351,13 +343,8 @@ struct IPadTimelineSidebarView: View {
         .onChange(of: viewModel.friendConnections) { _, _ in
             refreshFriendScheduleMatches()
         }
-        .alert(friendMatchAlert?.title ?? "", isPresented: Binding(
-            get: { friendMatchAlert != nil },
-            set: { if !$0 { friendMatchAlert = nil } }
-        )) {
-            Button("OK") { friendMatchAlert = nil }
-        } message: {
-            Text(friendMatchAlert?.message ?? "")
+        .sheet(item: $friendMatchAlert) { presentation in
+            FriendMatchPresentationView(presentation: presentation)
         }
         .confirmationDialog(
             deleteTripConfirmPairing.map { "Delete Trip \($0)?" } ?? "Delete Trip?",
@@ -846,7 +833,7 @@ struct IPadTimelineSidebarView: View {
     }
 
     private func refreshFriendScheduleMatches() {
-        guard AppEnvironment.isTripBoardFetchVisible else {
+        guard AppEnvironment.isFriendSharingVisible else {
             friendScheduleMatches = .empty
             return
         }
@@ -862,6 +849,48 @@ struct IPadTimelineSidebarView: View {
 
     private var friendMatchAmber: Color {
         Color(red: 0.95, green: 0.58, blue: 0.12)
+    }
+
+    private func flightMatchPresentation(for leg: TripLeg, matches: [FriendFlightMatch]) -> FriendMatchPresentation {
+        FriendMatchPresentation(
+            title: "Friends on \(leg.displayFlightNumberText)",
+            friends: matches.map { match in
+                friendMatchPerson(
+                    gemsID: match.friendGEMSID,
+                    subtitle: "\(match.departureAirport)-\(match.arrivalAirport)"
+                )
+            }
+        )
+    }
+
+    private func restOverlapPresentation(station: String, overlaps: [FriendRestOverlap]) -> FriendMatchPresentation {
+        FriendMatchPresentation(
+            title: "Friends at \(station)",
+            friends: overlaps.map { overlap in
+                friendMatchPerson(
+                    gemsID: overlap.friendGEMSID,
+                    subtitle: "\(durationText(minutes: overlap.overlapMinutes)) overlap"
+                )
+            }
+        )
+    }
+
+    private func friendMatchPerson(gemsID: String, subtitle: String) -> FriendMatchPerson {
+        let normalized = GEMSIDNormalizer.normalize(gemsID)
+        let friend = viewModel.acceptedFriendConnections.first {
+            GEMSIDNormalizer.normalize($0.employeeID) == normalized
+        }
+        return FriendMatchPerson(
+            id: normalized,
+            displayName: friend?.displayName ?? normalized,
+            subtitle: subtitle,
+            avatarImageData: friend?.avatarImageData
+        )
+    }
+
+    private func durationText(minutes: Int) -> String {
+        let safeMinutes = max(0, minutes)
+        return "\(safeMinutes / 60)h \(safeMinutes % 60)m"
     }
 
 }

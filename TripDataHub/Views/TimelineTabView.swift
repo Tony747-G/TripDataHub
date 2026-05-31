@@ -1,11 +1,5 @@
 import SwiftUI
 
-private struct FriendMatchAlert: Identifiable {
-    let id = UUID()
-    let title: String
-    let message: String
-}
-
 struct TimelineTabView: View {
     let scrollTrigger: Int
     @EnvironmentObject private var viewModel: AppViewModel
@@ -16,7 +10,7 @@ struct TimelineTabView: View {
     @State private var legData = TimelineLegData(schedules: [])
     @State private var tripDataByTripID: [String: CrewAccessTripSummary] = [:]
     @State private var importedUTCTimesByTripAndSequence: [String: CrewAccessLegUTCTimes] = [:]
-    @State private var friendMatchAlert: FriendMatchAlert?
+    @State private var friendMatchAlert: FriendMatchPresentation?
     @State private var friendScheduleMatches: FriendScheduleMatches = .empty
     @State private var deleteTripConfirmPairing: String? = nil
     @State private var showingAddEvent = false
@@ -152,12 +146,8 @@ struct TimelineTabView: View {
                 refreshTripDataCards()
                 refreshFriendScheduleMatches()
             }
-            .alert(item: $friendMatchAlert) { alert in
-                Alert(
-                    title: Text(alert.title),
-                    message: Text(alert.message),
-                    dismissButton: .default(Text("OK"))
-                )
+            .sheet(item: $friendMatchAlert) { presentation in
+                FriendMatchPresentationView(presentation: presentation)
             }
             .confirmationDialog(
                 deleteTripConfirmPairing.map { "Delete Trip \($0)?" } ?? "Delete Trip?",
@@ -400,7 +390,7 @@ struct TimelineTabView: View {
             dayDiff: dayShift(for: leg),
             blockText: blockAndLayoverText(for: leg, nextLegByID: nextLegByID),
             iconColor: hasFlightMatch ? friendMatchAmber : .primary,
-            onIconTap: hasFlightMatch
+            onFriendMatchTap: hasFlightMatch
                 ? { friendMatchAlert = flightMatchAlert(for: leg, matches: flightMatches) }
                 : nil
         )
@@ -465,7 +455,7 @@ struct TimelineTabView: View {
             isPast: TimelineLayoverSupport.isPastLayover(arrDate: arrDate, nextLeg: next),
             fontScale: fontScale,
             iconColor: hasRestOverlap ? friendMatchAmber : .primary,
-            onIconTap: hasRestOverlap
+            onFriendMatchTap: hasRestOverlap
                 ? { friendMatchAlert = restOverlapAlert(station: station, overlaps: restOverlaps) }
                 : nil
         )
@@ -644,7 +634,7 @@ struct TimelineTabView: View {
     }
 
     private func refreshFriendScheduleMatches() {
-        guard AppEnvironment.isTripBoardFetchVisible else {
+        guard AppEnvironment.isFriendSharingVisible else {
             friendScheduleMatches = .empty
             return
         }
@@ -1056,25 +1046,44 @@ struct TimelineTabView: View {
         Color(red: 0.95, green: 0.58, blue: 0.12)
     }
 
-    private func flightMatchAlert(for leg: TripLeg, matches: [FriendFlightMatch]) -> FriendMatchAlert {
+    private func flightMatchAlert(for leg: TripLeg, matches: [FriendFlightMatch]) -> FriendMatchPresentation {
         let title = "Friends on \(leg.displayFlightNumberText)"
-        let lines = matches.map { match in
-            "GEMS \(match.friendGEMSID): \(match.departureAirport)-\(match.arrivalAirport)"
+        let friends = matches.map { match in
+            friendMatchPerson(
+                gemsID: match.friendGEMSID,
+                subtitle: "\(match.departureAirport)-\(match.arrivalAirport)"
+            )
         }
-        return FriendMatchAlert(
+        return FriendMatchPresentation(
             title: title,
-            message: lines.joined(separator: "\n")
+            friends: friends
         )
     }
 
-    private func restOverlapAlert(station: String, overlaps: [FriendRestOverlap]) -> FriendMatchAlert {
+    private func restOverlapAlert(station: String, overlaps: [FriendRestOverlap]) -> FriendMatchPresentation {
         let title = "Friends at \(station)"
-        let lines = overlaps.map { overlap in
-            "GEMS \(overlap.friendGEMSID): \(durationText(minutes: overlap.overlapMinutes)) overlap"
+        let friends = overlaps.map { overlap in
+            friendMatchPerson(
+                gemsID: overlap.friendGEMSID,
+                subtitle: "\(durationText(minutes: overlap.overlapMinutes)) overlap"
+            )
         }
-        return FriendMatchAlert(
+        return FriendMatchPresentation(
             title: title,
-            message: lines.joined(separator: "\n")
+            friends: friends
+        )
+    }
+
+    private func friendMatchPerson(gemsID: String, subtitle: String) -> FriendMatchPerson {
+        let normalized = GEMSIDNormalizer.normalize(gemsID)
+        let friend = viewModel.acceptedFriendConnections.first {
+            GEMSIDNormalizer.normalize($0.employeeID) == normalized
+        }
+        return FriendMatchPerson(
+            id: normalized,
+            displayName: friend?.displayName ?? normalized,
+            subtitle: subtitle,
+            avatarImageData: friend?.avatarImageData
         )
     }
 

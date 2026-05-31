@@ -376,6 +376,9 @@ final class AppViewModel: ObservableObject {
             self.currentCloudKitRecordName = localIdentityRecordName()
         }
         self.updateAdminStatus()
+        if let loadedVerifiedIdentity {
+            seedAppReviewMockScheduleIfNeeded(for: loadedVerifiedIdentity.gemsID)
+        }
         backfillMissingUTCInCachedSchedulesIfNeeded()
         if self.authStatus == .loggedIn, errorMessage == SyncServiceError.notAuthenticated.localizedDescription {
             errorMessage = nil
@@ -650,6 +653,12 @@ final class AppViewModel: ObservableObject {
         return verifiedIdentity.cloudKitRecordName == currentCloudKitRecordName
     }
 
+    private var isAppReviewMockVerifiedIdentity: Bool {
+        guard let gemsID = verifiedIdentity?.gemsID else { return false }
+        let normalized = GEMSIDNormalizer.normalize(gemsID)
+        return normalized == "0000001" || normalized == "0000002"
+    }
+
     var seniorityCount: Int { gemsVerificationRecordCount }
 
     var canAccessAdminTab: Bool {
@@ -734,6 +743,13 @@ final class AppViewModel: ObservableObject {
             friendActionMessage = "GEMS ID is required."
             return
         }
+        guard employeeID != GEMSIDNormalizer.normalize(myGEMSID) else {
+            friendActionMessage = "You cannot add yourself as a friend."
+            return
+        }
+        if linkAppReviewMockFriendIfNeeded(myGEMSID: myGEMSID, friendGEMSID: employeeID) {
+            return
+        }
         if let index = friendConnections.firstIndex(where: { $0.employeeID == employeeID }) {
             if friendConnections[index].status == .accepted {
                 friendActionMessage = "Friend already linked: \(employeeID)"
@@ -746,10 +762,12 @@ final class AppViewModel: ObservableObject {
                 myGEMSID: myGEMSID,
                 friendGEMSID: employeeID
             )
-            enableScheduleSharingForFriends()
             upsertFriendConnection(from: link)
-            await uploadSharedScheduleIfNeeded(reason: "friend request")
-            await refreshFriendSchedulesFromCloud()
+            if link.isAccepted {
+                enableScheduleSharingForFriends()
+                await uploadSharedScheduleIfNeeded(reason: "friend accepted")
+                await refreshFriendSchedulesFromCloud()
+            }
             friendActionMessage = link.isAccepted
                 ? "Friend linked: \(employeeID)"
                 : "Request saved. Ask GEMS \(employeeID) to add your GEMS ID too."
@@ -765,6 +783,7 @@ final class AppViewModel: ObservableObject {
             friendConnections[index].requestedAt = link.requestedAt ?? Date()
             if link.isAccepted {
                 friendConnections[index].linkedAt = link.linkedAt ?? friendConnections[index].linkedAt ?? Date()
+                friendConnections[index].acceptedAt = friendConnections[index].acceptedAt ?? friendConnections[index].linkedAt
             }
         } else {
             friendConnections.append(
@@ -799,10 +818,39 @@ final class AppViewModel: ObservableObject {
             friendConnections.removeAll { $0.id == id }
             saveFriendConnections()
             updateScheduleSharingAfterFriendListChange()
+            await deleteSharedScheduleDataIfSharingDisabled(gemsID: myGEMSID)
             friendActionMessage = "Request canceled: \(connection.employeeID)"
         } catch {
             friendActionMessage = friendRequestErrorMessage(error)
             logNonFatal("Friend CloudKit cancel failed: \(error.localizedDescription)")
+        }
+    }
+
+    func removeFriend(_ id: UUID) async {
+        guard !AppEnvironment.isAppStoreReviewMode else {
+            friendActionMessage = "Schedule sharing is unavailable in Demo Mode."
+            return
+        }
+        guard let index = friendConnections.firstIndex(where: { $0.id == id }) else { return }
+        let connection = friendConnections[index]
+        guard let myGEMSID = verifiedIdentity?.gemsID else {
+            friendActionMessage = "GEMS verification is required."
+            return
+        }
+
+        do {
+            try await friendScheduleCloudKitService.cancelFriendRequest(
+                myGEMSID: myGEMSID,
+                friendGEMSID: connection.employeeID
+            )
+            friendConnections.removeAll { $0.id == id }
+            saveFriendConnections()
+            updateScheduleSharingAfterFriendListChange()
+            await deleteSharedScheduleDataIfSharingDisabled(gemsID: myGEMSID)
+            friendActionMessage = "Friend removed: \(connection.employeeID)"
+        } catch {
+            friendActionMessage = friendRequestErrorMessage(error)
+            logNonFatal("Friend CloudKit remove failed: \(error.localizedDescription)")
         }
     }
 
@@ -822,6 +870,17 @@ final class AppViewModel: ObservableObject {
             }
         }
         return "Friend request could not be saved. Please try again."
+    }
+
+    private func deleteSharedScheduleDataIfSharingDisabled(gemsID: String) async {
+        guard !isScheduleSharingEnabled else { return }
+        do {
+            try await friendScheduleCloudKitService.deleteSharedScheduleData(gemsID: gemsID)
+            friendCloudKitSyncMessage = nil
+        } catch {
+            friendCloudKitSyncMessage = "Failed to remove shared schedule: \(error.localizedDescription)"
+            logNonFatal("Friend CloudKit shared schedule delete failed: \(error.localizedDescription)")
+        }
     }
 
     func setScheduleSharingEnabled(_ enabled: Bool) {
@@ -859,8 +918,7 @@ final class AppViewModel: ObservableObject {
             return
         }
         let hasAcceptedConnection = friendConnections.contains { $0.status == .accepted }
-        let hasPendingConnection = friendConnections.contains { $0.status == .pending }
-        let shouldShare = hasAcceptedConnection || (isScheduleSharingEnabled && hasPendingConnection)
+        let shouldShare = isScheduleSharingEnabled && hasAcceptedConnection
         guard isScheduleSharingEnabled != shouldShare else { return }
         isScheduleSharingEnabled = shouldShare
         UserDefaults.standard.set(shouldShare, forKey: scheduleSharingEnabledKey)
@@ -886,6 +944,7 @@ final class AppViewModel: ObservableObject {
 
     func handleSchedulesChangedForSharing() {
         guard !AppEnvironment.isAppStoreReviewMode else { return }
+        guard !isAppReviewMockVerifiedIdentity else { return }
         guard isScheduleSharingEnabled else { return }
         Task { [weak self] in
             await self?.uploadSharedScheduleIfNeeded(reason: "schedule changed")
@@ -894,12 +953,21 @@ final class AppViewModel: ObservableObject {
 
     func syncFriendCloudKit(reason: String = "manual") async {
         guard !AppEnvironment.isAppStoreReviewMode else { return }
+        guard !isAppReviewMockVerifiedIdentity else {
+            if let gemsID = verifiedIdentity?.gemsID {
+                seedAppReviewMockScheduleIfNeeded(for: gemsID)
+            }
+            if !acceptedFriendConnections.isEmpty {
+                friendCloudKitSyncMessage = "App Review mock schedule sharing active."
+            }
+            return
+        }
         guard !isSyncingFriendCloudKit else { return }
         isSyncingFriendCloudKit = true
         defer { isSyncingFriendCloudKit = false }
 
-        await uploadSharedScheduleIfNeeded(reason: reason)
         await refreshFriendSchedulesFromCloud()
+        await uploadSharedScheduleIfNeeded(reason: reason)
     }
 
     private func uploadSharedScheduleIfNeeded(reason: String) async {
@@ -923,14 +991,17 @@ final class AppViewModel: ObservableObject {
             needsSharedScheduleUpload = false
             pendingSharedScheduleUploadReason = nil
             await performSharedScheduleUploadIfNeeded(reason: currentReason)
-            if needsSharedScheduleUpload {
-                nextReason = pendingSharedScheduleUploadReason ?? "coalesced"
-            }
+            let coalescedReason = pendingSharedScheduleUploadReason
+            let shouldUploadAgain = needsSharedScheduleUpload
+            needsSharedScheduleUpload = false
+            pendingSharedScheduleUploadReason = nil
+            nextReason = shouldUploadAgain ? (coalescedReason ?? "coalesced") : nil
         }
     }
 
     private func performSharedScheduleUploadIfNeeded(reason: String) async {
         guard !AppEnvironment.isAppStoreReviewMode else { return }
+        guard !isAppReviewMockVerifiedIdentity else { return }
         guard isScheduleSharingEnabled else { return }
         guard isIdentityVerified,
               let verifiedIdentity,
@@ -939,11 +1010,6 @@ final class AppViewModel: ObservableObject {
             return
         }
         let shareableSchedules = schedules.isEmpty ? crewAccessSchedules : schedules
-        guard !shareableSchedules.isEmpty else {
-            friendCloudKitSyncMessage = "No schedule to share yet."
-            logNonFatal("Friend CloudKit schedule upload skipped: no schedules (\(reason))")
-            return
-        }
         let crewAccessTrips = await Self.loadCrewAccessTripJSONPayloadsFromImportFiles()
         // Enrich schedules with hotel names from local JSON before uploading —
         // friends see hotel names without needing to re-import PDFs.
@@ -981,6 +1047,7 @@ final class AppViewModel: ObservableObject {
 
     func refreshFriendSchedulesFromCloud() async {
         guard !AppEnvironment.isAppStoreReviewMode else { return }
+        guard !isAppReviewMockVerifiedIdentity else { return }
         guard isIdentityVerified,
               let verifiedIdentity else {
             return
@@ -1433,8 +1500,10 @@ final class AppViewModel: ObservableObject {
         case .available:
             keepCachedIdentityAfterTransientCloudKitFailure("CloudKit identity is temporarily unavailable. Using the last verified GEMS identity for now.")
         case .noAccount:
-            cloudKitIdentityMessage = "Sign into iCloud to verify or share schedules."
-            currentCloudKitRecordName = nil
+            cloudKitIdentityMessage = "Sign into iCloud to share schedules across devices."
+            if currentCloudKitRecordName == nil {
+                currentCloudKitRecordName = verifiedIdentity?.cloudKitRecordName ?? localIdentityRecordName()
+            }
             updateAdminStatus()
         case .restricted:
             cloudKitIdentityMessage = "iCloud access is restricted on this device."
@@ -3994,9 +4063,9 @@ final class AppViewModel: ObservableObject {
     }
 
     func verifyIdentity(gemsID rawGemsID: String, dateOfBirth rawDateOfBirth: String) async {
-        guard let currentCloudKitRecordName else {
-            identityActionMessage = "Apple identity is unavailable. Sign into iCloud first."
-            return
+        let identityRecordName = currentCloudKitRecordName ?? localIdentityRecordName()
+        if currentCloudKitRecordName == nil {
+            currentCloudKitRecordName = identityRecordName
         }
 
         let gemsID = GEMSIDNormalizer.normalize(rawGemsID)
@@ -4011,14 +4080,18 @@ final class AppViewModel: ObservableObject {
         }
 
         let verificationResult: GEMSVerificationResult?
-        do {
-            verificationResult = try await gemsVerificationCloudKitService.verify(
-                gemsID: gemsID,
-                dateOfBirth: normalizedDOB
-            )
-        } catch {
-            identityActionMessage = "Verification database is unavailable: \(error.localizedDescription)"
-            return
+        if let mockResult = appReviewMockVerificationResult(gemsID: gemsID, normalizedDOB: normalizedDOB) {
+            verificationResult = mockResult
+        } else {
+            do {
+                verificationResult = try await gemsVerificationCloudKitService.verify(
+                    gemsID: gemsID,
+                    dateOfBirth: normalizedDOB
+                )
+            } catch {
+                identityActionMessage = "Verification database is unavailable: \(error.localizedDescription)"
+                return
+            }
         }
 
         let isAdminBootstrap = verificationResult == nil && isAdminEligible(gemsID: gemsID, dob: normalizedDOB)
@@ -4029,7 +4102,7 @@ final class AppViewModel: ObservableObject {
         let domicile = verificationResult?.domicile ?? DomicileSupport.defaultDomicile
 
         let verified = VerifiedIdentityProfile(
-            cloudKitRecordName: currentCloudKitRecordName,
+            cloudKitRecordName: identityRecordName,
             name: "GEMS \(gemsID)",
             gemsID: gemsID,
             domicile: domicile,
@@ -4042,6 +4115,7 @@ final class AppViewModel: ObservableObject {
         )
         verifiedIdentity = verified
         saveVerifiedIdentity(verified)
+        seedAppReviewMockScheduleIfNeeded(for: gemsID)
         do {
             try await gemsVerificationCloudKitService.recordVerifiedUser(gemsID: gemsID)
         } catch {
@@ -4051,16 +4125,237 @@ final class AppViewModel: ObservableObject {
         identityActionMessage = isAdminBootstrap
             ? "Verified as bootstrap admin. Upload GEMS verification records to CloudKit."
             : "Verified as GEMS \(gemsID) / \(domicile)."
-        if isScheduleSharingEnabled {
-            Task { [weak self] in
-                await self?.syncFriendCloudKit(reason: "identity verified")
-            }
+        Task { [weak self] in
+            await self?.syncFriendCloudKit(reason: "identity verified")
         }
         Task { [weak self] in
             await self?.fetchDeviceScheduleIfNeeded(reason: "identity verified")
             await self?.fetchManualEventsIfNeeded(reason: "identity verified")
             await self?.uploadManualEventsIfNeeded(reason: "identity verified")
         }
+    }
+
+    private func appReviewMockVerificationResult(gemsID: String, normalizedDOB: String) -> GEMSVerificationResult? {
+        guard normalizedDOB == "01/01/1990" else { return nil }
+        switch GEMSIDNormalizer.normalize(gemsID) {
+        case "0000001", "0000002":
+            return GEMSVerificationResult(gemsID: gemsID, domicile: DomicileSupport.defaultDomicile)
+        default:
+            return nil
+        }
+    }
+
+    private func linkAppReviewMockFriendIfNeeded(myGEMSID: String, friendGEMSID: String) -> Bool {
+        let my = GEMSIDNormalizer.normalize(myGEMSID)
+        let friend = GEMSIDNormalizer.normalize(friendGEMSID)
+        guard my == "0000001", friend == "0000002" else { return false }
+
+        let linkedAt = Date()
+        upsertAppReviewMockPilotTwoFriend(linkedAt: linkedAt)
+        friendCloudKitSyncMessage = "App Review mock friend linked locally."
+        friendActionMessage = "Friend linked: \(friend)"
+        return true
+    }
+
+    private func upsertAppReviewMockPilotTwoFriend(linkedAt: Date) {
+        enableScheduleSharingForFriends()
+        let friend = "0000002"
+        let existing = friendConnections.first { $0.employeeID == friend }
+        let mockFriend = FriendConnection(
+            id: existing?.id ?? UUID(),
+            employeeID: friend,
+            nickname: existing?.nickname ?? "App Review Pilot Two",
+            status: .accepted,
+            requestedAt: existing?.requestedAt ?? linkedAt,
+            linkedAt: existing?.linkedAt ?? linkedAt,
+            acceptedAt: existing?.acceptedAt ?? linkedAt,
+            sharedSchedules: [Self.appReviewPilotTwoSchedule(updatedAt: linkedAt)]
+        )
+        if let index = friendConnections.firstIndex(where: { $0.employeeID == friend }) {
+            friendConnections[index] = mockFriend
+        } else {
+            friendConnections.append(mockFriend)
+        }
+        saveFriendConnections()
+        updateScheduleSharingAfterFriendListChange()
+        friendCloudKitSyncMessage = "App Review mock schedule sharing active."
+    }
+
+    private func seedAppReviewMockScheduleIfNeeded(for gemsID: String) {
+        let normalized = GEMSIDNormalizer.normalize(gemsID)
+        let schedule: PayPeriodSchedule
+        switch normalized {
+        case "0000001":
+            schedule = Self.appReviewPilotOneSchedule(updatedAt: Date())
+        case "0000002":
+            schedule = Self.appReviewPilotTwoSchedule(updatedAt: Date())
+        default:
+            return
+        }
+
+        var updatedCrewAccess = crewAccessSchedules.filter { existing in
+            existing.id != schedule.id
+                && !existing.legs.contains { $0.pairing == schedule.legs.first?.pairing }
+        }
+        updatedCrewAccess.append(schedule)
+        updatedCrewAccess.sort { $0.label < $1.label }
+        crewAccessSchedules = updatedCrewAccess
+        schedules = mergeAndSortSchedules(crew: updatedCrewAccess, bidpro: bidproSchedules)
+        let persistedLastSyncAt = lastSyncAt ?? Date()
+        do {
+            try cacheService.save(ScheduleCacheSnapshotV2(
+                crewAccessSchedules: updatedCrewAccess,
+                bidproSchedules: bidproSchedules,
+                lastSyncAt: persistedLastSyncAt,
+                migratedAt: nil
+            ))
+            if lastSyncAt == nil {
+                lastSyncAt = persistedLastSyncAt
+            }
+        } catch {
+            logNonFatal("Failed to persist App Review mock schedule: \(error.localizedDescription)")
+        }
+        lastImportSummaryMessage = "Loaded App Review sample trip \(schedule.legs.first?.pairing ?? schedule.id)."
+        if normalized == "0000001",
+           friendConnections.contains(where: { $0.employeeID == "0000002" }) {
+            upsertAppReviewMockPilotTwoFriend(linkedAt: Date())
+        }
+    }
+
+    private static func appReviewPilotOneSchedule(updatedAt: Date) -> PayPeriodSchedule {
+        let payPeriod = "PP26-07"
+        let pairing = "A00001"
+        let legs = [
+            TripLeg(
+                payPeriod: payPeriod,
+                pairing: pairing,
+                leg: 1,
+                flight: "001",
+                depAirport: "ANC",
+                depLocal: "2026-06-14 05:00",
+                arrAirport: "CVG",
+                arrLocal: "2026-06-14 15:00",
+                depUTC: "2026-06-14T13:00:00Z",
+                arrUTC: "2026-06-14T19:00:00Z",
+                status: "-",
+                block: "06:00",
+                layoverStation: "CVG",
+                layoverHotelName: "Holiday Inn",
+                layoverDuration: "14:30",
+                stdUTC: "2026-06-14T13:00:00Z",
+                staUTC: "2026-06-14T19:00:00Z"
+            ),
+            TripLeg(
+                payPeriod: payPeriod,
+                pairing: pairing,
+                leg: 2,
+                flight: "002",
+                depAirport: "CVG",
+                depLocal: "2026-06-15 06:00",
+                arrAirport: "HND",
+                arrLocal: "2026-06-16 07:00",
+                depUTC: "2026-06-15T10:00:00Z",
+                arrUTC: "2026-06-15T22:00:00Z",
+                status: "-",
+                block: "12:00",
+                layoverStation: "HND",
+                layoverHotelName: "Tokyu Haneda",
+                layoverDuration: "24:30",
+                stdUTC: "2026-06-15T10:00:00Z",
+                staUTC: "2026-06-15T22:00:00Z"
+            ),
+            TripLeg(
+                payPeriod: payPeriod,
+                pairing: pairing,
+                leg: 3,
+                flight: "5X003",
+                depAirport: "HND",
+                depLocal: "2026-06-17 09:30",
+                arrAirport: "ANC",
+                arrLocal: "2026-06-17 01:30",
+                depUTC: "2026-06-17T00:30:00Z",
+                arrUTC: "2026-06-17T09:30:00Z",
+                status: "DH",
+                block: "09:00",
+                stdUTC: "2026-06-17T00:30:00Z",
+                staUTC: "2026-06-17T09:30:00Z"
+            )
+        ]
+        return PayPeriodSchedule(
+            id: "\(payPeriod)-\(pairing)",
+            label: "\(payPeriod)-\(pairing)",
+            tripCount: 1,
+            legCount: legs.count,
+            openTimeCount: 0,
+            updatedAt: updatedAt,
+            legs: legs,
+            openTimeTrips: []
+        )
+    }
+
+    private static func appReviewPilotTwoSchedule(updatedAt: Date) -> PayPeriodSchedule {
+        let payPeriod = "PP26-07"
+        let pairing = "B00001"
+        let legs = [
+            TripLeg(
+                payPeriod: payPeriod,
+                pairing: pairing,
+                leg: 1,
+                flight: "4",
+                depAirport: "ANC",
+                depLocal: "2026-06-14 10:00",
+                arrAirport: "HKG",
+                arrLocal: "2026-06-15 12:00",
+                depUTC: "2026-06-14T18:00:00Z",
+                arrUTC: "2026-06-15T04:00:00Z",
+                status: "-",
+                block: "10:00",
+                stdUTC: "2026-06-14T18:00:00Z",
+                staUTC: "2026-06-15T04:00:00Z"
+            ),
+            TripLeg(
+                payPeriod: payPeriod,
+                pairing: pairing,
+                leg: 2,
+                flight: "5",
+                depAirport: "HKG",
+                depLocal: "2026-06-16 04:00",
+                arrAirport: "HND",
+                arrLocal: "2026-06-16 08:30",
+                depUTC: "2026-06-15T20:00:00Z",
+                arrUTC: "2026-06-15T23:30:00Z",
+                status: "-",
+                block: "04:30",
+                stdUTC: "2026-06-15T20:00:00Z",
+                staUTC: "2026-06-15T23:30:00Z"
+            ),
+            TripLeg(
+                payPeriod: payPeriod,
+                pairing: pairing,
+                leg: 3,
+                flight: "5X003",
+                depAirport: "HND",
+                depLocal: "2026-06-17 09:30",
+                arrAirport: "ANC",
+                arrLocal: "2026-06-17 01:30",
+                depUTC: "2026-06-17T00:30:00Z",
+                arrUTC: "2026-06-17T09:30:00Z",
+                status: "DH",
+                block: "09:00",
+                stdUTC: "2026-06-17T00:30:00Z",
+                staUTC: "2026-06-17T09:30:00Z"
+            )
+        ]
+        return PayPeriodSchedule(
+            id: "\(payPeriod)-\(pairing)",
+            label: "\(payPeriod)-\(pairing)",
+            tripCount: 1,
+            legCount: legs.count,
+            openTimeCount: 0,
+            updatedAt: updatedAt,
+            legs: legs,
+            openTimeTrips: []
+        )
     }
 
     func refreshVerifiedAppUsers() async {
@@ -4084,14 +4379,31 @@ final class AppViewModel: ObservableObject {
     }
 
     func deleteLocalProfileAccount() {
+        let deletingGEMSID = verifiedIdentity?.gemsID
         isDeletingProfileAccount = true
         Self.clearLocalProfileStorageForDelete()
+        friendConnections = []
+        saveFriendConnections()
+        isScheduleSharingEnabled = false
+        UserDefaults.standard.set(false, forKey: scheduleSharingEnabledKey)
+        friendCloudKitSyncMessage = nil
         verifiedIdentity = nil
         identityActionMessage = nil
         clearVerifiedIdentity()
         Task {
+            if let deletingGEMSID {
+                await deleteFriendSharingDataForAccountDelete(gemsID: deletingGEMSID)
+            }
             await writeProfileTombstoneToCloudKit()
             isDeletingProfileAccount = false
+        }
+    }
+
+    private func deleteFriendSharingDataForAccountDelete(gemsID: String) async {
+        do {
+            try await friendScheduleCloudKitService.deleteFriendSharingData(gemsID: gemsID)
+        } catch {
+            logNonFatal("Friend CloudKit account-delete cleanup failed: \(error.localizedDescription)")
         }
     }
 
@@ -4475,9 +4787,14 @@ final class AppViewModel: ObservableObject {
             schedules = []
         }
         return FriendConnection(
-            id: entry.id, employeeID: entry.employeeID,
+            id: entry.id,
+            employeeID: entry.employeeID,
             nickname: entry.nickname,
-            status: entry.status, requestedAt: entry.requestedAt, linkedAt: entry.linkedAt,
+            avatarImageData: entry.avatarImageData,
+            status: entry.restoredStatus,
+            requestedAt: entry.requestedAt,
+            linkedAt: entry.linkedAt ?? entry.acceptedAt,
+            acceptedAt: entry.acceptedAt,
             sharedSchedules: schedules
         )
     }
@@ -4497,10 +4814,16 @@ final class AppViewModel: ObservableObject {
         var id: UUID
         var employeeID: String
         var nickname: String?
+        var avatarImageData: Data?
         var status: FriendConnectionStatus
         var requestedAt: Date
         var linkedAt: Date?
+        var acceptedAt: Date?
         var sharedSchedulesData: Data?
+
+        var restoredStatus: FriendConnectionStatus {
+            acceptedAt == nil ? status : .accepted
+        }
     }
 
     private func normalizeFriendConnections(_ connections: [FriendConnection]) -> [FriendConnection] {
@@ -4512,9 +4835,11 @@ final class AppViewModel: ObservableObject {
                 id: connection.id,
                 employeeID: employeeID,
                 nickname: trimmedNickname.isEmpty ? nil : trimmedNickname,
-                status: connection.status,
+                avatarImageData: connection.avatarImageData,
+                status: (connection.status == .accepted || connection.acceptedAt != nil) ? .accepted : .pending,
                 requestedAt: connection.requestedAt,
                 linkedAt: connection.linkedAt,
+                acceptedAt: connection.acceptedAt,
                 sharedSchedules: connection.sharedSchedules,
                 sharedTimelineCards: connection.sharedTimelineCards
             )
@@ -4529,13 +4854,16 @@ final class AppViewModel: ObservableObject {
 
     private func mergedFriendConnection(_ lhs: FriendConnection, _ rhs: FriendConnection) -> FriendConnection {
         let accepted = lhs.status == .accepted || rhs.status == .accepted
+        let acceptedAt = lhs.acceptedAt ?? rhs.acceptedAt
         return FriendConnection(
             id: lhs.id,
             employeeID: lhs.employeeID,
             nickname: lhs.nickname ?? rhs.nickname,
-            status: accepted ? .accepted : .pending,
+            avatarImageData: lhs.avatarImageData ?? rhs.avatarImageData,
+            status: (accepted || acceptedAt != nil) ? .accepted : .pending,
             requestedAt: min(lhs.requestedAt, rhs.requestedAt),
             linkedAt: lhs.linkedAt ?? rhs.linkedAt,
+            acceptedAt: acceptedAt,
             sharedSchedules: lhs.sharedSchedules.isEmpty ? rhs.sharedSchedules : lhs.sharedSchedules,
             sharedTimelineCards: lhs.sharedTimelineCards.isEmpty ? rhs.sharedTimelineCards : lhs.sharedTimelineCards
         )
@@ -4571,6 +4899,9 @@ final class AppViewModel: ObservableObject {
         let encoder = JSONEncoder()
         let entries = friendConnections.map { conn -> FriendConnectionSyncEntry in
             let normalizedID = GEMSIDNormalizer.normalize(conn.employeeID)
+            let acceptedAt = conn.acceptedAt
+                ?? (conn.status == .accepted ? (conn.linkedAt ?? conn.requestedAt) : nil)
+                ?? existingByID[normalizedID]?.acceptedAt
             var schedData: Data? = nil
             if conn.status == .accepted, !conn.sharedSchedules.isEmpty,
                let encoded = try? encoder.encode(conn.sharedSchedules),
@@ -4588,7 +4919,11 @@ final class AppViewModel: ObservableObject {
             return FriendConnectionSyncEntry(
                 id: conn.id, employeeID: conn.employeeID,
                 nickname: conn.nickname,
-                status: conn.status, requestedAt: conn.requestedAt, linkedAt: conn.linkedAt,
+                avatarImageData: conn.avatarImageData,
+                status: acceptedAt == nil ? conn.status : .accepted,
+                requestedAt: conn.requestedAt,
+                linkedAt: conn.linkedAt ?? acceptedAt,
+                acceptedAt: acceptedAt,
                 sharedSchedulesData: schedData
             )
         }

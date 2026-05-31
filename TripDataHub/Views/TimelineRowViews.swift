@@ -1,11 +1,57 @@
 import SwiftUI
 
+struct FriendMatchPerson: Identifiable, Hashable {
+    let id: String
+    let displayName: String
+    let subtitle: String
+    let avatarImageData: Data?
+}
+
+struct FriendMatchPresentation: Identifiable, Hashable {
+    let id = UUID()
+    let title: String
+    let friends: [FriendMatchPerson]
+}
+
+struct FriendMatchPresentationView: View {
+    let presentation: FriendMatchPresentation
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List(presentation.friends) { friend in
+                ProfileCard(
+                    avatarImageData: friend.avatarImageData ?? Data(),
+                    displayName: friend.displayName,
+                    subtitle: friend.subtitle,
+                    avatarSize: 44
+                )
+                .listRowBackground(Color.clear)
+            }
+            .scrollContentBackground(.hidden)
+            .navigationTitle(presentation.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel("Close")
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
 /// Shared flight row used by TimelineTabView and ScheduleTimelineRendererView.
 ///
 /// All computed values (timeRangeText, dayDiff, blockText) are pre-computed by the caller,
 /// keeping UTC/LCL logic and friend-match state entirely in the owning view.
 /// `iconColor` defaults to `.primary`; pass `friendMatchAmber` for friend highlights.
-/// `onIconTap` is nil in ScheduleTimelineRendererView (Friends Timeline, no tap needed).
+/// `onFriendMatchTap` is nil in ScheduleTimelineRendererView (Friends Timeline, no tap needed).
 struct TimelineFlightRow: View {
     let leg: TripLeg
     let isPast: Bool
@@ -14,26 +60,30 @@ struct TimelineFlightRow: View {
     let dayDiff: Int
     let blockText: String
     var iconColor: Color = .primary
-    var onIconTap: (() -> Void)? = nil
+    var onFriendMatchTap: (() -> Void)? = nil
 
     var body: some View {
+        if let tap = onFriendMatchTap {
+            rowContent
+                .contentShape(Rectangle())
+                .onTapGesture(perform: tap)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint("Shows friends on this flight")
+        } else {
+            rowContent
+        }
+    }
+
+    private var rowContent: some View {
         HStack(alignment: .center, spacing: 12) {
             let resolvedIconColor: Color = isPast ? .gray : iconColor
-            let icon = MaterialIconView(
+            MaterialIconView(
                 codePoint: TimelineLegIconSupport.codePoint(for: leg.status),
                 size: 20 * fontScale,
                 color: resolvedIconColor,
                 fallbackSystemName: TimelineLegIconSupport.fallbackSystemName(for: leg.status)
             )
             .frame(width: 28 * fontScale, alignment: .center)
-
-            if let tap = onIconTap {
-                Button(action: tap) { icon }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Friend on same flight")
-            } else {
-                icon
-            }
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
@@ -136,7 +186,7 @@ struct TimelineManualOperationalRow: View {
 ///
 /// Hotel name, duration, and arrival date label are pre-computed by the caller.
 /// `iconColor` defaults to `.primary`; pass `friendMatchAmber` for rest-overlap highlights.
-/// `onIconTap` is nil in ScheduleTimelineRendererView (Friends Timeline, no tap needed).
+/// `onFriendMatchTap` is nil in ScheduleTimelineRendererView (Friends Timeline, no tap needed).
 struct TimelineLayoverCard: View {
     let station: String
     let hotel: String
@@ -146,7 +196,7 @@ struct TimelineLayoverCard: View {
     let isPast: Bool
     let fontScale: CGFloat
     var iconColor: Color = .primary
-    var onIconTap: (() -> Void)? = nil
+    var onFriendMatchTap: (() -> Void)? = nil
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -159,6 +209,18 @@ struct TimelineLayoverCard: View {
     }
 
     var body: some View {
+        if let tap = onFriendMatchTap {
+            cardContent
+                .contentShape(Rectangle())
+                .onTapGesture(perform: tap)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint("Shows friends with overlapping layover")
+        } else {
+            cardContent
+        }
+    }
+
+    private var cardContent: some View {
         VStack(spacing: 0) {
             if !arrLocalDateLabel.isEmpty {
                 Text(arrLocalDateLabel)
@@ -172,24 +234,16 @@ struct TimelineLayoverCard: View {
 
             HStack(alignment: .center, spacing: 12) {
                 let resolvedIconColor: Color = isPast ? .gray : iconColor
-                let bedIcon = Image(systemName: "bed.double.fill")
+                Image(systemName: "bed.double.fill")
                     .font(.system(size: 16 * fontScale))
                     .foregroundStyle(resolvedIconColor)
                     .frame(width: 28 * fontScale, alignment: .center)
-
-                if let tap = onIconTap {
-                    Button(action: tap) { bedIcon }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Friend layover overlap")
-                } else {
-                    bedIcon
-                }
 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack {
                         Text("Layover at \(station)")
                             .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
-                            .foregroundStyle(isPast ? .gray : iconColor)
+                            .foregroundStyle(isPast ? .gray : .primary)
                         Spacer()
                         if !durationText.isEmpty {
                             Text("Rest: \(durationText)")

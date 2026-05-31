@@ -10,7 +10,19 @@ enum AppEnvironment {
     }()
 
     static let isTripBoardFetchVisible: Bool = {
-#if DEBUG
+#if TDH_ENABLE_TRIPBOARD
+        return !isAppStoreReviewMode
+#else
+        return false
+#endif
+    }()
+
+    static let isFriendSharingVisible: Bool = {
+        !isAppStoreReviewMode
+    }()
+
+    static let isOpenTimeVisible: Bool = {
+#if TDH_ENABLE_OPENTIME
         return !isAppStoreReviewMode
 #else
         return false

@@ -239,6 +239,8 @@ private struct FakeFriendScheduleCloudKitService: FriendScheduleCloudKitServicin
         FriendScheduleCloudKitLink(friendGEMSID: friendGEMSID, isAccepted: false, linkedAt: nil, requestedAt: nil)
     }
     func cancelFriendRequest(myGEMSID: String, friendGEMSID: String) async throws {}
+    func deleteSharedScheduleData(gemsID: String) async throws {}
+    func deleteFriendSharingData(gemsID: String) async throws {}
     func refreshConnections(myGEMSID: String, connections: [FriendConnection]) async throws -> [FriendConnection] {
         connections
     }

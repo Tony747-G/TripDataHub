@@ -141,9 +141,11 @@ struct FriendConnection: Identifiable, Codable, Hashable {
     let id: UUID
     let employeeID: String
     var nickname: String?
+    var avatarImageData: Data?
     var status: FriendConnectionStatus
     var requestedAt: Date
     var linkedAt: Date?
+    var acceptedAt: Date?
     var sharedSchedules: [PayPeriodSchedule]
     // TODO: Phase B 以降で削除予定。iOS アプリ内では未使用（Web ビューア専用）。
     var sharedTimelineCards: [WebTimelineCard]
@@ -157,18 +159,22 @@ struct FriendConnection: Identifiable, Codable, Hashable {
         id: UUID = UUID(),
         employeeID: String,
         nickname: String? = nil,
+        avatarImageData: Data? = nil,
         status: FriendConnectionStatus,
         requestedAt: Date = Date(),
         linkedAt: Date? = nil,
+        acceptedAt: Date? = nil,
         sharedSchedules: [PayPeriodSchedule] = [],
         sharedTimelineCards: [WebTimelineCard] = []
     ) {
         self.id = id
         self.employeeID = employeeID
         self.nickname = nickname
+        self.avatarImageData = avatarImageData
         self.status = status
         self.requestedAt = requestedAt
         self.linkedAt = linkedAt
+        self.acceptedAt = acceptedAt ?? (status == .accepted ? (linkedAt ?? requestedAt) : nil)
         self.sharedSchedules = sharedSchedules
         self.sharedTimelineCards = sharedTimelineCards
     }

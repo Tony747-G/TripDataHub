@@ -38,19 +38,28 @@ Container: `iCloud.com.sfune.TimelineSchedule`. All record types use the **Publi
 
 - **Purpose:** Pair record connecting two users who have accepted each other as friends.
 - **Record name:** `tdh_friend_{firstGEMS}_{secondGEMS}` where `(first, second)` is the canonical ordered pair (alphabetical).
-- **Key fields:** `firstGEMSID`, `secondGEMSID`, `firstAccepted`, `secondAccepted`, `updatedAt`.
+- **Key fields:** `gemsA`, `gemsB`, `approvedA`, `approvedB`, `requestedAt`, `linkedAt`, `status`, `updatedAt`.
 - **Owner model:** Either side may create the record (request); the other side updates the matching `*Accepted` flag.
-- **Tombstone behavior:** None currently. Removing a friend deletes the record outright.
+- **Tombstone behavior:** Removing a friend clears both approvals, clears `linkedAt`, and marks the record `status = canceled`. A later request revives the same record as `pending` with a fresh `requestedAt`.
 - **Security role:** `_icloud` create/read/write own.
-- **Production deploy required when:** Adding fields or queryable indexes.
+- **Production deploy required when:** Adding fields or queryable indexes. Queries predicate on `gemsA` and `gemsB`; both fields need Queryable indexes in Production.
 
 ## `TDHSharedSchedule`
 
 - **Purpose:** A user's parsed schedule, exposed to accepted friends.
 - **Record name:** `tdh_schedule_{normalizedGEMSID}`.
-- **Key fields:** `ownerGEMSID`, `ownerRecordName`, `schedulesData` (JSON-encoded `[PayPeriodSchedule]`), `updatedAt`.
+- **Key fields:** `ownerGEMSID`, `schedulesData` (JSON-encoded `[PayPeriodSchedule]`), `updatedAt`.
 - **Owner model:** Owned and written by the user; read by their friends.
+- **Upload gating:** Written only when the user has at least one accepted mutual friend link.
 - **Tombstone behavior:** None. Empty `schedulesData` means "no trips".
+- **Privacy note:** Do not persist `ownerRecordName` or other internal CloudKit record identifiers in this record. Friend Sharing must not expose internal CloudKit IDs, device identifiers, CloudKit metadata, or presence/status fields.
+- **Deletion:** When sharing is disabled by removing the last friend, or when Account Delete runs, the app deletes the user's `TDHSharedSchedule` and `TripScheduleSnapshot` records from the Public DB.
+
+## `TripScheduleSnapshot`
+
+- **Purpose:** Web/review-friendly serialized snapshot of the same owned schedule data.
+- **Record name:** `tdh_snapshot_{normalizedGEMSID}`.
+- **Deletion:** Deleted together with `TDHSharedSchedule` when the user no longer has active Friend Sharing or deletes their account.
 - **Security role:** `_icloud` create/read/write own.
 - **Production deploy required when:** Adding fields or queryable indexes.
 

@@ -24,7 +24,7 @@ final class LaunchBehaviorUITests: XCTestCase {
         XCTAssertLessThan(nextReportCard.frame.minY, dateHeader.frame.minY)
     }
 
-    func test_settingsLoggedOutStateShowsLoginActionAndPresentsLoginSheet() {
+    func test_settingsLoggedOutStateHidesTripBoardLoginAction() {
         let app = XCUIApplication()
         app.launchArguments += ["UITEST_LOGGED_OUT_VERIFIED"]
         app.launch()
@@ -34,15 +34,7 @@ final class LaunchBehaviorUITests: XCTestCase {
         settingsTab.tap()
 
         let loginButton = app.buttons["settings.tripboardAction"]
-        XCTAssertTrue(loginButton.waitForExistence(timeout: 5))
-        XCTAssertEqual(loginButton.label, "TripBoard Log-in")
-
-        loginButton.tap()
-
-        // Check for the Close button in TripBoardLoginView's toolbar — more reliable
-        // than querying the navigation bar title in a sheet context.
-        let closeButton = app.buttons["Close"]
-        XCTAssertTrue(closeButton.waitForExistence(timeout: 5))
+        XCTAssertFalse(loginButton.waitForExistence(timeout: 2))
     }
 
 }
