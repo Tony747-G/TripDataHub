@@ -251,6 +251,21 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertEqual(recordNames, ["tdh_friend_0111111_0222222"])
     }
 
+    func test_friendCloudKitRequest_existingAcceptedLinkReturnsWithoutResave() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+
+        _ = try await service.requestFriend(myGEMSID: "222222", friendGEMSID: "111111")
+        _ = try await service.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
+        let savesBeforeDuplicateRequest = await database.saveCount()
+
+        let link = try await service.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
+
+        XCTAssertTrue(link.isAccepted)
+        let savesAfterDuplicateRequest = await database.saveCount()
+        XCTAssertEqual(savesAfterDuplicateRequest, savesBeforeDuplicateRequest)
+    }
+
     func test_friendCloudKitRequest_retriesRaceConflictAndAccepts() async throws {
         let database = FriendCloudKitFakeDatabase(conflictFirstFriendLinkSaveWithOtherApproval: true)
         let service = FriendScheduleCloudKitService(databaseProvider: { database })
@@ -952,6 +967,7 @@ private final class CapturingFriendCloudKitService: FriendScheduleCloudKitServic
 private actor FriendCloudKitFakeDatabase: FriendScheduleCloudKitDatabase {
     private var records: [String: CKRecord] = [:]
     private var conflictFirstFriendLinkSaveWithOtherApproval: Bool
+    private var saveCallCount = 0
 
     init(conflictFirstFriendLinkSaveWithOtherApproval: Bool = false) {
         self.conflictFirstFriendLinkSaveWithOtherApproval = conflictFirstFriendLinkSaveWithOtherApproval
@@ -965,6 +981,7 @@ private actor FriendCloudKitFakeDatabase: FriendScheduleCloudKitDatabase {
     }
 
     func save(_ record: CKRecord) async throws -> CKRecord {
+        saveCallCount += 1
         let recordName = record.recordID.recordName
         if conflictFirstFriendLinkSaveWithOtherApproval,
            recordName.hasPrefix("tdh_friend_") {
@@ -1028,6 +1045,10 @@ private actor FriendCloudKitFakeDatabase: FriendScheduleCloudKitDatabase {
         records.keys
             .filter { $0.hasPrefix("tdh_friend_") }
             .sorted()
+    }
+
+    func saveCount() -> Int {
+        saveCallCount
     }
 
     func recordSnapshot(named recordName: String) -> CKRecord? {

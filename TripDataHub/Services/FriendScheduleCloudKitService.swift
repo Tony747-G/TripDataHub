@@ -120,6 +120,9 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         for attempt in 0..<3 {
             do {
                 let record = try await friendLinkRecord(recordID: recordID, database: database)
+                if isAccepted(record) || approvalAlreadyRecorded(in: record, myGEMSID: my, pair: pair) {
+                    return link(from: record, myGEMSID: my, friendGEMSID: friend)
+                }
                 applyApproval(
                     to: record,
                     myGEMSID: my,
@@ -542,6 +545,17 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
             return true
         }
         return boolValue(record[Field.approvedA]) && boolValue(record[Field.approvedB])
+    }
+
+    private func approvalAlreadyRecorded(
+        in record: CKRecord,
+        myGEMSID: String,
+        pair: (first: String, second: String)
+    ) -> Bool {
+        guard (record[Field.status] as? String) != LinkStatus.canceled else {
+            return false
+        }
+        return boolValue(record[approvalField(for: myGEMSID, pair: pair)])
     }
 
     private func mergeConnections(_ connections: [FriendConnection]) -> [FriendConnection] {
