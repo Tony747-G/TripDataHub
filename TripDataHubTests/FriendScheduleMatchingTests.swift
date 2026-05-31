@@ -512,7 +512,7 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertNil(snapshotRecord)
     }
 
-    func test_deleteFriendSharingData_cancelsLinksAndDeletesSharedScheduleData() async throws {
+    func test_deleteFriendSharingData_removesOwnApprovalAndDeletesSharedScheduleData() async throws {
         let database = FriendCloudKitFakeDatabase()
         let service = FriendScheduleCloudKitService(databaseProvider: { database })
         await database.insertFriendLink(
@@ -546,17 +546,40 @@ final class FriendScheduleMatchingTests: XCTestCase {
 
         let firstRecord = await database.recordSnapshot(named: "tdh_friend_0111111_0222222")
         let first = try XCTUnwrap(firstRecord)
-        XCTAssertEqual(first["status"] as? String, "canceled")
+        XCTAssertEqual(first["status"] as? String, "pending")
         XCTAssertEqual((first["approvedA"] as? NSNumber)?.boolValue, false)
-        XCTAssertEqual((first["approvedB"] as? NSNumber)?.boolValue, false)
+        XCTAssertEqual((first["approvedB"] as? NSNumber)?.boolValue, true)
         XCTAssertNil(first["linkedAt"])
         let secondRecord = await database.recordSnapshot(named: "tdh_friend_0111111_0333333")
         let second = try XCTUnwrap(secondRecord)
-        XCTAssertEqual(second["status"] as? String, "canceled")
+        XCTAssertEqual(second["status"] as? String, "pending")
         let scheduleRecord = await database.recordSnapshot(named: "tdh_schedule_0111111")
         let snapshotRecord = await database.recordSnapshot(named: "tdh_snapshot_0111111")
         XCTAssertNil(scheduleRecord)
         XCTAssertNil(snapshotRecord)
+    }
+
+    func test_requestFriend_afterAccountDeleteRestoresWhenOtherApprovalRemains() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+        await database.insertFriendLink(
+            gemsA: "0111111",
+            gemsB: "0222222",
+            approvedA: true,
+            approvedB: true,
+            status: "accepted",
+            linkedAt: Date(timeIntervalSince1970: 2)
+        )
+
+        try await service.deleteFriendSharingData(gemsID: "111111")
+        let link = try await service.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
+
+        XCTAssertTrue(link.isAccepted)
+        let recordSnapshot = await database.recordSnapshot(named: "tdh_friend_0111111_0222222")
+        let record = try XCTUnwrap(recordSnapshot)
+        XCTAssertEqual(record["status"] as? String, "accepted")
+        XCTAssertEqual((record["approvedA"] as? NSNumber)?.boolValue, true)
+        XCTAssertEqual((record["approvedB"] as? NSNumber)?.boolValue, true)
     }
 
     func test_refreshConnections_restoresAcceptedConnectionWhenFriendLinkMissing() async throws {

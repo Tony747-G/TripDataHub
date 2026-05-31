@@ -255,10 +255,16 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         var seenRecordNames: Set<String> = []
 
         for record in linkRecords where seenRecordNames.insert(record.recordID.recordName).inserted {
-            record[Field.approvedA] = false as CKRecordValue
-            record[Field.approvedB] = false as CKRecordValue
+            let gemsA = GEMSIDNormalizer.normalize(record[Field.gemsA] as? String ?? "")
+            let gemsB = GEMSIDNormalizer.normalize(record[Field.gemsB] as? String ?? "")
+            let pair = Self.orderedPair(gemsA, gemsB)
+            let myApprovalField = approvalField(for: normalizedGEMSID, pair: pair)
+            let otherApprovalField = myApprovalField == Field.approvedA ? Field.approvedB : Field.approvedA
+            let otherApprovalRemains = boolValue(record[otherApprovalField])
+
+            record[myApprovalField] = false as CKRecordValue
             record[Field.linkedAt] = nil
-            record[Field.status] = LinkStatus.canceled as CKRecordValue
+            record[Field.status] = (otherApprovalRemains ? LinkStatus.pending : LinkStatus.canceled) as CKRecordValue
             record[Field.updatedAt] = Date() as CKRecordValue
             _ = try await database.save(record)
         }
