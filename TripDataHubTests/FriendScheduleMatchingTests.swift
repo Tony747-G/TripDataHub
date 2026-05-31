@@ -637,7 +637,11 @@ final class FriendScheduleMatchingTests: XCTestCase {
     func test_submitFriendRequest_uploadsSharedScheduleOnlyAfterMutualAcceptance() async throws {
         let service = CapturingFriendCloudKitService()
         service.nextRequestIsAccepted = true
-        let vm = AppViewModel(friendScheduleCloudKitService: service)
+        let notificationService = CapturingFriendLinkNotificationService()
+        let vm = AppViewModel(
+            friendLinkNotificationService: notificationService,
+            friendScheduleCloudKitService: service
+        )
         setVerifiedIdentity(on: vm, gemsID: "111111")
         vm.crewAccessSchedules = [makeSchedule(legs: [])]
 
@@ -646,6 +650,28 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertEqual(vm.friendConnections.first?.status, .accepted)
         XCTAssertTrue(vm.isScheduleSharingEnabled)
         XCTAssertEqual(service.uploadScheduleCallCount, 1)
+        XCTAssertEqual(notificationService.notifiedFriendIDs, ["0222222"])
+    }
+
+    @MainActor
+    func test_syncFriendCloudKit_notifiesWhenPendingFriendBecomesAccepted() async throws {
+        let service = CapturingFriendCloudKitService()
+        service.refreshedConnections = [
+            FriendConnection(employeeID: "0222222", status: .accepted)
+        ]
+        let notificationService = CapturingFriendLinkNotificationService()
+        let vm = AppViewModel(
+            friendLinkNotificationService: notificationService,
+            friendScheduleCloudKitService: service
+        )
+        setVerifiedIdentity(on: vm, gemsID: "111111")
+        vm.friendConnections = [
+            FriendConnection(employeeID: "0222222", status: .pending)
+        ]
+
+        await vm.syncFriendCloudKit(reason: "friend refresh")
+
+        XCTAssertEqual(notificationService.notifiedFriendIDs, ["0222222"])
     }
 
     @MainActor
@@ -961,6 +987,14 @@ private final class CapturingFriendCloudKitService: FriendScheduleCloudKitServic
     func refreshConnections(myGEMSID: String, connections: [FriendConnection]) async throws -> [FriendConnection] {
         refreshCallCount += 1
         return refreshedConnections ?? connections
+    }
+}
+
+private final class CapturingFriendLinkNotificationService: FriendLinkNotificationScheduling, @unchecked Sendable {
+    private(set) var notifiedFriendIDs: [String] = []
+
+    func notifyFriendLinked(_ friend: FriendConnection) async {
+        notifiedFriendIDs.append(friend.employeeID)
     }
 }
 

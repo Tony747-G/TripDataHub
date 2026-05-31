@@ -7,6 +7,37 @@ import os
 
 private let logger = Logger(subsystem: "com.sfune.TripDataHub", category: "AppViewModel")
 
+protocol FriendLinkNotificationScheduling: Sendable {
+    func notifyFriendLinked(_ friend: FriendConnection) async
+}
+
+struct FriendLinkNotificationService: FriendLinkNotificationScheduling {
+    func notifyFriendLinked(_ friend: FriendConnection) async {
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        let isAuthorized: Bool
+        switch settings.authorizationStatus {
+        case .authorized, .provisional:
+            isAuthorized = true
+        case .notDetermined:
+            isAuthorized = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) == true
+        default:
+            isAuthorized = false
+        }
+        guard isAuthorized else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "Friend Connected"
+        content.body = "\(friend.displayName) is now linked. You can view their timeline."
+        content.sound = .default
+        content.threadIdentifier = "friend.linked"
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+        let identifier = "friend.linked.\(friend.employeeID)"
+        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
+        try? await center.add(request)
+    }
+}
+
 enum AuthStatus: String {
     case unknown
     case loggedOut
@@ -201,6 +232,7 @@ final class AppViewModel: ObservableObject {
     private let authService: TripBoardAuthServiceProtocol
     private let cacheService: ScheduleCacheServiceProtocol
     private let notificationService: NextReportNotificationServiceProtocol
+    private let friendLinkNotificationService: FriendLinkNotificationScheduling
     private let crewAccessImportService: CrewAccessPDFImportServiceProtocol
     private let friendScheduleCloudKitService: FriendScheduleCloudKitServicing
     private let gemsVerificationCloudKitService: GEMSVerificationCloudKitServicing
@@ -283,6 +315,7 @@ final class AppViewModel: ObservableObject {
         authService: TripBoardAuthServiceProtocol = TripBoardAuthService(),
         cacheService: ScheduleCacheServiceProtocol = ScheduleCacheService(),
         notificationService: NextReportNotificationServiceProtocol = NextReportNotificationService(),
+        friendLinkNotificationService: FriendLinkNotificationScheduling = FriendLinkNotificationService(),
         crewAccessImportService: CrewAccessPDFImportServiceProtocol = CrewAccessPDFImportService(),
         friendScheduleCloudKitService: FriendScheduleCloudKitServicing = FriendScheduleCloudKitService(
             containerIdentifier: "iCloud.com.sfune.TimelineSchedule"
@@ -310,6 +343,7 @@ final class AppViewModel: ObservableObject {
         self.authService = authService
         self.cacheService = cacheService
         self.notificationService = notificationService
+        self.friendLinkNotificationService = friendLinkNotificationService
         self.crewAccessImportService = crewAccessImportService
         self.friendScheduleCloudKitService = friendScheduleCloudKitService
         self.gemsVerificationCloudKitService = gemsVerificationCloudKitService
@@ -757,12 +791,20 @@ final class AppViewModel: ObservableObject {
             }
         }
 
+        let wasAcceptedBeforeRequest = friendConnections.contains {
+            $0.employeeID == employeeID && $0.status == .accepted
+        }
+
         do {
             let link = try await friendScheduleCloudKitService.requestFriend(
                 myGEMSID: myGEMSID,
                 friendGEMSID: employeeID
             )
             upsertFriendConnection(from: link)
+            if link.isAccepted, !wasAcceptedBeforeRequest,
+               let friend = friendConnections.first(where: { $0.employeeID == link.friendGEMSID }) {
+                await notifyFriendLinked(friend)
+            }
             if link.isAccepted {
                 enableScheduleSharingForFriends()
                 await uploadSharedScheduleIfNeeded(reason: "friend accepted")
@@ -928,18 +970,7 @@ final class AppViewModel: ObservableObject {
     }
 
     private func notifyFriendLinked(_ friend: FriendConnection) async {
-        let center = UNUserNotificationCenter.current()
-        let status = await center.notificationSettings().authorizationStatus
-        guard status == .authorized || status == .provisional else { return }
-        let content = UNMutableNotificationContent()
-        content.title = "Friend Connected"
-        content.body = "\(friend.displayName) is now linked. You can view their timeline."
-        content.sound = .default
-        content.threadIdentifier = "friend.linked"
-        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
-        let identifier = "friend.linked.\(friend.employeeID)"
-        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
-        try? await center.add(request)
+        await friendLinkNotificationService.notifyFriendLinked(friend)
     }
 
     func handleSchedulesChangedForSharing() {
@@ -1054,7 +1085,7 @@ final class AppViewModel: ObservableObject {
         }
 
         do {
-            let previouslyAccepted = Set(friendConnections.filter { $0.status == .accepted }.map(\.employeeID))
+            let previouslyPending = Set(friendConnections.filter { $0.status == .pending }.map(\.employeeID))
             friendConnections = try await friendScheduleCloudKitService.refreshConnections(
                 myGEMSID: verifiedIdentity.gemsID,
                 connections: friendConnections
@@ -1063,7 +1094,7 @@ final class AppViewModel: ObservableObject {
             updateScheduleSharingAfterFriendListChange()
             friendCloudKitSyncMessage = "Friend schedules updated."
             let newlyAccepted = friendConnections.filter {
-                $0.status == .accepted && !previouslyAccepted.contains($0.employeeID)
+                $0.status == .accepted && previouslyPending.contains($0.employeeID)
             }
             for friend in newlyAccepted {
                 await notifyFriendLinked(friend)
@@ -4799,14 +4830,21 @@ final class AppViewModel: ObservableObject {
         )
     }
 
-    private func mergeICloudKVFriendConnections() {
+    private func mergeICloudKVFriendConnections() async {
         let kvEntries = iCloudKVFriendConnectionEntries()
         guard !kvEntries.isEmpty else { return }
+        let previouslyPending = Set(friendConnections.filter { $0.status == .pending }.map(\.employeeID))
         let kvConnections = kvEntries.map { friendConnection(from: $0) }
         let merged = normalizeFriendConnections(friendConnections + kvConnections)
         if merged != friendConnections {
             friendConnections = merged
             saveFriendConnections()
+            let newlyAccepted = friendConnections.filter {
+                $0.status == .accepted && previouslyPending.contains($0.employeeID)
+            }
+            for friend in newlyAccepted {
+                await notifyFriendLinked(friend)
+            }
         }
     }
 
