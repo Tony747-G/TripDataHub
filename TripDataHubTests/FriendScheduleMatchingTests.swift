@@ -279,6 +279,35 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertEqual((record["approvedB"] as? NSNumber)?.boolValue, true)
     }
 
+    func test_friendCloudKitRequest_permissionFailureCreatesUserOwnedAcceptedLink() async throws {
+        let database = FriendCloudKitFakeDatabase(denyCanonicalFriendLinkUpdates: true)
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+
+        _ = try await service.requestFriend(myGEMSID: "222222", friendGEMSID: "111111")
+        let link = try await service.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
+
+        XCTAssertTrue(link.isAccepted)
+        let userOwnedRecord = await database.recordSnapshot(named: "tdh_friend_user_0111111_0222222")
+        let record = try XCTUnwrap(userOwnedRecord)
+        XCTAssertEqual(record["status"] as? String, "accepted")
+        XCTAssertEqual((record["approvedA"] as? NSNumber)?.boolValue, true)
+        XCTAssertEqual((record["approvedB"] as? NSNumber)?.boolValue, true)
+    }
+
+    func test_friendCloudKitRefresh_mergesUserOwnedAcceptedLink() async throws {
+        let database = FriendCloudKitFakeDatabase(denyCanonicalFriendLinkUpdates: true)
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+
+        _ = try await service.requestFriend(myGEMSID: "222222", friendGEMSID: "111111")
+        _ = try await service.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
+
+        let refreshed = try await service.refreshConnections(myGEMSID: "222222", connections: [])
+
+        XCTAssertEqual(refreshed.count, 1)
+        XCTAssertEqual(refreshed.first?.employeeID, "0111111")
+        XCTAssertEqual(refreshed.first?.status, .accepted)
+    }
+
     func test_friendCloudKitCancel_marksSingleSidedPendingRequestCanceled() async throws {
         let database = FriendCloudKitFakeDatabase()
         let service = FriendScheduleCloudKitService(databaseProvider: { database })
@@ -1001,10 +1030,15 @@ private final class CapturingFriendLinkNotificationService: FriendLinkNotificati
 private actor FriendCloudKitFakeDatabase: FriendScheduleCloudKitDatabase {
     private var records: [String: CKRecord] = [:]
     private var conflictFirstFriendLinkSaveWithOtherApproval: Bool
+    private var denyCanonicalFriendLinkUpdates: Bool
     private var saveCallCount = 0
 
-    init(conflictFirstFriendLinkSaveWithOtherApproval: Bool = false) {
+    init(
+        conflictFirstFriendLinkSaveWithOtherApproval: Bool = false,
+        denyCanonicalFriendLinkUpdates: Bool = false
+    ) {
         self.conflictFirstFriendLinkSaveWithOtherApproval = conflictFirstFriendLinkSaveWithOtherApproval
+        self.denyCanonicalFriendLinkUpdates = denyCanonicalFriendLinkUpdates
     }
 
     func record(for recordID: CKRecord.ID) async throws -> CKRecord {
@@ -1018,7 +1052,7 @@ private actor FriendCloudKitFakeDatabase: FriendScheduleCloudKitDatabase {
         saveCallCount += 1
         let recordName = record.recordID.recordName
         if conflictFirstFriendLinkSaveWithOtherApproval,
-           recordName.hasPrefix("tdh_friend_") {
+           Self.isCanonicalFriendLinkRecordName(recordName) {
             conflictFirstFriendLinkSaveWithOtherApproval = false
             let serverRecord = CKRecord(recordType: "TDHFriendLink", recordID: record.recordID)
             serverRecord["gemsA"] = "0111111" as CKRecordValue
@@ -1026,6 +1060,11 @@ private actor FriendCloudKitFakeDatabase: FriendScheduleCloudKitDatabase {
             serverRecord["approvedB"] = true as CKRecordValue
             records[recordName] = serverRecord
             throw CKError(.serverRecordChanged)
+        }
+        if denyCanonicalFriendLinkUpdates,
+           Self.isCanonicalFriendLinkRecordName(recordName),
+           records[recordName] != nil {
+            throw CKError(.permissionFailure)
         }
 
         records[recordName] = record
@@ -1087,5 +1126,9 @@ private actor FriendCloudKitFakeDatabase: FriendScheduleCloudKitDatabase {
 
     func recordSnapshot(named recordName: String) -> CKRecord? {
         records[recordName]
+    }
+
+    private static func isCanonicalFriendLinkRecordName(_ recordName: String) -> Bool {
+        recordName.hasPrefix("tdh_friend_") && !recordName.hasPrefix("tdh_friend_user_")
     }
 }

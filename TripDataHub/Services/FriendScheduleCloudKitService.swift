@@ -129,7 +129,18 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
                     pair: pair
                 )
 
-                let saved = try await database.save(record)
+                let saved: CKRecord
+                do {
+                    saved = try await database.save(record)
+                } catch let error as CKError where error.code == .permissionFailure {
+                    return try await saveUserOwnedFriendApproval(
+                        myGEMSID: my,
+                        friendGEMSID: friend,
+                        pair: pair,
+                        canonicalRecord: record,
+                        database: database
+                    )
+                }
                 return link(from: saved, myGEMSID: my, friendGEMSID: friend)
             } catch let error as CKError where Self.shouldRetryFriendLinkSave(error) {
                 guard attempt < 2 else { throw error }
@@ -140,6 +151,48 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         }
 
         throw CKError(.serverRecordChanged)
+    }
+
+    private func saveUserOwnedFriendApproval(
+        myGEMSID: String,
+        friendGEMSID: String,
+        pair: (first: String, second: String),
+        canonicalRecord: CKRecord,
+        database: FriendScheduleCloudKitDatabase
+    ) async throws -> FriendScheduleCloudKitLink {
+        let recordID = CKRecord.ID(
+            recordName: Self.userOwnedFriendLinkRecordName(owner: myGEMSID, friend: friendGEMSID)
+        )
+        let record = (try? await database.record(for: recordID))
+            ?? CKRecord(recordType: RecordType.friendLink, recordID: recordID)
+        record[Field.gemsA] = pair.first as CKRecordValue
+        record[Field.gemsB] = pair.second as CKRecordValue
+        record[approvalField(for: myGEMSID, pair: pair)] = true as CKRecordValue
+        if record[Field.requestedAt] == nil {
+            record[Field.requestedAt] = (canonicalRecord[Field.requestedAt] as? Date ?? Date()) as CKRecordValue
+        }
+        record[Field.updatedAt] = Date() as CKRecordValue
+
+        let friendApprovedCanonical = hasApproval(from: friendGEMSID, in: canonicalRecord, pair: pair)
+        let friendApprovedUserOwned = try await reciprocalUserOwnedApprovalExists(
+                myGEMSID: myGEMSID,
+                friendGEMSID: friendGEMSID,
+                pair: pair,
+                database: database
+        )
+        if friendApprovedCanonical || friendApprovedUserOwned {
+            record[Field.approvedA] = true as CKRecordValue
+            record[Field.approvedB] = true as CKRecordValue
+            record[Field.status] = LinkStatus.accepted as CKRecordValue
+            if record[Field.linkedAt] == nil {
+                record[Field.linkedAt] = Date() as CKRecordValue
+            }
+        } else if record[Field.status] == nil || (record[Field.status] as? String) == LinkStatus.canceled {
+            record[Field.status] = LinkStatus.pending as CKRecordValue
+        }
+
+        let saved = try await database.save(record)
+        return link(from: saved, myGEMSID: myGEMSID, friendGEMSID: friendGEMSID)
     }
 
     func cancelFriendRequest(myGEMSID: String, friendGEMSID: String) async throws {
@@ -558,6 +611,34 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         return boolValue(record[approvalField(for: myGEMSID, pair: pair)])
     }
 
+    private func hasApproval(
+        from gemsID: String,
+        in record: CKRecord,
+        pair: (first: String, second: String)
+    ) -> Bool {
+        guard (record[Field.status] as? String) != LinkStatus.canceled else {
+            return false
+        }
+        return boolValue(record[approvalField(for: gemsID, pair: pair)])
+    }
+
+    private func reciprocalUserOwnedApprovalExists(
+        myGEMSID: String,
+        friendGEMSID: String,
+        pair: (first: String, second: String),
+        database: FriendScheduleCloudKitDatabase
+    ) async throws -> Bool {
+        let recordID = CKRecord.ID(
+            recordName: Self.userOwnedFriendLinkRecordName(owner: friendGEMSID, friend: myGEMSID)
+        )
+        do {
+            let record = try await database.record(for: recordID)
+            return hasApproval(from: friendGEMSID, in: record, pair: pair)
+        } catch let error as CKError where error.code == .unknownItem {
+            return false
+        }
+    }
+
     private func mergeConnections(_ connections: [FriendConnection]) -> [FriendConnection] {
         var merged: [FriendConnection] = []
         for connection in connections {
@@ -640,6 +721,10 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
 
     private static func friendLinkRecordName(first: String, second: String) -> String {
         "tdh_friend_\(normalizedRecordComponent(first))_\(normalizedRecordComponent(second))"
+    }
+
+    private static func userOwnedFriendLinkRecordName(owner: String, friend: String) -> String {
+        "tdh_friend_user_\(normalizedRecordComponent(owner))_\(normalizedRecordComponent(friend))"
     }
 
     private static func normalizedRecordComponent(_ raw: String) -> String {
