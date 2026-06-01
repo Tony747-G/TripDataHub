@@ -77,6 +77,43 @@ struct FriendsTabView: View {
                     }
                 }
 
+                Section("Friend Requests") {
+                    if viewModel.incomingFriendRequestConnections.isEmpty {
+                        Text("No friend requests.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(viewModel.incomingFriendRequestConnections) { friend in
+                            VStack(alignment: .leading, spacing: 8) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(friend.employeeID)
+                                        .font(.headline)
+                                    Text("Requested: \(friend.requestedAt.formatted(date: .abbreviated, time: .shortened))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text("Waiting for your approval")
+                                        .font(.caption)
+                                        .foregroundStyle(.blue)
+                                    Text("This pilot added your GEMS ID.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                Button {
+                                    Task {
+                                        await viewModel.acceptIncomingFriendRequest(friend.id)
+                                    }
+                                } label: {
+                                    Label("Accept Request", systemImage: "checkmark.circle.fill")
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+
                 Section("Pending Requests") {
                     if viewModel.pendingFriendConnections.isEmpty {
                         Text("No pending requests.")

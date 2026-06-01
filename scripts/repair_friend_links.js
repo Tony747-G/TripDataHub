@@ -16,13 +16,17 @@ Usage:
   node scripts/repair_friend_links.js --pair <gemsA:gemsB> --dry-run
   node scripts/repair_friend_links.js --pair <gemsA:gemsB> --upload
   node scripts/repair_friend_links.js --pair <gemsA:gemsB> --lookup
+  node scripts/repair_friend_links.js --incoming <requester:recipient> --upload
 
 Options:
   --pair <a:b>              GEMS pair to mark accepted. Can be repeated.
+  --incoming <from:to>      GEMS request to mark pending from requester to recipient. Can be repeated.
   --pairs-file <path>       Text file containing one pair per line as a,b or a:b.
   --dry-run                 Write preview only; do not contact CloudKit.
   --upload                  Upload accepted TDHFriendLink records to CloudKit.
   --lookup                  Fetch matching TDHFriendLink records from CloudKit.
+  --record-type <type>      Record type for generated records. Default: ${RECORD_TYPE}
+  --record-name <name>      Exact record name to lookup. Can be repeated with --lookup.
   --out <path>              Preview JSON path. Default: build/friend_link_repair_preview.json
   --container <id>          CloudKit container. Default: ${DEFAULT_CONTAINER}
   --environment <env>       development or production. Default: ${DEFAULT_ENVIRONMENT}
@@ -45,7 +49,10 @@ Example:
 function parseArgs(argv) {
   const args = {
     pairs: [],
+    incomingRequests: [],
+    recordNames: [],
     output: "build/friend_link_repair_preview.json",
+    recordType: RECORD_TYPE,
     container: DEFAULT_CONTAINER,
     environment: DEFAULT_ENVIRONMENT,
     database: DEFAULT_DATABASE,
@@ -68,8 +75,17 @@ function parseArgs(argv) {
       case "--pair":
         args.pairs.push(next());
         break;
+      case "--incoming":
+        args.incomingRequests.push(next());
+        break;
       case "--pairs-file":
         args.pairsFile = next();
+        break;
+      case "--record-type":
+        args.recordType = next();
+        break;
+      case "--record-name":
+        args.recordNames.push(next());
         break;
       case "--out":
         args.output = next();
@@ -115,8 +131,12 @@ function parseArgs(argv) {
       .filter((line) => line && !line.startsWith("#"));
     args.pairs.push(...filePairs);
   }
-  if (args.pairs.length === 0) {
-    throw new Error("At least one --pair or --pairs-file entry is required.");
+  if (args.pairs.length === 0 && args.incomingRequests.length === 0 && args.recordNames.length === 0) {
+    throw new Error("At least one --pair, --incoming, --record-name, or --pairs-file entry is required.");
+  }
+  if (args.lookup && args.incomingRequests.length > 0) {
+    args.pairs.push(...args.incomingRequests);
+    args.incomingRequests = [];
   }
   const actionCount = [args.dryRun, args.upload, args.lookup].filter(Boolean).length;
   if (actionCount !== 1) {
@@ -153,15 +173,24 @@ function parsePair(raw) {
   return orderedPair(parts[0], parts[1]);
 }
 
+function parseDirectedPair(raw) {
+  const parts = String(raw).split(/[,:]/).map((part) => part.trim()).filter(Boolean);
+  if (parts.length !== 2) throw new Error(`Invalid incoming request "${raw}". Use REQUESTER:RECIPIENT.`);
+  const requester = normalizeGEMSID(parts[0]);
+  const recipient = normalizeGEMSID(parts[1]);
+  if (requester === recipient) throw new Error(`Self friend request is invalid: ${requester}`);
+  return { requester, recipient, ordered: orderedPair(requester, recipient) };
+}
+
 function friendLinkRecordName(first, second) {
   return `tdh_friend_${first}_${second}`;
 }
 
 function cloudKitTimestamp(date) {
-  return Math.floor(date.getTime() / 1000);
+  return date.getTime();
 }
 
-function prepareRecords(pairInputs) {
+function prepareAcceptedRecords(pairInputs) {
   const now = new Date();
   const seen = new Set();
   return pairInputs.map(parsePair).filter(([first, second]) => {
@@ -181,6 +210,45 @@ function prepareRecords(pairInputs) {
       linkedAt: { value: cloudKitTimestamp(now), type: "TIMESTAMP" },
       updatedAt: { value: cloudKitTimestamp(now), type: "TIMESTAMP" },
     },
+  }));
+}
+
+function prepareIncomingRecords(incomingInputs) {
+  const now = new Date();
+  const seen = new Set();
+  return incomingInputs.map(parseDirectedPair).filter(({ ordered: [first, second] }) => {
+    const key = `${first}:${second}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).map(({ requester, recipient, ordered: [first, second] }) => {
+    const requesterIsA = requester === first;
+    return {
+      recordName: friendLinkRecordName(first, second),
+      recordType: RECORD_TYPE,
+      repairStatus: "pending",
+      fields: {
+        gemsA: { value: first },
+        gemsB: { value: second },
+        approvedA: { value: requesterIsA ? 1 : 0, type: "INT64" },
+        approvedB: { value: requesterIsA ? 0 : 1, type: "INT64" },
+        requesterGEMSID: { value: requester },
+        recipientGEMSID: { value: recipient },
+        status: { value: "pending" },
+        linkedAt: { value: null },
+        requestedAt: { value: cloudKitTimestamp(now), type: "TIMESTAMP" },
+        updatedAt: { value: cloudKitTimestamp(now), type: "TIMESTAMP" },
+      },
+    };
+  });
+}
+
+function prepareLookupRecords(recordNames, recordType) {
+  return recordNames.map((recordName) => ({
+    recordName,
+    recordType,
+    repairStatus: "lookup",
+    fields: {},
   }));
 }
 
@@ -272,7 +340,7 @@ function writePreview(outputPath, args, records) {
     container: args.container,
     environment: args.environment,
     database: args.database,
-    recordType: RECORD_TYPE,
+    recordType: args.recordType,
     count: records.length,
     records,
   }, null, 2));
@@ -280,12 +348,16 @@ function writePreview(outputPath, args, records) {
 
 async function main() {
   const args = parseArgs(process.argv);
-  const records = prepareRecords(args.pairs);
+  const records = [
+    ...prepareAcceptedRecords(args.pairs),
+    ...prepareIncomingRecords(args.incomingRequests),
+    ...prepareLookupRecords(args.recordNames, args.recordType),
+  ];
   writePreview(args.output, args, records);
   console.log(`Prepared ${records.length} ${RECORD_TYPE} repair record(s).`);
   console.log(`Preview written to ${args.output}`);
   for (const record of records) {
-    console.log(`- ${record.recordName}: accepted`);
+    console.log(`- ${record.recordName}: ${record.repairStatus ?? "accepted"}`);
   }
   if (args.dryRun) {
     console.log("Dry run complete. No CloudKit upload was performed.");

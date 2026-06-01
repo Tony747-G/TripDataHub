@@ -9,10 +9,29 @@ private let logger = Logger(subsystem: "com.sfune.TripDataHub", category: "AppVi
 
 protocol FriendLinkNotificationScheduling: Sendable {
     func notifyFriendLinked(_ friend: FriendConnection) async
+    func notifyFriendRequestReceived(_ friend: FriendConnection) async
 }
 
 struct FriendLinkNotificationService: FriendLinkNotificationScheduling {
     func notifyFriendLinked(_ friend: FriendConnection) async {
+        await schedule(
+            identifier: "friend.linked.\(friend.employeeID)",
+            title: "Friend Connected",
+            body: "\(friend.displayName) is now linked. You can view their timeline.",
+            threadIdentifier: "friend.linked"
+        )
+    }
+
+    func notifyFriendRequestReceived(_ friend: FriendConnection) async {
+        await schedule(
+            identifier: "friend.request.\(friend.employeeID)",
+            title: "Friend Request",
+            body: "GEMS \(friend.displayName) added you. Open Friends to accept.",
+            threadIdentifier: "friend.request"
+        )
+    }
+
+    private func schedule(identifier: String, title: String, body: String, threadIdentifier: String) async {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
         let isAuthorized: Bool
@@ -27,12 +46,11 @@ struct FriendLinkNotificationService: FriendLinkNotificationScheduling {
         guard isAuthorized else { return }
 
         let content = UNMutableNotificationContent()
-        content.title = "Friend Connected"
-        content.body = "\(friend.displayName) is now linked. You can view their timeline."
+        content.title = title
+        content.body = body
         content.sound = .default
-        content.threadIdentifier = "friend.linked"
+        content.threadIdentifier = threadIdentifier
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
-        let identifier = "friend.linked.\(friend.employeeID)"
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
         try? await center.add(request)
     }
@@ -279,6 +297,7 @@ final class AppViewModel: ObservableObject {
     private let notification12hKey = "notification_12h_enabled"
     private let friendConnectionsKey = "friend_connections_v1"
     private let friendConnectionsSyncKey = "friend_connections_sync_v1"
+    private let friendConnectionsResetAtKey = "friend_connections_reset_at_v1"
     private let scheduleSharingEnabledKey = "schedule_sharing_enabled_v1"
     private let seniorityRecordsKey = "pilot_seniority_records_v1"
     // Legacy keys/file names are kept so upgrades from pre-CloudKit verification builds can clean up local seniority data.
@@ -662,7 +681,13 @@ final class AppViewModel: ObservableObject {
 
     var pendingFriendConnections: [FriendConnection] {
         friendConnections
-            .filter { $0.status == .pending }
+            .filter { $0.status == .pending && $0.requestDirection != .incoming }
+            .sorted { $0.requestedAt > $1.requestedAt }
+    }
+
+    var incomingFriendRequestConnections: [FriendConnection] {
+        friendConnections
+            .filter { $0.isIncomingRequest }
             .sorted { $0.requestedAt > $1.requestedAt }
     }
 
@@ -798,7 +823,8 @@ final class AppViewModel: ObservableObject {
         do {
             let link = try await friendScheduleCloudKitService.requestFriend(
                 myGEMSID: myGEMSID,
-                friendGEMSID: employeeID
+                friendGEMSID: employeeID,
+                friendResetAt: friendConnectionsResetAt()
             )
             upsertFriendConnection(from: link)
             if link.isAccepted, !wasAcceptedBeforeRequest,
@@ -822,6 +848,7 @@ final class AppViewModel: ObservableObject {
     private func upsertFriendConnection(from link: FriendScheduleCloudKitLink) {
         if let index = friendConnections.firstIndex(where: { $0.employeeID == link.friendGEMSID }) {
             friendConnections[index].status = link.isAccepted ? .accepted : .pending
+            friendConnections[index].requestDirection = link.isAccepted ? nil : (link.requestDirection ?? .outgoing)
             friendConnections[index].requestedAt = link.requestedAt ?? Date()
             if link.isAccepted {
                 friendConnections[index].linkedAt = link.linkedAt ?? friendConnections[index].linkedAt ?? Date()
@@ -832,6 +859,7 @@ final class AppViewModel: ObservableObject {
                 FriendConnection(
                     employeeID: link.friendGEMSID,
                     status: link.isAccepted ? .accepted : .pending,
+                    requestDirection: link.requestDirection,
                     linkedAt: link.isAccepted ? (link.linkedAt ?? Date()) : nil
                 )
             )
@@ -866,6 +894,13 @@ final class AppViewModel: ObservableObject {
             friendActionMessage = friendRequestErrorMessage(error)
             logNonFatal("Friend CloudKit cancel failed: \(error.localizedDescription)")
         }
+    }
+
+    func acceptIncomingFriendRequest(_ id: UUID) async {
+        guard let connection = friendConnections.first(where: { $0.id == id && $0.isIncomingRequest }) else {
+            return
+        }
+        await submitFriendRequest(employeeID: connection.employeeID)
     }
 
     func removeFriend(_ id: UUID) async {
@@ -971,6 +1006,10 @@ final class AppViewModel: ObservableObject {
 
     private func notifyFriendLinked(_ friend: FriendConnection) async {
         await friendLinkNotificationService.notifyFriendLinked(friend)
+    }
+
+    private func notifyFriendRequestReceived(_ friend: FriendConnection) async {
+        await friendLinkNotificationService.notifyFriendRequestReceived(friend)
     }
 
     func handleSchedulesChangedForSharing() {
@@ -1086,10 +1125,14 @@ final class AppViewModel: ObservableObject {
 
         do {
             let previouslyPending = Set(friendConnections.filter { $0.status == .pending }.map(\.employeeID))
+            let previouslyIncoming = Set(friendConnections.filter { $0.isIncomingRequest }.map(\.employeeID))
+            friendConnections = currentFriendConnections(friendConnections)
             friendConnections = try await friendScheduleCloudKitService.refreshConnections(
                 myGEMSID: verifiedIdentity.gemsID,
-                connections: friendConnections
+                connections: friendConnections,
+                friendResetAt: friendConnectionsResetAt()
             )
+            friendConnections = currentFriendConnections(friendConnections)
             saveFriendConnections()
             updateScheduleSharingAfterFriendListChange()
             friendCloudKitSyncMessage = "Friend schedules updated."
@@ -1098,6 +1141,12 @@ final class AppViewModel: ObservableObject {
             }
             for friend in newlyAccepted {
                 await notifyFriendLinked(friend)
+            }
+            let newlyIncoming = friendConnections.filter {
+                $0.isIncomingRequest && !previouslyIncoming.contains($0.employeeID)
+            }
+            for friend in newlyIncoming {
+                await notifyFriendRequestReceived(friend)
             }
         } catch {
             friendCloudKitSyncMessage = "Failed to update friend schedules: \(error.localizedDescription)"
@@ -4412,6 +4461,7 @@ final class AppViewModel: ObservableObject {
     func deleteLocalProfileAccount() {
         let deletingGEMSID = verifiedIdentity?.gemsID
         isDeletingProfileAccount = true
+        setFriendConnectionsResetAt(Date())
         Self.clearLocalProfileStorageForDelete()
         friendConnections = []
         saveFriendConnections()
@@ -4421,7 +4471,8 @@ final class AppViewModel: ObservableObject {
         verifiedIdentity = nil
         identityActionMessage = nil
         clearVerifiedIdentity()
-        Task {
+        Task { [weak self] in
+            guard let self else { return }
             if let deletingGEMSID {
                 await deleteFriendSharingDataForAccountDelete(gemsID: deletingGEMSID)
             }
@@ -4792,7 +4843,7 @@ final class AppViewModel: ObservableObject {
         // flow from iPhone to iPad (and vice-versa) without needing CloudKit.
         let kvEntries = iCloudKVFriendConnectionEntries()
         let combined = local + kvEntries.map { friendConnection(from: $0) }
-        let normalized = normalizeFriendConnections(combined)
+        let normalized = currentFriendConnections(normalizeFriendConnections(combined))
         if normalized != local || !isFromKeychain,
            let migratedData = try? JSONEncoder().encode(normalized) {
             try? keychainService.save(data: migratedData, account: friendConnectionsKey)
@@ -4809,6 +4860,21 @@ final class AppViewModel: ObservableObject {
         return (try? JSONDecoder().decode([FriendConnectionSyncEntry].self, from: data)) ?? []
     }
 
+    private func friendConnectionsResetAt() -> Date? {
+        let localTimestamp = UserDefaults.standard.double(forKey: friendConnectionsResetAtKey)
+        let cloudTimestamp = NSUbiquitousKeyValueStore.default.double(forKey: friendConnectionsResetAtKey)
+        let timestamp = max(localTimestamp, cloudTimestamp)
+        guard timestamp > 0 else { return nil }
+        return Date(timeIntervalSince1970: timestamp)
+    }
+
+    private func setFriendConnectionsResetAt(_ date: Date) {
+        let timestamp = date.timeIntervalSince1970
+        UserDefaults.standard.set(timestamp, forKey: friendConnectionsResetAtKey)
+        NSUbiquitousKeyValueStore.default.set(timestamp, forKey: friendConnectionsResetAtKey)
+        NSUbiquitousKeyValueStore.default.synchronize()
+    }
+
     private func friendConnection(from entry: FriendConnectionSyncEntry) -> FriendConnection {
         let schedules: [PayPeriodSchedule]
         if let data = entry.sharedSchedulesData,
@@ -4823,6 +4889,7 @@ final class AppViewModel: ObservableObject {
             nickname: entry.nickname,
             avatarImageData: entry.avatarImageData,
             status: entry.restoredStatus,
+            requestDirection: entry.restoredStatus == .accepted ? nil : entry.requestDirection,
             requestedAt: entry.requestedAt,
             linkedAt: entry.linkedAt ?? entry.acceptedAt,
             acceptedAt: entry.acceptedAt,
@@ -4835,7 +4902,7 @@ final class AppViewModel: ObservableObject {
         guard !kvEntries.isEmpty else { return }
         let previouslyPending = Set(friendConnections.filter { $0.status == .pending }.map(\.employeeID))
         let kvConnections = kvEntries.map { friendConnection(from: $0) }
-        let merged = normalizeFriendConnections(friendConnections + kvConnections)
+        let merged = currentFriendConnections(normalizeFriendConnections(friendConnections + kvConnections))
         if merged != friendConnections {
             friendConnections = merged
             saveFriendConnections()
@@ -4854,6 +4921,7 @@ final class AppViewModel: ObservableObject {
         var nickname: String?
         var avatarImageData: Data?
         var status: FriendConnectionStatus
+        var requestDirection: FriendRequestDirection?
         var requestedAt: Date
         var linkedAt: Date?
         var acceptedAt: Date?
@@ -4875,6 +4943,7 @@ final class AppViewModel: ObservableObject {
                 nickname: trimmedNickname.isEmpty ? nil : trimmedNickname,
                 avatarImageData: connection.avatarImageData,
                 status: (connection.status == .accepted || connection.acceptedAt != nil) ? .accepted : .pending,
+                requestDirection: connection.status == .accepted ? nil : (connection.requestDirection ?? .outgoing),
                 requestedAt: connection.requestedAt,
                 linkedAt: connection.linkedAt,
                 acceptedAt: connection.acceptedAt,
@@ -4890,6 +4959,20 @@ final class AppViewModel: ObservableObject {
         return normalized
     }
 
+    private func currentFriendConnections(_ connections: [FriendConnection]) -> [FriendConnection] {
+        guard let resetAt = friendConnectionsResetAt() else { return connections }
+        return connections.filter { connection in
+            if connection.status == .accepted || connection.acceptedAt != nil {
+                let acceptedAt = connection.acceptedAt ?? connection.linkedAt ?? connection.requestedAt
+                return acceptedAt >= resetAt
+            }
+            if connection.requestDirection == .incoming {
+                return true
+            }
+            return connection.requestedAt >= resetAt
+        }
+    }
+
     private func mergedFriendConnection(_ lhs: FriendConnection, _ rhs: FriendConnection) -> FriendConnection {
         let accepted = lhs.status == .accepted || rhs.status == .accepted
         let acceptedAt = lhs.acceptedAt ?? rhs.acceptedAt
@@ -4899,6 +4982,7 @@ final class AppViewModel: ObservableObject {
             nickname: lhs.nickname ?? rhs.nickname,
             avatarImageData: lhs.avatarImageData ?? rhs.avatarImageData,
             status: (accepted || acceptedAt != nil) ? .accepted : .pending,
+            requestDirection: (accepted || acceptedAt != nil) ? nil : (lhs.requestDirection == .incoming || rhs.requestDirection == .incoming ? .incoming : .outgoing),
             requestedAt: min(lhs.requestedAt, rhs.requestedAt),
             linkedAt: lhs.linkedAt ?? rhs.linkedAt,
             acceptedAt: acceptedAt,
@@ -4915,8 +4999,12 @@ final class AppViewModel: ObservableObject {
     }
 
     private func saveFriendConnections() {
+        let connectionsToSave = currentFriendConnections(friendConnections)
+        if connectionsToSave != friendConnections {
+            friendConnections = connectionsToSave
+        }
         do {
-            let data = try JSONEncoder().encode(friendConnections)
+            let data = try JSONEncoder().encode(connectionsToSave)
             try keychainService.save(data: data, account: friendConnectionsKey)
         } catch {
             logNonFatal("Failed to save friend connections: \(error.localizedDescription)")
@@ -4935,7 +5023,7 @@ final class AppViewModel: ObservableObject {
         })
         var kvBudget = 800_000
         let encoder = JSONEncoder()
-        let entries = friendConnections.map { conn -> FriendConnectionSyncEntry in
+        let entries = connectionsToSave.map { conn -> FriendConnectionSyncEntry in
             let normalizedID = GEMSIDNormalizer.normalize(conn.employeeID)
             let acceptedAt = conn.acceptedAt
                 ?? (conn.status == .accepted ? (conn.linkedAt ?? conn.requestedAt) : nil)
@@ -4959,6 +5047,7 @@ final class AppViewModel: ObservableObject {
                 nickname: conn.nickname,
                 avatarImageData: conn.avatarImageData,
                 status: acceptedAt == nil ? conn.status : .accepted,
+                requestDirection: acceptedAt == nil ? conn.requestDirection : nil,
                 requestedAt: conn.requestedAt,
                 linkedAt: conn.linkedAt ?? acceptedAt,
                 acceptedAt: acceptedAt,
@@ -4995,6 +5084,7 @@ final class AppViewModel: ObservableObject {
                 let legacyFileURL = appSupport.appendingPathComponent(legacySeniorityFileName)
                 if fm.fileExists(atPath: fileURL.path) {
                     let data = try Data(contentsOf: fileURL)
+                    try? Self.applyCompleteFileProtection(to: fileURL)
                     let decoded = try JSONDecoder().decode([PilotSeniorityRecord].self, from: data)
                     return SeniorityLoadResult(
                         records: decoded,
@@ -5009,7 +5099,7 @@ final class AppViewModel: ObservableObject {
                 if fm.fileExists(atPath: legacyFileURL.path) {
                     let oldData = try Data(contentsOf: legacyFileURL)
                     let migrated = try JSONDecoder().decode([PilotSeniorityRecord].self, from: oldData)
-                    try oldData.write(to: fileURL, options: .atomic)
+                    try Self.writeProtectedData(oldData, to: fileURL)
                     try? fm.removeItem(at: legacyFileURL)
                     return SeniorityLoadResult(
                         records: migrated,
@@ -5024,7 +5114,7 @@ final class AppViewModel: ObservableObject {
                 if let oldData = UserDefaults.standard.data(forKey: seniorityRecordsKey)
                     ?? UserDefaults.standard.data(forKey: legacySeniorityRecordsKey) {
                     let migrated = try JSONDecoder().decode([PilotSeniorityRecord].self, from: oldData)
-                    try oldData.write(to: fileURL, options: .atomic)
+                    try Self.writeProtectedData(oldData, to: fileURL)
                     UserDefaults.standard.removeObject(forKey: seniorityRecordsKey)
                     UserDefaults.standard.removeObject(forKey: legacySeniorityRecordsKey)
                     return SeniorityLoadResult(
@@ -5230,7 +5320,19 @@ final class AppViewModel: ObservableObject {
         )
         let fileURL = appSupport.appendingPathComponent(seniorityFileName)
         let data = try JSONEncoder().encode(records)
-        try data.write(to: fileURL, options: .atomic)
+        try writeProtectedData(data, to: fileURL)
+    }
+
+    private nonisolated static func writeProtectedData(_ data: Data, to fileURL: URL) throws {
+        try data.write(to: fileURL, options: [.atomic, .completeFileProtection])
+        try applyCompleteFileProtection(to: fileURL)
+    }
+
+    private nonisolated static func applyCompleteFileProtection(to fileURL: URL) throws {
+        try FileManager.default.setAttributes(
+            [.protectionKey: FileProtectionType.complete],
+            ofItemAtPath: fileURL.path
+        )
     }
 
     private static func fingerprint(for policy: AdminPolicy) -> String {

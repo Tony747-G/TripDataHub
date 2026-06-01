@@ -1,5 +1,6 @@
 import SwiftUI
 import os
+import UserNotifications
 
 private let logger = Logger(subsystem: "com.sfune.TripDataHub", category: "AppLifecycle")
 
@@ -50,6 +51,11 @@ enum ExternalOpenLaunchGate {
 @main
 struct TripDataHubApp: App {
     private let viewModel = AppViewModel.shared
+    private let notificationDelegate = NotificationForegroundDelegate()
+
+    init() {
+        UNUserNotificationCenter.current().delegate = notificationDelegate
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -68,6 +74,15 @@ struct TripDataHubApp: App {
                     }
                 }
         }
+    }
+}
+
+private final class NotificationForegroundDelegate: NSObject, UNUserNotificationCenterDelegate {
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .list, .sound]
     }
 }
 

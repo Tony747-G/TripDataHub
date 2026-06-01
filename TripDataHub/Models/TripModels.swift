@@ -137,12 +137,18 @@ enum FriendConnectionStatus: String, Codable {
     case accepted
 }
 
+enum FriendRequestDirection: String, Codable {
+    case incoming
+    case outgoing
+}
+
 struct FriendConnection: Identifiable, Codable, Hashable {
     let id: UUID
     let employeeID: String
     var nickname: String?
     var avatarImageData: Data?
     var status: FriendConnectionStatus
+    var requestDirection: FriendRequestDirection?
     var requestedAt: Date
     var linkedAt: Date?
     var acceptedAt: Date?
@@ -161,6 +167,7 @@ struct FriendConnection: Identifiable, Codable, Hashable {
         nickname: String? = nil,
         avatarImageData: Data? = nil,
         status: FriendConnectionStatus,
+        requestDirection: FriendRequestDirection? = nil,
         requestedAt: Date = Date(),
         linkedAt: Date? = nil,
         acceptedAt: Date? = nil,
@@ -172,11 +179,16 @@ struct FriendConnection: Identifiable, Codable, Hashable {
         self.nickname = nickname
         self.avatarImageData = avatarImageData
         self.status = status
+        self.requestDirection = status == .pending ? (requestDirection ?? .outgoing) : nil
         self.requestedAt = requestedAt
         self.linkedAt = linkedAt
         self.acceptedAt = acceptedAt ?? (status == .accepted ? (linkedAt ?? requestedAt) : nil)
         self.sharedSchedules = sharedSchedules
         self.sharedTimelineCards = sharedTimelineCards
+    }
+
+    var isIncomingRequest: Bool {
+        status == .pending && requestDirection == .incoming
     }
 }
 

@@ -484,6 +484,31 @@ private struct FriendsManagementSection: View {
             }
         }
 
+        if !viewModel.incomingFriendRequestConnections.isEmpty {
+            Section("Friend Requests") {
+                ForEach(viewModel.incomingFriendRequestConnections) { friend in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(friend.employeeID)
+                            Text("Waiting for your approval")
+                                .font(.caption)
+                                .foregroundStyle(.blue)
+                        }
+                        Spacer()
+                        Button {
+                            Task {
+                                await viewModel.acceptIncomingFriendRequest(friend.id)
+                            }
+                        } label: {
+                            Label("Accept", systemImage: "checkmark.circle.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
+                }
+            }
+        }
+
         if !viewModel.pendingFriendConnections.isEmpty {
             Section("Pending") {
                 ForEach(viewModel.pendingFriendConnections) { friend in

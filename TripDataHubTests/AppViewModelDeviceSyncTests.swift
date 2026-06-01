@@ -685,13 +685,13 @@ private struct FixedImportService: CrewAccessPDFImportServiceProtocol {
 private struct NoopFriendCloudKitService: FriendScheduleCloudKitServicing {
     func uploadSchedule(gemsID: String, cloudKitRecordName: String, schedules: [PayPeriodSchedule]) async throws {}
     func uploadScheduleSnapshot(gemsID: String, ownerDisplayName: String, crewAccessTrips: [CrewAccessTripJSON]) async throws {}
-    func requestFriend(myGEMSID: String, friendGEMSID: String) async throws -> FriendScheduleCloudKitLink {
+    func requestFriend(myGEMSID: String, friendGEMSID: String, friendResetAt: Date?) async throws -> FriendScheduleCloudKitLink {
         FriendScheduleCloudKitLink(friendGEMSID: friendGEMSID, isAccepted: false, linkedAt: nil, requestedAt: nil)
     }
     func cancelFriendRequest(myGEMSID: String, friendGEMSID: String) async throws {}
     func deleteSharedScheduleData(gemsID: String) async throws {}
     func deleteFriendSharingData(gemsID: String) async throws {}
-    func refreshConnections(myGEMSID: String, connections: [FriendConnection]) async throws -> [FriendConnection] { connections }
+    func refreshConnections(myGEMSID: String, connections: [FriendConnection], friendResetAt: Date?) async throws -> [FriendConnection] { connections }
 }
 
 private struct NoopGEMSVerificationService: GEMSVerificationCloudKitServicing {

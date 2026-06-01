@@ -249,6 +249,10 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertTrue(second.isAccepted)
         let recordNames = await database.friendLinkRecordNames()
         XCTAssertEqual(recordNames, ["tdh_friend_0111111_0222222"])
+        let recordSnapshot = await database.recordSnapshot(named: "tdh_friend_0111111_0222222")
+        let record = try XCTUnwrap(recordSnapshot)
+        XCTAssertEqual(record["requesterGEMSID"] as? String, "0222222")
+        XCTAssertEqual(record["recipientGEMSID"] as? String, "0111111")
     }
 
     func test_friendCloudKitRequest_existingAcceptedLinkReturnsWithoutResave() async throws {
@@ -292,6 +296,37 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertEqual(record["status"] as? String, "accepted")
         XCTAssertEqual((record["approvedA"] as? NSNumber)?.boolValue, true)
         XCTAssertEqual((record["approvedB"] as? NSNumber)?.boolValue, true)
+
+        let splitDatabase = FriendCloudKitFakeDatabase()
+        let splitService = FriendScheduleCloudKitService(databaseProvider: { splitDatabase })
+        await splitDatabase.insertFriendLink(
+            recordName: "tdh_friend_0111111_0222222",
+            gemsA: "0111111",
+            gemsB: "0222222",
+            approvedA: true,
+            approvedB: false,
+            status: "pending",
+            linkedAt: nil
+        )
+        await splitDatabase.insertFriendLink(
+            recordName: "tdh_friend_user_0222222_0111111",
+            gemsA: "0111111",
+            gemsB: "0222222",
+            approvedA: false,
+            approvedB: true,
+            status: "pending",
+            linkedAt: nil
+        )
+
+        let splitLink = try await splitService.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
+
+        XCTAssertTrue(splitLink.isAccepted)
+        let splitRecordSnapshot = await splitDatabase.recordSnapshot(named: "tdh_friend_0111111_0222222")
+        let splitRecord = try XCTUnwrap(splitRecordSnapshot)
+        XCTAssertEqual(splitRecord["status"] as? String, "accepted")
+        XCTAssertEqual((splitRecord["approvedA"] as? NSNumber)?.boolValue, true)
+        XCTAssertEqual((splitRecord["approvedB"] as? NSNumber)?.boolValue, true)
+        XCTAssertNotNil(splitRecord["linkedAt"])
     }
 
     func test_friendCloudKitRefresh_mergesUserOwnedAcceptedLink() async throws {
@@ -343,7 +378,18 @@ final class FriendScheduleMatchingTests: XCTestCase {
 
         _ = try await service.requestFriend(myGEMSID: "222222", friendGEMSID: "111111")
         _ = try await service.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
+        await database.insertFriendLink(
+            recordName: "tdh_friend_user_0222222_0111111",
+            gemsA: "0111111",
+            gemsB: "0222222",
+            approvedA: false,
+            approvedB: true,
+            status: "pending",
+            linkedAt: nil
+        )
         try await service.cancelFriendRequest(myGEMSID: "111111", friendGEMSID: "222222")
+        let deletedUserOwnedRecord = await database.recordSnapshot(named: "tdh_friend_user_0222222_0111111")
+        XCTAssertNil(deletedUserOwnedRecord)
 
         let link = try await service.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
 
@@ -549,6 +595,8 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertEqual(first["status"] as? String, "pending")
         XCTAssertEqual((first["approvedA"] as? NSNumber)?.boolValue, false)
         XCTAssertEqual((first["approvedB"] as? NSNumber)?.boolValue, true)
+        XCTAssertEqual(first["requesterGEMSID"] as? String, "0222222")
+        XCTAssertEqual(first["recipientGEMSID"] as? String, "0111111")
         XCTAssertNil(first["linkedAt"])
         let secondRecord = await database.recordSnapshot(named: "tdh_friend_0111111_0333333")
         let second = try XCTUnwrap(secondRecord)
@@ -580,6 +628,68 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertEqual(record["status"] as? String, "accepted")
         XCTAssertEqual((record["approvedA"] as? NSNumber)?.boolValue, true)
         XCTAssertEqual((record["approvedB"] as? NSNumber)?.boolValue, true)
+
+        let resetDatabase = FriendCloudKitFakeDatabase()
+        let resetService = FriendScheduleCloudKitService(databaseProvider: { resetDatabase })
+        let oldDate = Date(timeIntervalSince1970: 10)
+        let resetAt = Date(timeIntervalSince1970: 20)
+        await resetDatabase.insertFriendLink(
+            gemsA: "0111111",
+            gemsB: "0222222",
+            approvedA: true,
+            approvedB: false,
+            status: "pending",
+            linkedAt: nil,
+            requestedAt: oldDate
+        )
+        await resetDatabase.insertFriendLink(
+            gemsA: "0111111",
+            gemsB: "0333333",
+            approvedA: false,
+            approvedB: true,
+            status: "pending",
+            linkedAt: nil,
+            requestedAt: oldDate
+        )
+
+        let refreshed = try await resetService.refreshConnections(
+            myGEMSID: "111111",
+            connections: [],
+            friendResetAt: resetAt
+        )
+
+        XCTAssertEqual(refreshed.map(\.employeeID), ["0333333"])
+        XCTAssertEqual(refreshed.first?.status, .pending)
+        XCTAssertEqual(refreshed.first?.requestDirection, .incoming)
+
+        let staleRequestDatabase = FriendCloudKitFakeDatabase()
+        let staleRequestService = FriendScheduleCloudKitService(databaseProvider: { staleRequestDatabase })
+        await staleRequestDatabase.insertFriendLink(
+            gemsA: "0111111",
+            gemsB: "0222222",
+            approvedA: true,
+            approvedB: false,
+            status: "pending",
+            linkedAt: nil,
+            requestedAt: oldDate
+        )
+
+        let restartedLink = try await staleRequestService.requestFriend(
+            myGEMSID: "111111",
+            friendGEMSID: "222222",
+            friendResetAt: resetAt
+        )
+
+        XCTAssertFalse(restartedLink.isAccepted)
+        XCTAssertEqual(restartedLink.requestDirection, .outgoing)
+        XCTAssertNotEqual(restartedLink.requestedAt, oldDate)
+        let staleRecordSnapshot = await staleRequestDatabase.recordSnapshot(named: "tdh_friend_0111111_0222222")
+        let staleRecord = try XCTUnwrap(staleRecordSnapshot)
+        XCTAssertEqual(staleRecord["status"] as? String, "pending")
+        XCTAssertEqual((staleRecord["approvedA"] as? NSNumber)?.boolValue, true)
+        XCTAssertEqual((staleRecord["approvedB"] as? NSNumber)?.boolValue, false)
+        XCTAssertEqual(staleRecord["requesterGEMSID"] as? String, "0111111")
+        XCTAssertEqual(staleRecord["recipientGEMSID"] as? String, "0222222")
     }
 
     func test_refreshConnections_restoresAcceptedConnectionWhenFriendLinkMissing() async throws {
@@ -681,6 +791,9 @@ final class FriendScheduleMatchingTests: XCTestCase {
         await vm.submitFriendRequest(employeeID: "222222")
 
         XCTAssertEqual(vm.friendConnections.first?.status, .pending)
+        XCTAssertEqual(vm.friendConnections.first?.requestDirection, .outgoing)
+        XCTAssertEqual(vm.pendingFriendConnections.count, 1)
+        XCTAssertTrue(vm.incomingFriendRequestConnections.isEmpty)
         XCTAssertFalse(vm.isScheduleSharingEnabled)
         XCTAssertEqual(service.uploadScheduleCallCount, 0)
     }
@@ -724,6 +837,23 @@ final class FriendScheduleMatchingTests: XCTestCase {
         await vm.syncFriendCloudKit(reason: "friend refresh")
 
         XCTAssertEqual(notificationService.notifiedFriendIDs, ["0222222"])
+
+        let incomingService = CapturingFriendCloudKitService()
+        incomingService.refreshedConnections = [
+            FriendConnection(employeeID: "0333333", status: .pending, requestDirection: .incoming)
+        ]
+        let incomingNotificationService = CapturingFriendLinkNotificationService()
+        let incomingVM = AppViewModel(
+            friendLinkNotificationService: incomingNotificationService,
+            friendScheduleCloudKitService: incomingService
+        )
+        setVerifiedIdentity(on: incomingVM, gemsID: "111111")
+
+        await incomingVM.syncFriendCloudKit(reason: "friend refresh")
+
+        XCTAssertEqual(incomingVM.incomingFriendRequestConnections.map(\.employeeID), ["0333333"])
+        XCTAssertTrue(incomingVM.pendingFriendConnections.isEmpty)
+        XCTAssertEqual(incomingNotificationService.notifiedRequestIDs, ["0333333"])
     }
 
     @MainActor
@@ -1010,13 +1140,13 @@ private final class CapturingFriendCloudKitService: FriendScheduleCloudKitServic
 
     func uploadScheduleSnapshot(gemsID: String, ownerDisplayName: String, crewAccessTrips: [CrewAccessTripJSON]) async throws {}
 
-    func requestFriend(myGEMSID: String, friendGEMSID: String) async throws -> FriendScheduleCloudKitLink {
+    func requestFriend(myGEMSID: String, friendGEMSID: String, friendResetAt: Date?) async throws -> FriendScheduleCloudKitLink {
         requestCallCount += 1
         return FriendScheduleCloudKitLink(
             friendGEMSID: GEMSIDNormalizer.normalize(friendGEMSID),
             isAccepted: nextRequestIsAccepted,
-            linkedAt: nextRequestIsAccepted ? Date(timeIntervalSince1970: 2) : nil,
-            requestedAt: Date(timeIntervalSince1970: 1)
+            linkedAt: nextRequestIsAccepted ? Date() : nil,
+            requestedAt: Date()
         )
     }
 
@@ -1036,7 +1166,7 @@ private final class CapturingFriendCloudKitService: FriendScheduleCloudKitServic
         lastDeletedFriendSharingGEMSID = gemsID
     }
 
-    func refreshConnections(myGEMSID: String, connections: [FriendConnection]) async throws -> [FriendConnection] {
+    func refreshConnections(myGEMSID: String, connections: [FriendConnection], friendResetAt: Date?) async throws -> [FriendConnection] {
         refreshCallCount += 1
         return refreshedConnections ?? connections
     }
@@ -1044,9 +1174,14 @@ private final class CapturingFriendCloudKitService: FriendScheduleCloudKitServic
 
 private final class CapturingFriendLinkNotificationService: FriendLinkNotificationScheduling, @unchecked Sendable {
     private(set) var notifiedFriendIDs: [String] = []
+    private(set) var notifiedRequestIDs: [String] = []
 
     func notifyFriendLinked(_ friend: FriendConnection) async {
         notifiedFriendIDs.append(friend.employeeID)
+    }
+
+    func notifyFriendRequestReceived(_ friend: FriendConnection) async {
+        notifiedRequestIDs.append(friend.employeeID)
     }
 }
 
@@ -1115,14 +1250,16 @@ private actor FriendCloudKitFakeDatabase: FriendScheduleCloudKitDatabase {
     }
 
     func insertFriendLink(
+        recordName: String? = nil,
         gemsA: String,
         gemsB: String,
         approvedA: Bool,
         approvedB: Bool,
         status: String?,
-        linkedAt: Date?
+        linkedAt: Date?,
+        requestedAt: Date? = nil
     ) {
-        let recordID = CKRecord.ID(recordName: "tdh_friend_\(gemsA)_\(gemsB)")
+        let recordID = CKRecord.ID(recordName: recordName ?? "tdh_friend_\(gemsA)_\(gemsB)")
         let record = CKRecord(recordType: "TDHFriendLink", recordID: recordID)
         record["gemsA"] = gemsA as CKRecordValue
         record["gemsB"] = gemsB as CKRecordValue
@@ -1133,6 +1270,9 @@ private actor FriendCloudKitFakeDatabase: FriendScheduleCloudKitDatabase {
         }
         if let linkedAt {
             record["linkedAt"] = linkedAt as CKRecordValue
+        }
+        if let requestedAt {
+            record["requestedAt"] = requestedAt as CKRecordValue
         }
         records[recordID.recordName] = record
     }
