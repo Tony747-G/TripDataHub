@@ -107,12 +107,56 @@ final class AppViewModelLogTenExportTests: XCTestCase {
         XCTAssertNil(viewModel.exportCrewAccessFlightsLogTenCSV(nowUTC: date("2026-05-07T00:00:00Z")))
     }
 
-    private func makeViewModel() -> AppViewModel {
+    func test_deleteCrewAccessTripReschedulesNotificationsFromRemainingTimelineTrips() async {
+        let notificationService = FakeNextReportNotificationService(status: .authorized)
+        let viewModel = makeViewModel(notificationService: notificationService)
+        viewModel.crewAccessSchedules = [
+            schedule(id: "CA26-05-A70651", legs: [
+                leg(
+                    flight: "5X213",
+                    dep: "ANC",
+                    arr: "SDF",
+                    stdUTC: "2026-06-04T12:00:00Z",
+                    staUTC: "2026-06-04T20:00:00Z"
+                )
+            ]),
+            schedule(id: "CA26-06-A70652", legs: [
+                leg(
+                    flight: "5X214",
+                    dep: "ANC",
+                    arr: "NRT",
+                    stdUTC: "2026-06-06T12:00:00Z",
+                    staUTC: "2026-06-07T00:00:00Z"
+                )
+            ])
+        ]
+        viewModel.bidproSchedules = [
+            schedule(id: "PP26-06-BIDPRO", legs: [
+                leg(
+                    flight: "5X999",
+                    dep: "ANC",
+                    arr: "HNL",
+                    stdUTC: "2026-06-08T12:00:00Z",
+                    staUTC: "2026-06-08T18:00:00Z"
+                )
+            ])
+        ]
+        viewModel.schedules = viewModel.crewAccessSchedules + viewModel.bidproSchedules
+
+        await viewModel.deleteCrewAccessTrips(ids: ["CA26-05-A70651"])
+
+        XCTAssertEqual(notificationService.rescheduleCalls.count, 1)
+        XCTAssertEqual(notificationService.rescheduleCalls.last?.scheduleIDs, ["CA26-06-A70652"])
+    }
+
+    private func makeViewModel(
+        notificationService: NextReportNotificationServiceProtocol = FakeNextReportNotificationService()
+    ) -> AppViewModel {
         AppViewModel(
             syncService: FakeTripBoardSyncService(),
             authService: FakeTripBoardAuthService(),
             cacheService: FakeScheduleCacheService(),
-            notificationService: FakeNextReportNotificationService(),
+            notificationService: notificationService,
             crewAccessImportService: FakeCrewAccessPDFImportService(),
             friendScheduleCloudKitService: FakeFriendScheduleCloudKitService(),
             gemsVerificationCloudKitService: FakeGEMSVerificationCloudKitService(),
@@ -213,16 +257,38 @@ private struct FakeTripBoardAuthService: TripBoardAuthServiceProtocol {
     @MainActor func clearWebKitCookies() async {}
 }
 
-private struct FakeNextReportNotificationService: NextReportNotificationServiceProtocol {
-    func authorizationStatus() async -> UNAuthorizationStatus { .notDetermined }
-    func requestAuthorization() async throws -> Bool { false }
+private final class FakeNextReportNotificationService: NextReportNotificationServiceProtocol {
+    struct RescheduleCall {
+        let scheduleIDs: [String]
+        let notify48h: Bool
+        let notify24h: Bool
+        let notify12h: Bool
+    }
+
+    let status: UNAuthorizationStatus
+    private(set) var rescheduleCalls: [RescheduleCall] = []
+
+    init(status: UNAuthorizationStatus = .notDetermined) {
+        self.status = status
+    }
+
+    func authorizationStatus() async -> UNAuthorizationStatus { status }
+    func requestAuthorization() async throws -> Bool { status == .authorized }
     func reschedule(
         schedules: [PayPeriodSchedule],
         notify48h: Bool,
         notify24h: Bool,
         notify12h: Bool
     ) async -> NotificationRescheduleResult {
-        NotificationRescheduleResult(requested: 0, scheduled: 0, failed: 0)
+        rescheduleCalls.append(
+            RescheduleCall(
+                scheduleIDs: schedules.map(\.id),
+                notify48h: notify48h,
+                notify24h: notify24h,
+                notify12h: notify12h
+            )
+        )
+        return NotificationRescheduleResult(requested: 0, scheduled: 0, failed: 0)
     }
 }
 

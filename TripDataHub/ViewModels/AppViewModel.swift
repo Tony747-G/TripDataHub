@@ -455,11 +455,11 @@ final class AppViewModel: ObservableObject {
             await MainActor.run {
                 self?.refreshCloudKitIdentity()
             }
-            await self?.refreshNotificationAuthorizationStatus()
-            await self?.rescheduleNotificationsIfAuthorized()
             // Fetch remote import files before reconcile so iPad gets iOS-imported files.
             await self?.fetchCrewAccessImportFilesIfNeeded(reason: "startup")
             await self?.applyCrewAccessRetentionPolicy()
+            await self?.refreshNotificationAuthorizationStatus()
+            await self?.rescheduleNotificationsIfAuthorized()
             await self?.syncProfileWithCloudKit()
         }
 
@@ -1914,6 +1914,7 @@ final class AppViewModel: ObservableObject {
             startExternalConsumerIfNeeded()
             crewAccessImportMessage = "CrewAccess import complete: \(json.tripId) (\(schedule.legCount) legs)."
             errorMessage = nil
+            await rescheduleNotificationsIfAuthorized()
             let uploadURL = jsonWriteContext.finalURL
             let staleFileNames = jsonWriteContext.staleSameBidPeriodTripURLs.map(\.lastPathComponent)
             Task { [weak self] in
@@ -2226,6 +2227,7 @@ final class AppViewModel: ObservableObject {
         } catch {
             logNonFatal("Failed to save schedule cache after CrewAccess file reconciliation: \(error.localizedDescription)")
         }
+        await rescheduleNotificationsIfAuthorized()
     }
 
     func deleteCrewAccessImportFiles(urls: [URL]) async {
@@ -2307,6 +2309,7 @@ final class AppViewModel: ObservableObject {
             logNonFatal("Failed to save schedule cache after CrewAccess file delete: \(error.localizedDescription)")
             logger.error("[CrewAccessFileDelete] cacheSaved=false error=\(error.localizedDescription, privacy: .public)")
         }
+        await rescheduleNotificationsIfAuthorized()
 
         let deletedFileCount = deletionResults.filter(\.deleted).count
         let failedFileCount = deletionResults.count - deletedFileCount
@@ -2409,6 +2412,7 @@ final class AppViewModel: ObservableObject {
         if !fileDeleteResult.deletedFileNames.isEmpty {
             await tombstoneCrewAccessImportFiles(fileNames: fileDeleteResult.deletedFileNames)
         }
+        await rescheduleNotificationsIfAuthorized()
         Task { [weak self] in await self?.uploadDeviceScheduleIfNeeded(reason: "trip deleted") }
     }
 
@@ -4785,7 +4789,7 @@ final class AppViewModel: ObservableObject {
 
         let prefs = notificationPreferences
         let result = await notificationService.reschedule(
-            schedules: schedules,
+            schedules: crewAccessSchedules,
             notify48h: prefs.notify48h,
             notify24h: prefs.notify24h,
             notify12h: prefs.notify12h
