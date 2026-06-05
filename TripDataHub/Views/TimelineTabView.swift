@@ -319,7 +319,7 @@ struct TimelineTabView: View {
             .onChange(of: viewModel.manualOperationalEvents) { _, _ in
                 refreshLegData()
             }
-            .onChange(of: viewModel.friendConnections) { _, _ in
+            .onChange(of: viewModel.friendConnectionsRevision) { _, _ in
                 refreshFriendScheduleMatches()
             }
             .onChange(of: selectedClockDisplay) { _, _ in

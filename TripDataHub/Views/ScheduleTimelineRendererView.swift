@@ -31,35 +31,44 @@ struct ScheduleTimelineRendererView: View {
         let legData = TimelineLegData(schedules: schedules)
         let sections = legData.daySections
         let nextLegByID = legData.nextLegByID
+        let initialFocusID = focusScrollID(for: legData)
 
-        ScrollView {
-            if sections.isEmpty {
-                Text(emptyStateMessage)
-                    .appScaledFont(.footnote, scale: fontScale)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 16)
-            } else {
-                LazyVStack(spacing: 0) {
-                    ForEach(sections) { section in
-                        Text(section.label)
-                            .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
-                            .foregroundStyle(section.isPast ? .gray : dateHeaderTextColor)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 5)
-                            .background(dateCardBackground)
+        ScrollViewReader { proxy in
+            ScrollView {
+                if sections.isEmpty {
+                    Text(emptyStateMessage)
+                        .appScaledFont(.footnote, scale: fontScale)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 16)
+                } else {
+                    LazyVStack(spacing: 0) {
+                        ForEach(sections) { section in
+                            Text(section.label)
+                                .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
+                                .foregroundStyle(section.isPast ? .gray : dateHeaderTextColor)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 5)
+                                .background(dateCardBackground)
+                                .id(daySectionScrollID(section.id))
 
-                        ForEach(section.legs) { leg in
-                            legRow(leg: leg, nextLegByID: nextLegByID)
-                            if shouldShowLayover(leg: leg, connectionMap: nextLegByID) {
-                                layoverCard(for: leg, connectionMap: nextLegByID)
+                            ForEach(section.legs) { leg in
+                                legRow(leg: leg, nextLegByID: nextLegByID)
+                                    .id(legScrollID(leg.id))
+                                if shouldShowLayover(leg: leg, connectionMap: nextLegByID) {
+                                    layoverCard(for: leg, connectionMap: nextLegByID)
+                                        .id(layoverScrollID(leg.id))
+                                }
+                                Divider()
                             }
-                            Divider()
                         }
                     }
                 }
+            }
+            .task(id: scrollContextKey(for: legData, focusID: initialFocusID)) {
+                await autoScrollToFocus(using: proxy, scrollID: initialFocusID)
             }
         }
     }
@@ -209,6 +218,73 @@ struct ScheduleTimelineRendererView: View {
 
     private func parseLocalDateTime(_ text: String) -> Date? {
         Self.localDateTimeFormatter.date(from: text)
+    }
+
+    // MARK: - Initial scroll target
+
+    private func daySectionScrollID(_ dayID: String) -> String {
+        "friendTimeline.daySection.\(dayID)"
+    }
+
+    private func legScrollID(_ legID: UUID) -> String {
+        "friendTimeline.leg.\(legID.uuidString)"
+    }
+
+    private func layoverScrollID(_ legID: UUID) -> String {
+        "friendTimeline.layover.\(legID.uuidString)"
+    }
+
+    private func scrollContextKey(for legData: TimelineLegData, focusID: String?) -> String {
+        let firstID = legData.allLegs.first?.id.uuidString ?? "none"
+        let lastID = legData.allLegs.last?.id.uuidString ?? "none"
+        return "\(focusID ?? "none")|\(legData.allLegs.count)|\(firstID)|\(lastID)"
+    }
+
+    private func focusScrollID(for legData: TimelineLegData) -> String? {
+        let now = Date()
+        let connectionMap = legData.nextLegByID
+
+        for leg in legData.allLegs {
+            guard shouldShowLayover(leg: leg, connectionMap: connectionMap),
+                  let arr = utcArrivalDate(for: leg),
+                  let nextLeg = connectionMap[leg.id]
+            else { continue }
+            let layoverEnd = TimelineLayoverSupport.restInfo(arrDate: arr, nextLeg: nextLeg)?.dutyStartUTC
+                ?? utcDepartureDate(for: nextLeg).map { $0.addingTimeInterval(-90 * 60) }
+            guard let layoverEnd else { continue }
+            if arr <= now && now < layoverEnd {
+                return layoverScrollID(leg.id)
+            }
+        }
+
+        let currentOrNextLeg = legData.allLegs.first { leg in
+            guard let dep = utcDepartureDate(for: leg) ?? parseLocalDateTime(leg.depLocal) else {
+                return false
+            }
+            if let arr = utcArrivalDate(for: leg) ?? parseLocalDateTime(leg.arrLocal),
+               dep <= now,
+               now < arr {
+                return true
+            }
+            return dep >= now
+        }
+
+        return currentOrNextLeg.map { legScrollID($0.id) }
+    }
+
+    @MainActor
+    private func autoScrollToFocus(using proxy: ScrollViewProxy, scrollID: String?) async {
+        guard !Task.isCancelled, let scrollID else { return }
+        proxy.scrollTo(scrollID, anchor: .top)
+
+        let delays: [UInt64] = [100_000_000, 200_000_000, 400_000_000]
+        for delay in delays {
+            try? await Task.sleep(nanoseconds: delay)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.25)) {
+                proxy.scrollTo(scrollID, anchor: .top)
+            }
+        }
     }
 
     // MARK: - Formatters

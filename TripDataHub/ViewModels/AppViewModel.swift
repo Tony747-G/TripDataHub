@@ -211,7 +211,12 @@ final class AppViewModel: ObservableObject {
     @Published var notificationScheduleMessage: String?
     @Published var isTripBoardServerDown = false
     @Published var didLastFetchFail = false
-    @Published var friendConnections: [FriendConnection] = []
+    @Published var friendConnections: [FriendConnection] = [] {
+        didSet {
+            friendConnectionsRevision &+= 1
+        }
+    }
+    @Published private(set) var friendConnectionsRevision: Int = 0
     @Published var friendActionMessage: String?
     @Published var identityActionMessage: String?
     @Published var friendCloudKitSyncMessage: String?
@@ -846,16 +851,19 @@ final class AppViewModel: ObservableObject {
     }
 
     private func upsertFriendConnection(from link: FriendScheduleCloudKitLink) {
+        var updatedConnections = friendConnections
         if let index = friendConnections.firstIndex(where: { $0.employeeID == link.friendGEMSID }) {
-            friendConnections[index].status = link.isAccepted ? .accepted : .pending
-            friendConnections[index].requestDirection = link.isAccepted ? nil : (link.requestDirection ?? .outgoing)
-            friendConnections[index].requestedAt = link.requestedAt ?? Date()
+            var connection = friendConnections[index]
+            connection.status = link.isAccepted ? .accepted : .pending
+            connection.requestDirection = link.isAccepted ? nil : (link.requestDirection ?? .outgoing)
+            connection.requestedAt = link.requestedAt ?? Date()
             if link.isAccepted {
-                friendConnections[index].linkedAt = link.linkedAt ?? friendConnections[index].linkedAt ?? Date()
-                friendConnections[index].acceptedAt = friendConnections[index].acceptedAt ?? friendConnections[index].linkedAt
+                connection.linkedAt = link.linkedAt ?? connection.linkedAt ?? Date()
+                connection.acceptedAt = connection.acceptedAt ?? connection.linkedAt
             }
+            updatedConnections[index] = connection
         } else {
-            friendConnections.append(
+            updatedConnections.append(
                 FriendConnection(
                     employeeID: link.friendGEMSID,
                     status: link.isAccepted ? .accepted : .pending,
@@ -864,6 +872,7 @@ final class AppViewModel: ObservableObject {
                 )
             )
         }
+        friendConnections = updatedConnections
         saveFriendConnections()
     }
 
@@ -1126,19 +1135,25 @@ final class AppViewModel: ObservableObject {
         do {
             let previouslyPending = Set(friendConnections.filter { $0.status == .pending }.map(\.employeeID))
             let previouslyIncoming = Set(friendConnections.filter { $0.isIncomingRequest }.map(\.employeeID))
-            friendConnections = currentFriendConnections(friendConnections)
-            friendConnections = try await friendScheduleCloudKitService.refreshConnections(
+            let currentConnections = currentFriendConnections(friendConnections)
+            let refreshedConnections = try await friendScheduleCloudKitService.refreshConnections(
                 myGEMSID: verifiedIdentity.gemsID,
-                connections: friendConnections,
+                connections: currentConnections,
                 friendResetAt: friendConnectionsResetAt()
             )
-            friendConnections = currentFriendConnections(friendConnections)
+            let nextConnections = currentFriendConnections(refreshedConnections)
+            if nextConnections != friendConnections {
+                friendConnections = nextConnections
+            }
             saveFriendConnections()
-            updateScheduleSharingAfterFriendListChange()
-            friendCloudKitSyncMessage = "Friend schedules updated."
             let newlyAccepted = friendConnections.filter {
                 $0.status == .accepted && previouslyPending.contains($0.employeeID)
             }
+            if !newlyAccepted.isEmpty {
+                enableScheduleSharingForFriends()
+            }
+            updateScheduleSharingAfterFriendListChange()
+            friendCloudKitSyncMessage = "Friend schedules updated."
             for friend in newlyAccepted {
                 await notifyFriendLinked(friend)
             }

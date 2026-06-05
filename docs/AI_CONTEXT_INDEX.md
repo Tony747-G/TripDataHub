@@ -12,6 +12,7 @@ This is the routing layer for AI sessions working on TripDataHub. It tells you w
 - `docs/CLOUDKIT.md`
 - `docs/ADR/ADR-001-public-cloudkit-phase1.md`
 - `docs/ADR/ADR-003-crewaccess-file-cloudkit-sync.md`
+- Before reporting a CloudKit user issue as fixed, verify whether the running build is using Development or Production and check the relevant records in **both** environments. Development/Production drift is a known recurring source of Friend Sharing and schedule-sync bugs.
 
 ## If Touching Time / Timeline / Calendar / iPad Calendar
 

@@ -270,6 +270,30 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertEqual(savesAfterDuplicateRequest, savesBeforeDuplicateRequest)
     }
 
+    func test_friendCloudKitRequest_existingAcceptedLinkAfterResetRequiresResave() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+
+        _ = try await service.requestFriend(myGEMSID: "222222", friendGEMSID: "111111")
+        _ = try await service.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
+        let savesBeforeDuplicateRequest = await database.saveCount()
+
+        let link = try await service.requestFriend(
+            myGEMSID: "111111",
+            friendGEMSID: "222222",
+            friendResetAt: Date().addingTimeInterval(60)
+        )
+
+        XCTAssertTrue(link.isAccepted)
+        let savesAfterDuplicateRequest = await database.saveCount()
+        XCTAssertGreaterThan(savesAfterDuplicateRequest, savesBeforeDuplicateRequest)
+        let recordSnapshot = await database.recordSnapshot(named: "tdh_friend_0111111_0222222")
+        let record = try XCTUnwrap(recordSnapshot)
+        XCTAssertEqual(record["status"] as? String, "accepted")
+        XCTAssertEqual((record["approvedA"] as? NSNumber)?.boolValue, true)
+        XCTAssertEqual((record["approvedB"] as? NSNumber)?.boolValue, true)
+    }
+
     func test_friendCloudKitRequest_retriesRaceConflictAndAccepts() async throws {
         let database = FriendCloudKitFakeDatabase(conflictFirstFriendLinkSaveWithOtherApproval: true)
         let service = FriendScheduleCloudKitService(databaseProvider: { database })
@@ -692,6 +716,30 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertEqual(staleRecord["recipientGEMSID"] as? String, "0222222")
     }
 
+    func test_refreshConnections_dropsAcceptedCloudLinkWhenOlderThanLocalReset() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+        let linkedAt = Date(timeIntervalSince1970: 10)
+        let resetAt = Date(timeIntervalSince1970: 20)
+        await database.insertFriendLink(
+            gemsA: "0111111",
+            gemsB: "0222222",
+            approvedA: true,
+            approvedB: true,
+            status: "accepted",
+            linkedAt: linkedAt,
+            requestedAt: linkedAt
+        )
+
+        let refreshed = try await service.refreshConnections(
+            myGEMSID: "111111",
+            connections: [],
+            friendResetAt: resetAt
+        )
+
+        XCTAssertTrue(refreshed.isEmpty)
+    }
+
     func test_refreshConnections_restoresAcceptedConnectionWhenFriendLinkMissing() async throws {
         let database = FriendCloudKitFakeDatabase()
         let service = FriendScheduleCloudKitService(databaseProvider: { database })
@@ -833,9 +881,13 @@ final class FriendScheduleMatchingTests: XCTestCase {
         vm.friendConnections = [
             FriendConnection(employeeID: "0222222", status: .pending)
         ]
+        vm.isScheduleSharingEnabled = false
+        vm.crewAccessSchedules = [makeSchedule(legs: [])]
 
         await vm.syncFriendCloudKit(reason: "friend refresh")
 
+        XCTAssertTrue(vm.isScheduleSharingEnabled)
+        XCTAssertEqual(service.uploadScheduleCallCount, 1)
         XCTAssertEqual(notificationService.notifiedFriendIDs, ["0222222"])
 
         let incomingService = CapturingFriendCloudKitService()

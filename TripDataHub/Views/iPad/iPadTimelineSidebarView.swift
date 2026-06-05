@@ -340,7 +340,7 @@ struct IPadTimelineSidebarView: View {
         .onChange(of: crewDomicileRawValue) { _, _ in
             refreshLegData()
         }
-        .onChange(of: viewModel.friendConnections) { _, _ in
+        .onChange(of: viewModel.friendConnectionsRevision) { _, _ in
             refreshFriendScheduleMatches()
         }
         .sheet(item: $friendMatchAlert) { presentation in

@@ -6,6 +6,7 @@ Container: `iCloud.com.sfune.TimelineSchedule`. All record types use the **Publi
 
 - **Development schema** is auto-created by running a Development build once and saving a record of each new type. Until that happens, the type does not exist in the dashboard.
 - **Production schema deploy is required** before TestFlight or App Store use whenever a record type, field, or index is added or changed. Use CloudKit Dashboard → Schema → Deploy Schema Changes.
+- **Always check both Development and Production when investigating user-facing CloudKit bugs.** Debug/device builds may read the Development environment while TestFlight/App Store reads Production. Do not assume a Production fix applies to a Debug build, and do not declare a Friend/GEMS/schedule issue fixed until the relevant records have been checked in both environments.
 - **Queryable indexes** must be added explicitly in CloudKit Dashboard → Indexes for any field used in a `CKQuery` predicate. New record types do NOT auto-create queryable indexes for `recordName` or custom fields.
 - **Security Roles** baseline (Public DB):
   - `_icloud`: Create / Read / Write where users need to create or update their own sync records.
@@ -97,6 +98,11 @@ Container: `iCloud.com.sfune.TimelineSchedule`. All record types use the **Publi
 
 ## Common Pitfalls
 
+- **Development vs Production drift can look like a code regression.** This has already caused repeated Friend Sharing bugs: Production had `TDHFriendLink` accepted and `TDHSharedSchedule` present, while Development still had the same friend link pending and/or missing schedule data. When debugging Friend Timeline, GEMS verification, shared schedules, import files, or device sync:
+  1. Determine which CloudKit environment the running build is using.
+  2. Lookup the record in both `development` and `production`.
+  3. Repair or copy records in both environments when the user is testing Debug and production behavior also matters.
+  4. Re-verify `TDHFriendLink`, `TDHSharedSchedule`, and `TripScheduleSnapshot` together; an accepted friend link without schedule data still produces an empty Friend Timeline.
 - **Setting a field to `nil` during initial schema creation prevents auto-schema** — CloudKit cannot infer the field type from `nil`. Omit the assignment instead.
 - **Public DB record IDs are global** — make sure `recordName` is collision-free across users. The convention here is to embed `normalizedGEMSID` in every record name.
 - **The dashboard caches schema** — after a new record type is created via app save, refresh the browser before checking Schema → Record Types.

@@ -739,14 +739,14 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = TripDataCountdownWidgetExtension/TripDataCountdownWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 61;
+				CURRENT_PROJECT_VERSION = 62;
 				INFOPLIST_FILE = TripDataCountdownWidgetExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.1.1;
+				MARKETING_VERSION = 1.1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule.CountdownWidget;
 				PRODUCT_NAME = TripDataCountdownWidgetExtension;
 				SDKROOT = iphoneos;
@@ -760,14 +760,14 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = TripDataShareActionExtension/TripDataShareActionExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 61;
+				CURRENT_PROJECT_VERSION = 62;
 				INFOPLIST_FILE = TripDataShareActionExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.1.1;
+				MARKETING_VERSION = 1.1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule.ShareAction;
 				PRODUCT_NAME = TripDataShareActionExtension;
 				SDKROOT = iphoneos;
@@ -781,14 +781,14 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = TripDataShareActionExtension/TripDataShareActionExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 61;
+				CURRENT_PROJECT_VERSION = 62;
 				INFOPLIST_FILE = TripDataShareActionExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.1.1;
+				MARKETING_VERSION = 1.1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule.ShareAction;
 				PRODUCT_NAME = TripDataShareActionExtension;
 				SDKROOT = iphoneos;
@@ -861,14 +861,14 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = TripDataCountdownWidgetExtension/TripDataCountdownWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 61;
+				CURRENT_PROJECT_VERSION = 62;
 				INFOPLIST_FILE = TripDataCountdownWidgetExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.1.1;
+				MARKETING_VERSION = 1.1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule.CountdownWidget;
 				PRODUCT_NAME = TripDataCountdownWidgetExtension;
 				SDKROOT = iphoneos;
@@ -903,7 +903,7 @@
 				CODE_SIGN_ENTITLEMENTS = TripDataHub/TripDataHub.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 61;
+				CURRENT_PROJECT_VERSION = 62;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TripDataHub/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "TripData Hub";
@@ -921,7 +921,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1.1;
+				MARKETING_VERSION = 1.1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule;
 				PRODUCT_NAME = TripDataHub;
 				SDKROOT = iphoneos;
@@ -1021,7 +1021,7 @@
 				CODE_SIGN_ENTITLEMENTS = TripDataHub/TripDataHub.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 61;
+				CURRENT_PROJECT_VERSION = 62;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TripDataHub/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "TripData Hub";
@@ -1039,7 +1039,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1.1;
+				MARKETING_VERSION = 1.1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule;
 				PRODUCT_NAME = TripDataHub;
 				SDKROOT = iphoneos;
