@@ -290,17 +290,7 @@ struct IPadTimelineSidebarView: View {
                         }
                     }
                 }
-                .onChange(of: viewModel.schedules) { _, _ in
-                    Task {
-                        try? await Task.sleep(nanoseconds: 120_000_000)
-                        if let rowID = nextScrollTargetID() {
-                            withAnimation(.easeInOut(duration: 0.25)) {
-                                proxy.scrollTo(rowID, anchor: .top)
-                            }
-                        }
-                    }
-                }
-                .onChange(of: viewModel.crewAccessSchedules) { _, _ in
+                .onChange(of: viewModel.scheduleDataRevision) { _, _ in
                     Task {
                         try? await Task.sleep(nanoseconds: 120_000_000)
                         if let rowID = nextScrollTargetID() {
@@ -329,7 +319,7 @@ struct IPadTimelineSidebarView: View {
             refreshTripDataCards()
             refreshFriendScheduleMatches()
         }
-        .onChange(of: viewModel.crewAccessSchedules) { _, _ in
+        .onChange(of: viewModel.scheduleDataRevision) { _, _ in
             refreshLegData()
             refreshTripDataCards()
             refreshFriendScheduleMatches()

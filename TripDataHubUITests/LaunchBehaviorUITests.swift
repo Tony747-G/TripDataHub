@@ -24,7 +24,7 @@ final class LaunchBehaviorUITests: XCTestCase {
         XCTAssertLessThan(nextReportCard.frame.minY, dateHeader.frame.minY)
     }
 
-    func test_settingsLoggedOutStateHidesTripBoardLoginAction() {
+    func test_settingsLoggedOutStateShowsTripBoardLoginAction() {
         let app = XCUIApplication()
         app.launchArguments += ["UITEST_LOGGED_OUT_VERIFIED"]
         app.launch()
@@ -34,7 +34,26 @@ final class LaunchBehaviorUITests: XCTestCase {
         settingsTab.tap()
 
         let loginButton = app.buttons["settings.tripboardAction"]
-        XCTAssertFalse(loginButton.waitForExistence(timeout: 2))
+        XCTAssertTrue(loginButton.waitForExistence(timeout: 5))
+        XCTAssertEqual(loginButton.label, "TripBoard Log-in")
+    }
+
+    func test_settingsOpenTimeDemoModeShowsDemoLoadAction() {
+        let app = XCUIApplication()
+        app.launchArguments += ["UITEST_LOGGED_OUT_VERIFIED"]
+        app.launchArguments += ["UITEST_OPENTIME_DEMO"]
+        app.launch()
+
+        let settingsTab = app.tabBars.buttons["Settings"]
+        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
+        settingsTab.tap()
+
+        let demoSwitch = app.switches["settings.openTimeDemoMode"]
+        XCTAssertTrue(demoSwitch.waitForExistence(timeout: 5))
+
+        let demoLoadButton = app.buttons["settings.tripboardAction"]
+        XCTAssertTrue(demoLoadButton.waitForExistence(timeout: 5))
+        XCTAssertEqual(demoLoadButton.label, "Load Demo OpenTime")
     }
 
 }

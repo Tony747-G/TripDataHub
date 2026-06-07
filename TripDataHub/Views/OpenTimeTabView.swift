@@ -24,6 +24,7 @@ struct OpenTimeTabView: View {
     @State private var lastFetchMessage: String?
     @State private var hideUpToDateTask: Task<Void, Never>?
     @State private var hideLastFetchTask: Task<Void, Never>?
+    @State private var ppSections: [OpenTimePPSection] = []
 
     private static let lastFetchFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -33,25 +34,37 @@ struct OpenTimeTabView: View {
     }()
 
     var body: some View {
-        if sidebarMode {
-            sidebarContent
-                .sheet(item: $selectedDetailTrip) { (trip: OpenTimeTrip) in
-                    NavigationStack {
-                        OpenTimeTripDetailView(
-                            trip: trip,
-                            titleColor: colorForRequestType(trip.requestType)
-                        )
-                        .toolbar {
-                            ToolbarItem(placement: .confirmationAction) {
-                                Button("Done") { selectedDetailTrip = nil }
+        Group {
+            if sidebarMode {
+                sidebarContent
+                    .sheet(item: $selectedDetailTrip) { (trip: OpenTimeTrip) in
+                        NavigationStack {
+                            OpenTimeTripDetailView(
+                                trip: trip,
+                                titleColor: colorForRequestType(trip.requestType)
+                            )
+                            .toolbar {
+                                ToolbarItem(placement: .confirmationAction) {
+                                    Button("Done") { selectedDetailTrip = nil }
+                                }
                             }
                         }
                     }
+            } else {
+                NavigationStack {
+                    fullScreenContent
                 }
-        } else {
-            NavigationStack {
-                fullScreenContent
             }
+        }
+        .onAppear(perform: rebuildOpenTimeSections)
+        .onChange(of: viewModel.scheduleDataRevision) { _, _ in
+            rebuildOpenTimeSections()
+        }
+        .onChange(of: viewModel.isOpenTimeDemoMode) { _, _ in
+            rebuildOpenTimeSections()
+        }
+        .onChange(of: openTimeDomicile) { _, _ in
+            rebuildOpenTimeSections()
         }
     }
 
@@ -63,7 +76,7 @@ struct OpenTimeTabView: View {
                 LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                     Color.clear.frame(height: 0).id(topAnchorID)
                     if ppSections.isEmpty {
-                        Text(AppEnvironment.isTripBoardFetchVisible ? "No fetched data yet. Pull to refresh or tap Fetch in Settings." : AppEnvironment.noTripBoardDataMessage)
+                        Text(emptyStateMessage)
                             .appScaledFont(.footnote, scale: effScale)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -149,7 +162,7 @@ struct OpenTimeTabView: View {
                             .id(topAnchorID)
 
                         if ppSections.isEmpty {
-                            Text(AppEnvironment.isTripBoardFetchVisible ? "No fetched data yet. Pull to refresh or use Settings to fetch from TripBoard." : AppEnvironment.noTripBoardDataMessage)
+                            Text(emptyStateMessage)
                                 .appScaledFont(.footnote, scale: fontScale)
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -245,7 +258,7 @@ struct OpenTimeTabView: View {
                             .foregroundStyle(.secondary)
                     }
                     if isRefreshingOpenTime {
-                        Text("Refreshing TripBoard data...")
+                        Text(viewModel.isOpenTimeDemoMode ? "Loading demo OpenTime data..." : "Refreshing TripBoard data...")
                             .appScaledFont(.caption, scale: fontScale)
                             .foregroundStyle(.secondary)
                     } else if let refreshMessage {
@@ -259,12 +272,48 @@ struct OpenTimeTabView: View {
             }
     }
 
-    private var ppSections: [OpenTimePPSection] {
-        let domicile = viewModel.verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
-        return OpenTimeSectionBuilder.build(schedules: viewModel.schedules, domicile: domicile)
+    private var emptyStateMessage: String {
+        if viewModel.isOpenTimeDemoMode {
+            return "Demo Mode is enabled. Pull to refresh sample OpenTime data."
+        }
+        return AppEnvironment.isTripBoardFetchVisible ? "No fetched data yet. Pull to refresh or use Settings to fetch from TripBoard." : AppEnvironment.noTripBoardDataMessage
+    }
+
+    private var openTimeDomicile: String {
+        viewModel.verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
+    }
+
+    private func rebuildOpenTimeSections() {
+        ppSections = OpenTimeSectionBuilder.build(
+            schedules: viewModel.openTimeDisplaySchedules,
+            domicile: openTimeDomicile
+        )
     }
 
     private func refreshOpenTime(using proxy: ScrollViewProxy) async {
+        hideUpToDateTask?.cancel()
+        hideUpToDateTask = nil
+        hideLastFetchTask?.cancel()
+        hideLastFetchTask = nil
+        if viewModel.isOpenTimeDemoMode {
+            await MainActor.run {
+                isRefreshingOpenTime = true
+                refreshMessage = nil
+                refreshMessageIsError = false
+                viewModel.refreshOpenTimeDemoData()
+                lastFetchMessage = "Demo Mode"
+            }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            await MainActor.run {
+                isRefreshingOpenTime = false
+                refreshMessage = "Demo OpenTime data loaded."
+                refreshMessageIsError = false
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    proxy.scrollTo(topAnchorID, anchor: .top)
+                }
+            }
+            return
+        }
         if !AppEnvironment.isTripBoardFetchVisible {
             await MainActor.run {
                 refreshMessage = AppEnvironment.tripBoardUnavailableMessage
@@ -272,10 +321,6 @@ struct OpenTimeTabView: View {
             }
             return
         }
-        hideUpToDateTask?.cancel()
-        hideUpToDateTask = nil
-        hideLastFetchTask?.cancel()
-        hideLastFetchTask = nil
         let (previousLastSyncAt, wasShowingLoginSheet) = await MainActor.run {
             (viewModel.lastSyncAt, viewModel.isShowingLoginSheet)
         }

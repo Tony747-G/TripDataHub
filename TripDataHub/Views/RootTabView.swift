@@ -31,18 +31,18 @@ struct RootTabView: View {
                 }
                 .tag(0)
 
-            if AppEnvironment.isOpenTimeVisible {
-                OpenTimeTabView()
-                    .tabItem {
-                        Label("OpenTime", systemImage: "clock")
-                    }
-                    .tag(1)
-            }
-
             if AppEnvironment.isFriendSharingVisible {
                 FriendsTabView()
                     .tabItem {
                         Label("Friends", systemImage: "person.2")
+                    }
+                    .tag(1)
+            }
+
+            if AppEnvironment.isOpenTimeVisible {
+                OpenTimeTabView()
+                    .tabItem {
+                        Label("OpenTime", systemImage: "clock")
                     }
                     .tag(2)
             }
@@ -53,19 +53,11 @@ struct RootTabView: View {
                 }
                 .tag(3)
 
-            if viewModel.canAccessAdminTab {
-                AdminTabView()
-                    .tabItem {
-                        Label("Admin", systemImage: "checklist")
-                    }
-                    .tag(4)
-            }
-
             SettingsTabView()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape")
                 }
-                .tag(5)
+                .tag(4)
         }
         .sheet(isPresented: Binding(
             get: { viewModel.isShowingLoginSheet && AppEnvironment.isTripBoardFetchVisible },
@@ -110,12 +102,9 @@ struct RootTabView: View {
                 }
             }
         }
-        .onChange(of: viewModel.schedules) { _, _ in
+        .onChange(of: viewModel.scheduleDataRevision) { _, _ in
             viewModel.refreshFlightCountdownPresentation()
             viewModel.handleSchedulesChangedForSharing()
-        }
-        .onChange(of: viewModel.crewAccessSchedules) { _, _ in
-            viewModel.refreshFlightCountdownPresentation()
         }
         .onChange(of: viewModel.pendingImport?.id) { _, newValue in
             if newValue != nil {

@@ -90,6 +90,10 @@ struct SettingsTabView: View {
             }
 
             logTenExportSection
+
+            if viewModel.canAccessAdminTools {
+                SettingsAdminSection()
+            }
         }
         .scrollDismissesKeyboard(.interactively)
     }

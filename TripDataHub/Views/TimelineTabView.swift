@@ -311,7 +311,7 @@ struct TimelineTabView: View {
                 refreshTripDataCards()
                 refreshFriendScheduleMatches()
             }
-            .onChange(of: viewModel.schedules) { _, _ in
+            .onChange(of: viewModel.scheduleDataRevision) { _, _ in
                 refreshLegData()
                 refreshTripDataCards()
                 refreshFriendScheduleMatches()

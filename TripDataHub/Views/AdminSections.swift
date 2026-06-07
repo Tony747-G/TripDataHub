@@ -1,10 +1,42 @@
 import SwiftUI
 
+struct SettingsAdminSection: View {
+    var body: some View {
+        Section("Admin") {
+            NavigationLink("Verified App Users") {
+                AdminVerifiedAppUsersView()
+            }
+        }
+    }
+}
+
+struct AdminVerifiedAppUsersView: View {
+    var body: some View {
+        List {
+            AdminVerifiedAppUsersSection()
+        }
+#if os(iOS)
+        .toolbar(.hidden, for: .navigationBar)
+#endif
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack {
+                Spacer()
+                Text("Verified App Users")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Spacer()
+            }
+            .padding(.vertical, 8)
+            .background(.background)
+        }
+    }
+}
+
 struct AdminVerifiedAppUsersSection: View {
     @EnvironmentObject private var viewModel: AppViewModel
 
     var body: some View {
-        Section("Verified App Users") {
+        Section {
             Button {
                 Task {
                     await viewModel.refreshVerifiedAppUsers()

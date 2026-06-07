@@ -84,38 +84,43 @@ struct SettingsTripBoardFetchSection: View {
 
     var body: some View {
         Section {
-            if AppEnvironment.isAppStoreReviewMode {
-                Label(AppEnvironment.tripBoardUnavailableMessage, systemImage: "lock.slash")
+            Toggle("Demo Mode", isOn: $viewModel.isOpenTimeDemoMode)
+                .accessibilityIdentifier("settings.openTimeDemoMode")
+
+            Toggle("Auto Fetch on App Open", isOn: $autoFetchOnOpen)
+                .disabled(viewModel.isOpenTimeDemoMode)
+
+            Button(tripBoardActionTitle) {
+                Task {
+                    await viewModel.syncTapped()
+                }
+            }
+            .disabled(viewModel.isSyncing)
+            .accessibilityIdentifier("settings.tripboardAction")
+
+            if viewModel.isSyncing {
+                ProgressView()
+            }
+
+            if viewModel.isTripBoardServerDown {
+                Text("Auth: TripBoard Server is down")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            } else {
+                Text("Auth: \(viewModel.authStatusText)")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-            } else {
-                Toggle("Auto Fetch on App Open", isOn: $autoFetchOnOpen)
-
-                Button(viewModel.authStatus == .loggedOut ? "TripBoard Log-in" : "Fetch TripBoard Data") {
-                    Task {
-                        await viewModel.syncTapped()
-                    }
-                }
-                .disabled(viewModel.isSyncing)
-                .accessibilityIdentifier("settings.tripboardAction")
-
-                if viewModel.isSyncing {
-                    ProgressView()
-                }
-
-                if viewModel.isTripBoardServerDown {
-                    Text("Auth: TripBoard Server is down")
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                } else {
-                    Text("Auth: \(viewModel.authStatusText)")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
             }
         } header: {
             sectionHeader("TripBoard Fetch")
         }
+    }
+
+    private var tripBoardActionTitle: String {
+        if viewModel.isOpenTimeDemoMode {
+            return "Load Demo OpenTime"
+        }
+        return viewModel.authStatus == .loggedOut ? "TripBoard Log-in" : "Fetch TripBoard Data"
     }
 }
 

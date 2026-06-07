@@ -121,8 +121,7 @@ struct IPadBidPeriodCalendarView: View {
         }
         .background(Color(.secondarySystemBackground).ignoresSafeArea(edges: .top))
         .onAppear { loadBidPeriod(for: Date()) }
-        .onChange(of: viewModel.crewAccessSchedules) { _, _ in refreshCalendarLayouts() }
-        .onChange(of: viewModel.schedules) { _, _ in refreshCalendarLayouts() }
+        .onChange(of: viewModel.scheduleDataRevision) { _, _ in refreshCalendarLayouts() }
         .onChange(of: viewModel.manualOperationalEvents) { _, _ in refreshCalendarLayouts() }
         .onChange(of: viewModel.manualPersonalEvents) { _, _ in refreshCalendarLayouts() }
         .onChange(of: pilotQualificationRawValue) { _, _ in refreshCalendarLayouts() }

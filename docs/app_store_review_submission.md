@@ -1,12 +1,12 @@
 # App Store Review Submission Notes
 
-Use this checklist when submitting the App Store Review / Demo Mode build.
+Use this checklist when submitting the App Store Review build.
 
 ## Build Mode
 
-For v1.1.0 Friend Sharing review, archive a normal Release build unless you intentionally want the legacy Demo Mode build.
+For OpenTime / TripBoard Fetch review, archive a normal Release build. Do not define `APPSTORE_REVIEW` unless you intentionally want the legacy Demo Mode build that hides TripBoard-related UI.
 
-Do not use the `APPSTORE_REVIEW` Swift compilation flag when Friend Sharing itself must be visible to App Review.
+Do not use the `APPSTORE_REVIEW` Swift compilation flag when OpenTime, TripBoard Fetch, or Friend Sharing must be visible to App Review.
 
 Legacy Demo Mode can still be produced with the `APPSTORE_REVIEW` Swift compilation flag enabled.
 
@@ -14,10 +14,11 @@ This enables Demo Mode:
 
 - GEMS verification is bypassed.
 - TripBoard Fetch is unavailable.
+- OpenTime is hidden.
 - Friends / advanced schedule sharing is hidden and disabled.
 - Manual PDF import, Timeline, Calendar, flight details, and local time rendering remain available.
 
-Production behavior is unchanged when `APPSTORE_REVIEW` is not defined.
+Normal Release behavior is used when `APPSTORE_REVIEW` is not defined.
 
 ## Archive Command
 
@@ -27,11 +28,10 @@ xcodebuild \
   -scheme TripDataHub \
   -destination 'generic/platform=iOS' \
   -configuration Release \
-  OTHER_SWIFT_FLAGS='$(inherited) -DAPPSTORE_REVIEW' \
   archive
 ```
 
-If archiving from Xcode instead of the command line, add `APPSTORE_REVIEW` to the Release archive build's Swift Active Compilation Conditions / Other Swift Flags before creating the archive.
+If a legacy Demo Mode build is intentionally needed, add `APPSTORE_REVIEW` to the Release archive build's Swift Active Compilation Conditions / Other Swift Flags before creating the archive.
 
 ## App Review Information
 
@@ -39,14 +39,14 @@ Set:
 
 - Sign-in required: OFF
 
-Do not provide airline, CrewAccess, TripBoard, GEMS, or employer credentials.
+Do not provide airline, CrewAccess, TripBoard, GEMS, or employer credentials unless a specific TripBoard review account is available and approved for App Review use.
 
 ## Review Notes
 
 For v1.1.0 and later, paste the following into App Review Notes:
 
 ```text
-TripDataHub is a personal schedule viewer that uses manually imported PDF schedule files provided by the user.
+TripDataHub is a personal schedule viewer that uses manually imported PDF schedule files provided by the user. It also includes an optional OpenTime view powered by TripBoard Fetch.
 
 TripDataHub includes optional Friend Sharing. Friend Sharing uses CloudKit Public Database records keyed by verified GEMS IDs. It does not use CloudKit Sharing / CKShare.
 
@@ -58,7 +58,26 @@ TripDataHub uploads shared schedule records only after a mutual friend connectio
 
 The shared Friend schedule is read-only to the receiving user. The feature shares only the user's display name/profile picture where configured and parsed schedule data needed for the schedule timeline. It does not expose internal CloudKit IDs, device identifiers, CloudKit metadata, last-sync timestamps, online status, or hidden profile attributes.
 
-The app does not connect to airline systems, crew systems, employer databases, or TripBoard during review. Manual PDF import remains available so reviewers can inspect the core schedule viewer experience. TripBoard Fetch remains unavailable in App Store builds.
+OpenTime is an optional read-only view powered by TripBoard Fetch.
+
+Users must have their own active BidPro TripBoard subscription and authenticate with their own TripBoard credentials. TripDataHub only displays OpenTime information that is already available to that authenticated user through their TripBoard account.
+
+TripDataHub does not provide TripBoard access, does not bypass any subscription requirement, does not share OpenTime data with other users, and does not submit, bid for, reserve, or modify any TripBoard data.
+
+Fetching occurs only on the user's device after the user authenticates. It is initiated by app launch when the user enables Auto Fetch on App Open, or by manual refresh / Fetch. TripDataHub does not run server-side scraping, automated background monitoring, continuous polling, or push notifications for OpenTime.
+
+For App Review, please use Demo Mode to review the OpenTime interface without using real TripBoard credentials.
+
+OpenTime Demo Mode steps:
+1. Open TripDataHub.
+2. Go to Settings.
+3. Enable Demo Mode in the TripBoard Fetch section.
+4. Open the OpenTime tab.
+5. Tap Refresh if needed.
+
+Demo Mode uses static sample OpenTime data stored in the app and does not connect to TripBoard.
+
+Manual PDF import remains available so reviewers can inspect the core schedule viewer experience without TripBoard credentials.
 
 Sample schedule PDF:
 https://tripdatahub.app/sample/
@@ -81,14 +100,16 @@ The sample screenshots and sample schedule data used for App Store review are sy
 
 ## Expected Review Flow
 
-Fresh install with `APPSTORE_REVIEW` enabled:
+Fresh install from a normal Release build:
 
-- App opens without sign-in.
+- App opens without mandatory sign-in.
 - Import Preview appears when the sample PDF is shared to TripDataHub.
 - Confirm Import saves trip `A00001`.
 - Timeline displays ANC-CVG, CVG-HND, and DH HND-ANC.
 - Calendar displays the imported trip.
 - Flight detail / trip timeline sheet is reviewable.
-- Settings shows Demo Mode and a TripBoard unavailable message.
-- No GEMS verification form is shown.
-- If Friend Sharing is enabled for the submitted build, it remains optional and requires iCloud plus mutual GEMS-ID approval before any shared schedule appears.
+- OpenTime tab is visible.
+- Settings shows TripBoard Fetch, Auto Fetch on App Open, and the TripBoard Log-in / Fetch action.
+- Settings also provides Demo Mode for reviewing OpenTime without TripBoard credentials.
+- TripBoard Fetch remains optional and requires the user's own active TripBoard subscription and credentials.
+- Friend Sharing remains optional and requires iCloud plus mutual GEMS-ID approval before any shared schedule appears.

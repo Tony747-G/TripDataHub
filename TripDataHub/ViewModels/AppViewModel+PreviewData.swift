@@ -84,6 +84,7 @@ extension AppViewModel {
         let arguments = ProcessInfo.processInfo.arguments
 
         if arguments.contains("UITEST_TIMELINE_SEED") {
+            isOpenTimeDemoMode = false
             let seededCrewSchedules = Self.uiTestTimelineSchedules
             crewAccessSchedules = seededCrewSchedules
             bidproSchedules = []
@@ -94,6 +95,7 @@ extension AppViewModel {
         }
 
         if arguments.contains("UITEST_LOGGED_OUT_VERIFIED") {
+            isOpenTimeDemoMode = false
             let recordName = currentCloudKitRecordName ?? "UITEST-LOCAL-IDENTITY"
             currentCloudKitRecordName = recordName
             verifiedIdentity = VerifiedIdentityProfile(
@@ -113,6 +115,10 @@ extension AppViewModel {
             errorMessage = nil
             isShowingLoginSheet = false
             didLastFetchFail = false
+        }
+
+        if arguments.contains("UITEST_OPENTIME_DEMO") {
+            isOpenTimeDemoMode = true
         }
     }
 

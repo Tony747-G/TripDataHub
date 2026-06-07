@@ -38,6 +38,8 @@ enum OpenTimeSectionBuilder {
         // Collect all rows, keyed by actual PP derived from startLocal
         var rowsByPP: [String: [OpenTimeDisplayRow]] = [:]
         var ppOrder: [String] = []
+        let localDateTimeFormatter = makeLocalFormatter(format: "yyyy-MM-dd HH:mm", domicile: domicile)
+        let localDayFormatter = makeLocalFormatter(format: "yyyy-MM-dd", domicile: domicile)
 
         for schedule in schedules {
             for trip in schedule.openTimeTrips {
@@ -45,7 +47,11 @@ enum OpenTimeSectionBuilder {
                 // app's own BP/PP calendar. Fall back to TripBoard's label if
                 // the date can't be resolved.
                 let ppLabel: String
-                if let date = departureUTC(for: trip, domicile: domicile),
+                if let date = departureUTC(
+                    for: trip,
+                    localDateTimeFormatter: localDateTimeFormatter,
+                    localDayFormatter: localDayFormatter
+                ),
                    let resolved = resolvePayPeriodLabel(for: date, domicile: domicile) {
                     ppLabel = resolved
                 } else {
@@ -103,34 +109,26 @@ enum OpenTimeSectionBuilder {
         }
     }
 
-    private static func departureUTC(for trip: OpenTimeTrip, domicile: String) -> Date? {
+    private static func departureUTC(
+        for trip: OpenTimeTrip,
+        localDateTimeFormatter: DateFormatter,
+        localDayFormatter: DateFormatter
+    ) -> Date? {
         let legDeparture = trip.legs
             .compactMap { LegConnectionTextBuilder.parseUTC($0.depUTC) }
             .min()
         if let legDeparture { return legDeparture }
 
-        return parseLocalDateTime(trip.startLocal, domicile: domicile)
-            ?? parseLocalDayAtStartOfDay(trip.startLocal, domicile: domicile)
+        return localDateTimeFormatter.date(from: trip.startLocal.trimmingCharacters(in: .whitespacesAndNewlines))
+            ?? localDayFormatter.date(from: ScheduleDateText.datePart(from: trip.startLocal))
     }
 
-    private static func parseLocalDateTime(_ value: String, domicile: String) -> Date? {
-        let timeZone = DomicileSupport.timeZone(for: domicile)
+    private static func makeLocalFormatter(format: String, domicile: String) -> DateFormatter {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = timeZone
-        formatter.dateFormat = "yyyy-MM-dd HH:mm"
-        return formatter.date(from: value.trimmingCharacters(in: .whitespacesAndNewlines))
-    }
-
-    private static func parseLocalDayAtStartOfDay(_ value: String, domicile: String) -> Date? {
-        let timeZone = DomicileSupport.timeZone(for: domicile)
-        let dateKey = ScheduleDateText.datePart(from: value)
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = timeZone
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.date(from: dateKey)
+        formatter.timeZone = DomicileSupport.timeZone(for: domicile)
+        formatter.dateFormat = format
+        return formatter
     }
 }

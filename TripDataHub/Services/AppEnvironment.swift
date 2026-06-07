@@ -10,11 +10,7 @@ enum AppEnvironment {
     }()
 
     static let isTripBoardFetchVisible: Bool = {
-#if TDH_ENABLE_TRIPBOARD
         return !isAppStoreReviewMode
-#else
-        return false
-#endif
     }()
 
     static let isFriendSharingVisible: Bool = {
@@ -22,11 +18,7 @@ enum AppEnvironment {
     }()
 
     static let isOpenTimeVisible: Bool = {
-#if TDH_ENABLE_OPENTIME
         return !isAppStoreReviewMode
-#else
-        return false
-#endif
     }()
 
     static let reviewModeMessage = "Demo Mode: GEMS verification is disabled for App Store review."

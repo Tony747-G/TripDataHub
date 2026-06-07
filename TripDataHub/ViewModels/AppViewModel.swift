@@ -184,6 +184,7 @@ final class AppViewModel: ObservableObject {
     static let crewAccessRetentionSelectionKey = "crewaccess_trip_data_retained_v1"
     static let defaultCrewAccessRetentionSelection = "ALL"
     static let crewAccessRetentionDefaultMigrationKey = "crewaccess_trip_data_retained_default_all_migrated_v1"
+    static let openTimeDemoModeKey = "opentime_demo_mode_enabled_v1"
 
     // MARK: - Import dedup (4-layer architecture)
     // Layer 1: ExternalOpenLaunchGate (BidProScheduleApp.swift) — catches iOS triple-delivery at onOpenURL
@@ -202,7 +203,11 @@ final class AppViewModel: ObservableObject {
     @Published var isSyncing = false
     @Published var isShowingLoginSheet = false
     @Published var lastSyncAt: Date?
-    @Published var schedules: [PayPeriodSchedule] = []
+    @Published var schedules: [PayPeriodSchedule] = [] {
+        didSet {
+            scheduleDataRevision &+= 1
+        }
+    }
     @Published var bidproSchedules: [PayPeriodSchedule] = []
     @Published var crewAccessSchedules: [PayPeriodSchedule] = []
     @Published var errorMessage: String?
@@ -211,11 +216,17 @@ final class AppViewModel: ObservableObject {
     @Published var notificationScheduleMessage: String?
     @Published var isTripBoardServerDown = false
     @Published var didLastFetchFail = false
+    @Published var isOpenTimeDemoMode = UserDefaults.standard.bool(forKey: AppViewModel.openTimeDemoModeKey) {
+        didSet {
+            UserDefaults.standard.set(isOpenTimeDemoMode, forKey: Self.openTimeDemoModeKey)
+        }
+    }
     @Published var friendConnections: [FriendConnection] = [] {
         didSet {
             friendConnectionsRevision &+= 1
         }
     }
+    @Published private(set) var scheduleDataRevision: Int = 0
     @Published private(set) var friendConnectionsRevision: Int = 0
     @Published var friendActionMessage: String?
     @Published var identityActionMessage: String?
@@ -725,7 +736,7 @@ final class AppViewModel: ObservableObject {
 
     var seniorityCount: Int { gemsVerificationRecordCount }
 
-    var canAccessAdminTab: Bool {
+    var canAccessAdminTools: Bool {
         isAdmin
     }
 
@@ -2438,6 +2449,19 @@ final class AppViewModel: ObservableObject {
         case .tripBoard:
             return bidproSchedules
         }
+    }
+
+    var openTimeDisplaySchedules: [PayPeriodSchedule] {
+        isOpenTimeDemoMode ? Self.openTimeDemoSchedules : schedules
+    }
+
+    func refreshOpenTimeDemoData() {
+        guard isOpenTimeDemoMode else { return }
+        lastSyncAt = Date()
+        errorMessage = nil
+        didLastFetchFail = false
+        isTripBoardServerDown = false
+        isShowingLoginSheet = false
     }
 
     func nextFlightCountdownOutput(nowUTC: Date = Date()) -> CountdownEngineOutput? {
@@ -4586,6 +4610,10 @@ final class AppViewModel: ObservableObject {
     }
 
     func syncTapped() async {
+        guard !isOpenTimeDemoMode else {
+            refreshOpenTimeDemoData()
+            return
+        }
         guard !AppEnvironment.isAppStoreReviewMode else {
             errorMessage = AppEnvironment.tripBoardUnavailableMessage
             isShowingLoginSheet = false
@@ -4619,6 +4647,10 @@ final class AppViewModel: ObservableObject {
     }
 
     func autoFetchOnAppActiveIfEnabled(_ enabled: Bool) async {
+        guard !isOpenTimeDemoMode else {
+            lastAutoFetchAt = nil
+            return
+        }
         guard !AppEnvironment.isAppStoreReviewMode else { return }
         guard enabled else { return }
         guard isIdentityVerified else { return }
@@ -4683,6 +4715,10 @@ final class AppViewModel: ObservableObject {
             authStatus = .loggedIn
             errorMessage = nil
             isShowingLoginSheet = false
+            guard !isOpenTimeDemoMode else {
+                refreshOpenTimeDemoData()
+                return
+            }
 
             // Run sync immediately after an explicit successful login.
             Task { [weak self] in
@@ -4702,6 +4738,10 @@ final class AppViewModel: ObservableObject {
     }
 
     private func performSync(openLoginOnAuthFailure: Bool) async {
+        guard !isOpenTimeDemoMode else {
+            refreshOpenTimeDemoData()
+            return
+        }
         guard !isSyncing else { return }
         isSyncing = true
         defer { isSyncing = false }
@@ -5605,6 +5645,140 @@ final class AppViewModel: ObservableObject {
         }
         return yy * 100 + pp
     }
+
+    private static let openTimeDemoSchedules: [PayPeriodSchedule] = [
+        PayPeriodSchedule(
+                id: "DEMO-PP26-06",
+                label: "PP26-06",
+                tripCount: 0,
+                legCount: 0,
+                openTimeCount: 4,
+                updatedAt: Date(timeIntervalSince1970: 1_780_358_400),
+                legs: [],
+                openTimeTrips: [
+                    OpenTimeTrip(
+                        id: UUID(uuidString: "00000000-0000-0000-0000-000000260601") ?? UUID(),
+                        payPeriod: "PP26-06",
+                        pairing: "A76102",
+                        startLocal: "2026-05-28 08:15",
+                        endLocal: "2026-06-01 19:40",
+                        route: "ANC CVG HND ANC",
+                        credit: "28:35",
+                        requestType: "PO",
+                        status: "Demo",
+                        legs: [
+                            TripLeg(
+                                id: UUID(uuidString: "00000000-0000-0000-0000-000000260611") ?? UUID(),
+                                payPeriod: "PP26-06",
+                                pairing: "A76102",
+                                leg: 1,
+                                flight: "102",
+                                depAirport: "ANC",
+                                depLocal: "2026-05-28 08:15",
+                                arrAirport: "CVG",
+                                arrLocal: "2026-05-28 17:40",
+                                depUTC: "2026-05-28T16:15:00Z",
+                                arrUTC: "2026-05-28T21:40:00Z",
+                                status: "-",
+                                block: "5:25"
+                            ),
+                            TripLeg(
+                                id: UUID(uuidString: "00000000-0000-0000-0000-000000260612") ?? UUID(),
+                                payPeriod: "PP26-06",
+                                pairing: "A76102",
+                                leg: 2,
+                                flight: "184",
+                                depAirport: "CVG",
+                                depLocal: "2026-05-29 11:30",
+                                arrAirport: "HND",
+                                arrLocal: "2026-05-30 14:10",
+                                depUTC: "2026-05-29T15:30:00Z",
+                                arrUTC: "2026-05-30T05:10:00Z",
+                                status: "-",
+                                block: "13:40"
+                            )
+                        ]
+                    ),
+                    OpenTimeTrip(
+                        id: UUID(uuidString: "00000000-0000-0000-0000-000000260602") ?? UUID(),
+                        payPeriod: "PP26-06",
+                        pairing: "A76218",
+                        startLocal: "2026-06-05 22:10",
+                        endLocal: "2026-06-09 09:55",
+                        route: "ANC SDF CGN SDF ANC",
+                        credit: "31:20",
+                        requestType: "PC",
+                        status: "Demo"
+                    ),
+                    OpenTimeTrip(
+                        id: UUID(uuidString: "00000000-0000-0000-0000-000000260603") ?? UUID(),
+                        payPeriod: "PP26-06",
+                        pairing: "A76344",
+                        startLocal: "2026-06-10 06:45",
+                        endLocal: "2026-06-13 16:25",
+                        route: "ANC NRT SIN HKG ANC",
+                        credit: "36:05",
+                        requestType: "PO",
+                        status: "Demo"
+                    ),
+                    OpenTimeTrip(
+                        id: UUID(uuidString: "00000000-0000-0000-0000-000000260604") ?? UUID(),
+                        payPeriod: "PP26-06",
+                        pairing: "A76470",
+                        startLocal: "2026-06-12 18:00",
+                        endLocal: "2026-06-13 23:40",
+                        route: "ANC LAX ANC",
+                        credit: "12:15",
+                        requestType: "PC",
+                        status: "Demo"
+                    )
+                ]
+        ),
+        PayPeriodSchedule(
+                id: "DEMO-PP26-07",
+                label: "PP26-07",
+                tripCount: 0,
+                legCount: 0,
+                openTimeCount: 3,
+                updatedAt: Date(timeIntervalSince1970: 1_782_777_600),
+                legs: [],
+                openTimeTrips: [
+                    OpenTimeTrip(
+                        id: UUID(uuidString: "00000000-0000-0000-0000-000000260701") ?? UUID(),
+                        payPeriod: "PP26-07",
+                        pairing: "A77005",
+                        startLocal: "2026-06-16 07:30",
+                        endLocal: "2026-06-20 18:05",
+                        route: "ANC ICN BKK ICN ANC",
+                        credit: "34:50",
+                        requestType: "PO",
+                        status: "Demo"
+                    ),
+                    OpenTimeTrip(
+                        id: UUID(uuidString: "00000000-0000-0000-0000-000000260702") ?? UUID(),
+                        payPeriod: "PP26-07",
+                        pairing: "A77191",
+                        startLocal: "2026-06-24 12:10",
+                        endLocal: "2026-06-28 21:30",
+                        route: "ANC SDF DWC HKG",
+                        credit: "42:10",
+                        requestType: "PC",
+                        status: "Demo"
+                    ),
+                    OpenTimeTrip(
+                        id: UUID(uuidString: "00000000-0000-0000-0000-000000260703") ?? UUID(),
+                        payPeriod: "PP26-07",
+                        pairing: "A77260",
+                        startLocal: "2026-07-03 09:20",
+                        endLocal: "2026-07-06 15:05",
+                        route: "ANC CVG AMS CVG ANC",
+                        credit: "27:45",
+                        requestType: "PO",
+                        status: "Demo"
+                    )
+                ]
+        )
+    ]
 
 }
 
