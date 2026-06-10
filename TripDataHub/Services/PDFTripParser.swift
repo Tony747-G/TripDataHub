@@ -175,13 +175,9 @@ struct PDFTripParser {
                 let dayNum    = Int(g[0]) ?? 1
                 let isDH      = !g[1].trimmingCharacters(in: .whitespaces).isEmpty
                 let rawFlight = g[2]
-                let flightNum: String
-                if rawFlight.allSatisfy(\.isNumber), let numeric = Int(rawFlight) {
-                    let normalized = String(numeric)
-                    flightNum = isDH ? "5X\(normalized)" : normalized
-                } else {
-                    flightNum = rawFlight
-                }
+                // Preserve the original digits (including leading zeros) so numeric
+                // and 5X-prefixed flights normalize to the same "XX…" form.
+                let flightNum = FlightNumberNormalizer.displayValue(rawFlight)
                 let dep       = g[3], arr = g[4]
                 let depUTC    = g[5], depLT = g[6]
                 let arrUTC    = g[7], arrLT = g[8]

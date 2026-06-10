@@ -604,13 +604,11 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         s.hasSuffix("h") ? String(s.dropLast()) : s
     }
 
-    private func normalizeFlightNumber(_ raw: String, isDeadhead: Bool) -> String {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.allSatisfy(\.isNumber), let numeric = Int(trimmed) {
-            let normalized = String(numeric)
-            return isDeadhead ? "5X\(normalized)" : normalized
-        }
-        return trimmed
+    private func normalizeFlightNumber(_ raw: String, isDeadhead _: Bool) -> String {
+        // Normalize identically whether or not a 5X airline prefix is present, so
+        // numeric ("003") and prefixed ("5X003") flights both yield "XX003" and
+        // stay matchable against a friend's copy of the same flight.
+        FlightNumberNormalizer.displayValue(raw)
     }
 
     private func layoverMetadataByArrivingSequence(extractedText: String, legRows: [ParsedLegRow]) -> [Int: LayoverLeg] {

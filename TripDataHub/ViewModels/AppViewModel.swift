@@ -282,6 +282,7 @@ final class AppViewModel: ObservableObject {
     private var sessionCookies: [HTTPCookie] = []
     private var lastAutoFetchAt: Date?
     private var externalConsumerTask: Task<Void, Never>?
+    private var pendingProfileUploadTask: Task<Void, Never>?
     private var lastConsumedAppGroupHandoffFileName: String?
     private var isConsumingAppGroupHandoff = false
     private var crewAccessLegImportReferenceTimes: [String: Date] = [:]
@@ -508,6 +509,7 @@ final class AppViewModel: ObservableObject {
     }
 
     deinit {
+        pendingProfileUploadTask?.cancel()
         if let foregroundObserver {
             NotificationCenter.default.removeObserver(foregroundObserver)
         }
@@ -2208,11 +2210,12 @@ final class AppViewModel: ObservableObject {
     func reconcileCrewAccessSchedulesWithImportFiles() async {
         let deletedKeys = deletedCrewAccessTripKeys
         let domicile = verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
-        let rebuiltSchedules = await Task.detached(priority: .utility) {
+        var rebuiltSchedules = await Task.detached(priority: .utility) {
             Self.loadCrewAccessSchedulesFromImportFiles().filter { schedule in
                 Self.crewAccessTripKeys(for: schedule, domicile: domicile).isDisjoint(with: deletedKeys)
             }
         }.value
+        rebuiltSchedules = preservingAppReviewMockSchedules(in: rebuiltSchedules)
 
         guard rebuiltSchedules != crewAccessSchedules else { return }
 
@@ -2254,6 +2257,25 @@ final class AppViewModel: ObservableObject {
             logNonFatal("Failed to save schedule cache after CrewAccess file reconciliation: \(error.localizedDescription)")
         }
         await rescheduleNotificationsIfAuthorized()
+    }
+
+    private func preservingAppReviewMockSchedules(
+        in rebuiltSchedules: [PayPeriodSchedule]
+    ) -> [PayPeriodSchedule] {
+        guard let gemsID = verifiedIdentity?.gemsID else { return rebuiltSchedules }
+        let mockSchedules: [PayPeriodSchedule]
+        switch GEMSIDNormalizer.normalize(gemsID) {
+        case "0000001":
+            mockSchedules = Self.appReviewPilotOneSchedules(updatedAt: Self.appReviewMockUpdatedAt)
+        case "0000002":
+            mockSchedules = [Self.appReviewPilotTwoSchedule(updatedAt: Self.appReviewMockUpdatedAt)]
+        default:
+            return rebuiltSchedules
+        }
+
+        let mockIDs = Set(mockSchedules.map(\.id))
+        return (rebuiltSchedules.filter { !mockIDs.contains($0.id) } + mockSchedules)
+            .sorted { scheduleDisplaySortKey($0) < scheduleDisplaySortKey($1) }
     }
 
     func deleteCrewAccessImportFiles(urls: [URL]) async {
@@ -4239,6 +4261,7 @@ final class AppViewModel: ObservableObject {
         verifiedIdentity = verified
         saveVerifiedIdentity(verified)
         seedAppReviewMockScheduleIfNeeded(for: gemsID)
+        await restoreProfileAfterIdentityVerification(gemsID: gemsID)
         do {
             try await gemsVerificationCloudKitService.recordVerifiedUser(gemsID: gemsID)
         } catch {
@@ -4248,14 +4271,15 @@ final class AppViewModel: ObservableObject {
         identityActionMessage = isAdminBootstrap
             ? "Verified as bootstrap admin. Upload GEMS verification records to CloudKit."
             : "Verified as GEMS \(gemsID) / \(domicile)."
-        Task { [weak self] in
-            await self?.syncFriendCloudKit(reason: "identity verified")
-        }
-        Task { [weak self] in
-            await self?.fetchDeviceScheduleIfNeeded(reason: "identity verified")
-            await self?.fetchManualEventsIfNeeded(reason: "identity verified")
-            await self?.uploadManualEventsIfNeeded(reason: "identity verified")
-        }
+        async let friendRestore: Void = syncFriendCloudKit(reason: "identity verified")
+        async let timelineRestore: Void = fetchDeviceScheduleIfNeeded(reason: "identity verified")
+        async let manualEventRestore: Void = restoreManualEventsAfterIdentityVerification()
+        _ = await (friendRestore, timelineRestore, manualEventRestore)
+    }
+
+    private func restoreManualEventsAfterIdentityVerification() async {
+        await fetchManualEventsIfNeeded(reason: "identity verified")
+        await uploadManualEventsIfNeeded(reason: "identity verified")
     }
 
     private func appReviewMockVerificationResult(gemsID: String, normalizedDOB: String) -> GEMSVerificationResult? {
@@ -4306,21 +4330,23 @@ final class AppViewModel: ObservableObject {
 
     private func seedAppReviewMockScheduleIfNeeded(for gemsID: String) {
         let normalized = GEMSIDNormalizer.normalize(gemsID)
-        let schedule: PayPeriodSchedule
+        let mockSchedules: [PayPeriodSchedule]
         switch normalized {
         case "0000001":
-            schedule = Self.appReviewPilotOneSchedule(updatedAt: Date())
+            mockSchedules = Self.appReviewPilotOneSchedules(updatedAt: Self.appReviewMockUpdatedAt)
         case "0000002":
-            schedule = Self.appReviewPilotTwoSchedule(updatedAt: Date())
+            mockSchedules = [Self.appReviewPilotTwoSchedule(updatedAt: Self.appReviewMockUpdatedAt)]
         default:
             return
         }
 
+        let mockScheduleIDs = Set(mockSchedules.map(\.id))
+        let mockPairings = Set(mockSchedules.flatMap { $0.legs.map(\.pairing) })
         var updatedCrewAccess = crewAccessSchedules.filter { existing in
-            existing.id != schedule.id
-                && !existing.legs.contains { $0.pairing == schedule.legs.first?.pairing }
+            !mockScheduleIDs.contains(existing.id)
+                && existing.legs.allSatisfy { !mockPairings.contains($0.pairing) }
         }
-        updatedCrewAccess.append(schedule)
+        updatedCrewAccess.append(contentsOf: mockSchedules)
         updatedCrewAccess.sort { $0.label < $1.label }
         crewAccessSchedules = updatedCrewAccess
         schedules = mergeAndSortSchedules(crew: updatedCrewAccess, bidpro: bidproSchedules)
@@ -4338,14 +4364,73 @@ final class AppViewModel: ObservableObject {
         } catch {
             logNonFatal("Failed to persist App Review mock schedule: \(error.localizedDescription)")
         }
-        lastImportSummaryMessage = "Loaded App Review sample trip \(schedule.legs.first?.pairing ?? schedule.id)."
+        let pairings = mockSchedules.compactMap { $0.legs.first?.pairing }.joined(separator: ", ")
+        lastImportSummaryMessage = "Loaded App Review sample trips \(pairings)."
         if normalized == "0000001",
            friendConnections.contains(where: { $0.employeeID == "0000002" }) {
             upsertAppReviewMockPilotTwoFriend(linkedAt: Date())
         }
     }
 
-    private static func appReviewPilotOneSchedule(updatedAt: Date) -> PayPeriodSchedule {
+    /// Fixed timestamp for App Review demo schedules. Using a constant (rather than
+    /// `Date()`) keeps rebuilt demo schedules byte-for-byte identical so reconcile
+    /// does not detect a spurious change on every pass.
+    static let appReviewMockUpdatedAt = Date(timeIntervalSince1970: 1_780_000_000)
+
+    /// Deterministic UUID derived from a seed so demo legs keep a stable identity
+    /// across rebuilds (no timeline/cache/notification churn from random UUIDs).
+    private static func stableMockLegID(_ seed: String) -> UUID {
+        let prime: UInt64 = 1_099_511_628_211
+        var hi: UInt64 = 14_695_981_039_346_656_037
+        for byte in seed.utf8 {
+            hi = (hi ^ UInt64(byte)) &* prime
+        }
+        var lo: UInt64 = hi ^ 0x9E37_79B9_7F4A_7C15
+        for byte in seed.utf8.reversed() {
+            lo = (lo ^ UInt64(byte)) &* prime
+        }
+        let hex = String(format: "%016llx%016llx", hi, lo)
+        let c = Array(hex)
+        let uuidString =
+            "\(String(c[0..<8]))-\(String(c[8..<12]))-\(String(c[12..<16]))-\(String(c[16..<20]))-\(String(c[20..<32]))"
+        return UUID(uuidString: uuidString) ?? UUID()
+    }
+
+    private static func withStableMockLegID(_ leg: TripLeg) -> TripLeg {
+        TripLeg(
+            id: stableMockLegID("\(leg.pairing)-\(leg.leg)-\(leg.flight)"),
+            payPeriod: leg.payPeriod, pairing: leg.pairing, leg: leg.leg, flight: leg.flight,
+            depAirport: leg.depAirport, depLocal: leg.depLocal,
+            arrAirport: leg.arrAirport, arrLocal: leg.arrLocal,
+            depUTC: leg.depUTC, arrUTC: leg.arrUTC, status: leg.status, block: leg.block,
+            layoverStation: leg.layoverStation, layoverHotelName: leg.layoverHotelName,
+            layoverDuration: leg.layoverDuration,
+            stdUTC: leg.stdUTC, staUTC: leg.staUTC, atdUTC: leg.atdUTC, ataUTC: leg.ataUTC
+        )
+    }
+
+    private static func withStableMockLegIDs(_ schedule: PayPeriodSchedule) -> PayPeriodSchedule {
+        PayPeriodSchedule(
+            id: schedule.id,
+            label: schedule.label,
+            tripCount: schedule.tripCount,
+            legCount: schedule.legCount,
+            openTimeCount: schedule.openTimeCount,
+            updatedAt: schedule.updatedAt,
+            legs: schedule.legs.map(withStableMockLegID),
+            openTimeTrips: schedule.openTimeTrips
+        )
+    }
+
+    static func appReviewPilotOneSchedules(updatedAt: Date) -> [PayPeriodSchedule] {
+        [
+            appReviewPilotOneJuneSchedule(updatedAt: updatedAt),
+            appReviewPilotOneCurrentSchedule(updatedAt: updatedAt),
+            appReviewPilotOneJulySchedule(updatedAt: updatedAt)
+        ].map(Self.withStableMockLegIDs)
+    }
+
+    private static func appReviewPilotOneCurrentSchedule(updatedAt: Date) -> PayPeriodSchedule {
         let payPeriod = "PP26-07"
         let pairing = "A00001"
         let legs = [
@@ -4353,7 +4438,7 @@ final class AppViewModel: ObservableObject {
                 payPeriod: payPeriod,
                 pairing: pairing,
                 leg: 1,
-                flight: "001",
+                flight: "XX001",
                 depAirport: "ANC",
                 depLocal: "2026-06-14 05:00",
                 arrAirport: "CVG",
@@ -4372,7 +4457,7 @@ final class AppViewModel: ObservableObject {
                 payPeriod: payPeriod,
                 pairing: pairing,
                 leg: 2,
-                flight: "002",
+                flight: "XX002",
                 depAirport: "CVG",
                 depLocal: "2026-06-15 06:00",
                 arrAirport: "HND",
@@ -4391,7 +4476,7 @@ final class AppViewModel: ObservableObject {
                 payPeriod: payPeriod,
                 pairing: pairing,
                 leg: 3,
-                flight: "5X003",
+                flight: "XX003",
                 depAirport: "HND",
                 depLocal: "2026-06-17 09:30",
                 arrAirport: "ANC",
@@ -4416,7 +4501,185 @@ final class AppViewModel: ObservableObject {
         )
     }
 
-    private static func appReviewPilotTwoSchedule(updatedAt: Date) -> PayPeriodSchedule {
+    private static func appReviewPilotOneJuneSchedule(updatedAt: Date) -> PayPeriodSchedule {
+        let payPeriod = "PP26-06"
+        let pairing = "A00020"
+        let legs = [
+            TripLeg(
+                payPeriod: payPeriod,
+                pairing: pairing,
+                leg: 1,
+                flight: "XX020",
+                depAirport: "ANC",
+                depLocal: "2026-06-01 10:00",
+                arrAirport: "HKG",
+                arrLocal: "2026-06-02 13:00",
+                depUTC: "2026-06-01T18:00:00Z",
+                arrUTC: "2026-06-02T05:00:00Z",
+                status: "-",
+                block: "11:00",
+                layoverStation: "HKG",
+                layoverDuration: "55:35",
+                stdUTC: "2026-06-01T18:00:00Z",
+                staUTC: "2026-06-02T05:00:00Z"
+            ),
+            TripLeg(
+                payPeriod: payPeriod,
+                pairing: pairing,
+                leg: 2,
+                flight: "XX021",
+                depAirport: "HKG",
+                depLocal: "2026-06-04 20:35",
+                arrAirport: "ANC",
+                arrLocal: "2026-06-04 15:10",
+                depUTC: "2026-06-04T12:35:00Z",
+                arrUTC: "2026-06-04T23:10:00Z",
+                status: "-",
+                block: "10:35",
+                stdUTC: "2026-06-04T12:35:00Z",
+                staUTC: "2026-06-04T23:10:00Z"
+            )
+        ]
+        return PayPeriodSchedule(
+            id: "\(payPeriod)-\(pairing)",
+            label: "\(payPeriod)-\(pairing)",
+            tripCount: 1,
+            legCount: legs.count,
+            openTimeCount: 0,
+            updatedAt: updatedAt,
+            legs: legs,
+            openTimeTrips: []
+        )
+    }
+
+    private static func appReviewPilotOneJulySchedule(updatedAt: Date) -> PayPeriodSchedule {
+        let payPeriod = "PP26-07"
+        let pairing = "A00010"
+        let legs = [
+            TripLeg(
+                payPeriod: payPeriod,
+                pairing: pairing,
+                leg: 1,
+                flight: "XX010",
+                depAirport: "ANC",
+                depLocal: "2026-06-30 15:10",
+                arrAirport: "HGH",
+                arrLocal: "2026-07-01 16:45",
+                depUTC: "2026-06-30T23:10:00Z",
+                arrUTC: "2026-07-01T08:45:00Z",
+                status: "-",
+                block: "09:35",
+                layoverStation: "HGH",
+                layoverDuration: "45:20",
+                stdUTC: "2026-06-30T23:10:00Z",
+                staUTC: "2026-07-01T08:45:00Z"
+            ),
+            TripLeg(
+                payPeriod: payPeriod,
+                pairing: pairing,
+                leg: 2,
+                flight: "XX011",
+                depAirport: "HGH",
+                depLocal: "2026-07-03 14:05",
+                arrAirport: "TPE",
+                arrLocal: "2026-07-03 16:10",
+                depUTC: "2026-07-03T06:05:00Z",
+                arrUTC: "2026-07-03T08:10:00Z",
+                status: "-",
+                block: "02:05",
+                layoverStation: "TPE",
+                layoverDuration: "39:20",
+                stdUTC: "2026-07-03T06:05:00Z",
+                staUTC: "2026-07-03T08:10:00Z"
+            ),
+            TripLeg(
+                payPeriod: payPeriod,
+                pairing: pairing,
+                leg: 3,
+                flight: "XX012",
+                depAirport: "TPE",
+                depLocal: "2026-07-05 07:30",
+                arrAirport: "DXB",
+                arrLocal: "2026-07-05 14:45",
+                depUTC: "2026-07-04T23:30:00Z",
+                arrUTC: "2026-07-05T10:45:00Z",
+                status: "-",
+                block: "11:15",
+                layoverStation: "DXB",
+                layoverDuration: "25:15",
+                stdUTC: "2026-07-04T23:30:00Z",
+                staUTC: "2026-07-05T10:45:00Z"
+            ),
+            TripLeg(
+                payPeriod: payPeriod,
+                pairing: pairing,
+                leg: 4,
+                flight: "XX013",
+                depAirport: "DXB",
+                depLocal: "2026-07-06 16:00",
+                arrAirport: "FRA",
+                arrLocal: "2026-07-06 20:10",
+                depUTC: "2026-07-06T12:00:00Z",
+                arrUTC: "2026-07-06T18:10:00Z",
+                status: "-",
+                block: "06:10",
+                layoverStation: "FRA",
+                layoverDuration: "32:25",
+                stdUTC: "2026-07-06T12:00:00Z",
+                staUTC: "2026-07-06T18:10:00Z"
+            ),
+            TripLeg(
+                payPeriod: payPeriod,
+                pairing: pairing,
+                leg: 5,
+                flight: "XX014",
+                depAirport: "FRA",
+                depLocal: "2026-07-08 04:35",
+                arrAirport: "CVG",
+                arrLocal: "2026-07-08 05:40",
+                depUTC: "2026-07-08T02:35:00Z",
+                arrUTC: "2026-07-08T09:40:00Z",
+                status: "-",
+                block: "07:05",
+                layoverStation: "CVG",
+                layoverDuration: "26:20",
+                stdUTC: "2026-07-08T02:35:00Z",
+                staUTC: "2026-07-08T09:40:00Z"
+            ),
+            TripLeg(
+                payPeriod: payPeriod,
+                pairing: pairing,
+                leg: 6,
+                flight: "XX015",
+                depAirport: "CVG",
+                depLocal: "2026-07-10 08:00",
+                arrAirport: "ANC",
+                arrLocal: "2026-07-10 10:35",
+                depUTC: "2026-07-10T12:00:00Z",
+                arrUTC: "2026-07-10T18:35:00Z",
+                status: "-",
+                block: "06:35",
+                stdUTC: "2026-07-10T12:00:00Z",
+                staUTC: "2026-07-10T18:35:00Z"
+            )
+        ]
+        return PayPeriodSchedule(
+            id: "\(payPeriod)-\(pairing)",
+            label: "\(payPeriod)-\(pairing)",
+            tripCount: 1,
+            legCount: legs.count,
+            openTimeCount: 0,
+            updatedAt: updatedAt,
+            legs: legs,
+            openTimeTrips: []
+        )
+    }
+
+    static func appReviewPilotTwoSchedule(updatedAt: Date) -> PayPeriodSchedule {
+        withStableMockLegIDs(appReviewPilotTwoScheduleRaw(updatedAt: updatedAt))
+    }
+
+    private static func appReviewPilotTwoScheduleRaw(updatedAt: Date) -> PayPeriodSchedule {
         let payPeriod = "PP26-07"
         let pairing = "B00001"
         let legs = [
@@ -4424,7 +4687,7 @@ final class AppViewModel: ObservableObject {
                 payPeriod: payPeriod,
                 pairing: pairing,
                 leg: 1,
-                flight: "4",
+                flight: "XX004",
                 depAirport: "ANC",
                 depLocal: "2026-06-14 10:00",
                 arrAirport: "HKG",
@@ -4440,7 +4703,7 @@ final class AppViewModel: ObservableObject {
                 payPeriod: payPeriod,
                 pairing: pairing,
                 leg: 2,
-                flight: "5",
+                flight: "XX005",
                 depAirport: "HKG",
                 depLocal: "2026-06-16 04:00",
                 arrAirport: "HND",
@@ -4456,7 +4719,7 @@ final class AppViewModel: ObservableObject {
                 payPeriod: payPeriod,
                 pairing: pairing,
                 leg: 3,
-                flight: "5X003",
+                flight: "XX003",
                 depAirport: "HND",
                 depLocal: "2026-06-17 09:30",
                 arrAirport: "ANC",
@@ -4504,6 +4767,10 @@ final class AppViewModel: ObservableObject {
     func deleteLocalProfileAccount() {
         let deletingGEMSID = verifiedIdentity?.gemsID
         isDeletingProfileAccount = true
+        // Cancel any debounced profile upload so a stale snapshot cannot land in
+        // CloudKit after the tombstone and resurrect the deleted account.
+        pendingProfileUploadTask?.cancel()
+        pendingProfileUploadTask = nil
         setFriendConnectionsResetAt(Date())
         Self.clearLocalProfileStorageForDelete()
         friendConnections = []
@@ -4516,10 +4783,10 @@ final class AppViewModel: ObservableObject {
         clearVerifiedIdentity()
         Task { [weak self] in
             guard let self else { return }
+            await writeProfileTombstoneToCloudKit()
             if let deletingGEMSID {
                 await deleteFriendSharingDataForAccountDelete(gemsID: deletingGEMSID)
             }
-            await writeProfileTombstoneToCloudKit()
             isDeletingProfileAccount = false
         }
     }
@@ -4542,6 +4809,9 @@ final class AppViewModel: ObservableObject {
         defaults.set(OperationalSettings.defaultCrewBase.rawValue, forKey: OperationalSettings.crewBaseKey)
         defaults.set(PilotQualification.captain.rawValue, forKey: "pilot_qualification")
         defaults.removeObject(forKey: ProfileStorageKeys.lastSeenAt)
+        defaults.removeObject(forKey: ProfileStorageKeys.faaMedicalExpiryDate)
+        defaults.removeObject(forKey: ProfileStorageKeys.passportExpiryDate)
+        defaults.removeObject(forKey: ProfileStorageKeys.chinaVisaExpiryDate)
         // Reset local updatedAt to epoch so this device's stale data cannot win
         // a future last-write-wins conflict against the CloudKit tombstone.
         defaults.set(0.0, forKey: ProfileStorageKeys.updatedAt)
@@ -4557,6 +4827,13 @@ final class AppViewModel: ObservableObject {
         do {
             if let remote = try await profileCloudKitService.fetchProfile() {
                 let local = ProfileSnapshot.loadFromLocalStorage()
+                // Pure last-write-wins. We deliberately do NOT fold local-only
+                // readiness dates into an empty cloud value here: CloudKit cannot
+                // tell a legacy record (predating the dates feature) from one whose
+                // dates were intentionally cleared on another device, so merging
+                // would resurrect a deletion. Pre-verification dates are migrated
+                // once via restoreProfileAfterIdentityVerification; ongoing edits
+                // upload immediately, so newer local dates already win below.
                 if remote.updatedAt > local.updatedAt {
                     remote.saveToLocalStorage()
                 } else if local.updatedAt > remote.updatedAt {
@@ -4576,6 +4853,7 @@ final class AppViewModel: ObservableObject {
 
     /// Uploads current local profile to CloudKit. Called on ProfileTabView dismiss.
     func uploadProfileToCloudKit() async {
+        guard !isDeletingProfileAccount else { return }
         let snapshot = ProfileSnapshot.loadFromLocalStorage()
         guard snapshot.hasContent else { return }
         do {
@@ -4591,6 +4869,85 @@ final class AppViewModel: ObservableObject {
         UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: ProfileStorageKeys.updatedAt)
     }
 
+    /// Called by Settings bindings for readiness dates. Changes are persisted locally
+    /// immediately and coalesced into one CloudKit upload after wheel interaction settles.
+    func profileSettingsDidChange() {
+        markProfileUpdated()
+        pendingProfileUploadTask?.cancel()
+        guard verifiedIdentity != nil else { return }
+        pendingProfileUploadTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            await self?.uploadProfileToCloudKit()
+        }
+    }
+
+    func restoreProfileAfterIdentityVerification(gemsID: String) async {
+        let normalizedGEMSID = GEMSIDNormalizer.normalize(gemsID)
+        do {
+            if let remote = try await profileCloudKitService.fetchProfile() {
+                let remoteGEMSID = GEMSIDNormalizer.normalize(remote.gemsID)
+                if remoteGEMSID == normalizedGEMSID {
+                    // Same account: the cloud record is authoritative. Only fold in
+                    // readiness dates the user entered *before ever verifying* — i.e.
+                    // when the local GEMS ID is still blank (true pre-verification
+                    // input). Never re-merge dates left over from a prior verified
+                    // session: a cleared-on-another-device value (cloud nil) must not
+                    // be revived by this device's stale copy.
+                    let local = ProfileSnapshot.loadFromLocalStorage()
+                    let isPreVerificationInput = GEMSIDNormalizer.normalize(local.gemsID).isEmpty
+                    if isPreVerificationInput {
+                        var stamped = local
+                        stamped.gemsID = normalizedGEMSID
+                        let merged = remote.mergingLegacyReadinessDates(from: stamped)
+                        if merged.didMerge {
+                            var restored = merged.snapshot
+                            restored.updatedAt = Date()
+                            restored.saveToLocalStorage()
+                            try await profileCloudKitService.saveProfile(restored)
+                            return
+                        }
+                    }
+                    remote.saveToLocalStorage()
+                    return
+                }
+            }
+
+            // No cloud record, or it belongs to a *different* GEMS ID. Never inherit
+            // a previous account's avatar / passport / visa / medical data — only the
+            // current (or first-time) user's own local profile may carry forward.
+            let existing = ProfileSnapshot.loadFromLocalStorage()
+            let existingGEMSID = GEMSIDNormalizer.normalize(existing.gemsID)
+            var profile: ProfileSnapshot
+            if existingGEMSID.isEmpty || existingGEMSID == normalizedGEMSID {
+                profile = existing
+            } else {
+                profile = ProfileSnapshot(
+                    gemsID: normalizedGEMSID,
+                    displayName: "",
+                    fleet: ProfileFleet.fleet757.rawValue,
+                    base: OperationalSettings.defaultCrewBase.rawValue,
+                    position: ProfilePosition.ca.rawValue,
+                    avatarImageData: nil,
+                    faaMedicalExpiryDate: nil,
+                    passportExpiryDate: nil,
+                    chinaVisaExpiryDate: nil,
+                    updatedAt: Date(),
+                    lastSeenAt: nil
+                )
+            }
+            profile.gemsID = normalizedGEMSID
+            if profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                profile.displayName = verifiedIdentity?.name ?? "GEMS \(normalizedGEMSID)"
+            }
+            profile.updatedAt = Date()
+            profile.saveToLocalStorage()
+            try await profileCloudKitService.saveProfile(profile)
+        } catch {
+            logNonFatal("Profile restore after identity verification failed: \(error.localizedDescription)")
+        }
+    }
+
     /// Writes an empty profile tombstone to CloudKit so other devices detect the
     /// deletion via last-write-wins (`tombstone.updatedAt > their local.updatedAt`).
     /// Does NOT call CKDatabase.delete — the record stays, content is cleared.
@@ -4598,6 +4955,9 @@ final class AppViewModel: ObservableObject {
         let tombstone = ProfileSnapshot(
             gemsID: "", displayName: "", fleet: "", base: "", position: "",
             avatarImageData: nil,
+            faaMedicalExpiryDate: nil,
+            passportExpiryDate: nil,
+            chinaVisaExpiryDate: nil,
             updatedAt: Date(),   // must be newer than any device's local updatedAt
             lastSeenAt: nil
         )
@@ -5672,7 +6032,7 @@ final class AppViewModel: ObservableObject {
                                 payPeriod: "PP26-06",
                                 pairing: "A76102",
                                 leg: 1,
-                                flight: "102",
+                                flight: "XX102",
                                 depAirport: "ANC",
                                 depLocal: "2026-05-28 08:15",
                                 arrAirport: "CVG",
@@ -5687,7 +6047,7 @@ final class AppViewModel: ObservableObject {
                                 payPeriod: "PP26-06",
                                 pairing: "A76102",
                                 leg: 2,
-                                flight: "184",
+                                flight: "XX184",
                                 depAirport: "CVG",
                                 depLocal: "2026-05-29 11:30",
                                 arrAirport: "HND",

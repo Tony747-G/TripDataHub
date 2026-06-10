@@ -38,6 +38,10 @@ This is the routing layer for AI sessions working on TripDataHub. It tells you w
 - `docs/INVARIANTS.md`
 - relevant domain docs from the sections above
 
+## If Debugging Simulator / Xcode Launch Issues
+
+- `docs/SIMULATOR_TROUBLESHOOTING.md`
+
 ## Before Implementation
 
 1. Identify the touched domain.

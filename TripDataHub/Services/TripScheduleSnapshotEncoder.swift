@@ -197,7 +197,7 @@ enum TripScheduleSnapshotEncoder {
             depAirport: item.depAirport,
             arrAirport: item.arrAirport,
             deadhead: item.deadhead,
-            flight: item.flight,
+            flight: FlightNumberNormalizer.displayValue(item.flight),
             startUTC: item.startUtc,
             endUTC: item.endUtc,
             startLocalDisplay: item.startLocalDisplay,
@@ -473,7 +473,7 @@ enum TripScheduleSnapshotEncoder {
         return WebScheduleItem(
             id: leg.id.uuidString,
             type: "flight",
-            label: "\(leg.flight) \(leg.depAirport)-\(leg.arrAirport)",
+            label: "\(FlightNumberNormalizer.displayValue(leg.flight)) \(leg.depAirport)-\(leg.arrAirport)",
             startUTC: start,
             endUTC: end,
             departureAirport: leg.depAirport,
@@ -517,7 +517,7 @@ enum TripScheduleSnapshotEncoder {
               let arrival = endDate(leg) else { return nil }
         return WebNextFlight(
             flightId: leg.id.uuidString,
-            flightNumber: leg.flight,
+            flightNumber: FlightNumberNormalizer.displayValue(leg.flight),
             departureAirport: leg.depAirport,
             arrivalAirport: leg.arrAirport,
             departureTimeUTC: formatUTC(departure),
@@ -534,14 +534,11 @@ enum TripScheduleSnapshotEncoder {
     }
 
     private static func displayFlightText(flight: String, deadhead: Bool) -> String {
-        let trimmed = flight.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = FlightNumberNormalizer.displayValue(flight)
         if deadhead {
             return trimmed.isEmpty ? "DH" : "DH \(trimmed)"
         }
-        if trimmed.uppercased().hasPrefix("5X") {
-            return trimmed
-        }
-        return "5X\(trimmed)"
+        return trimmed
     }
 
     private static func localTimeRange(start: String, end: String) -> String {

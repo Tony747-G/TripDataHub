@@ -11,9 +11,9 @@ struct IPadBidPeriodCalendarView: View {
     @Binding var selectedBidPeriodID: String?
     @AppStorage("pilot_qualification") private var pilotQualificationRawValue = PilotQualification.captain.rawValue
     @AppStorage("bid_transition_timeline_enabled") private var bidTransitionTimelineEnabled = true
-    @AppStorage("faa_medical_expiry_date") private var faaMedicalExpiryDate = ""
-    @AppStorage("passport_expiry_date") private var passportExpiryDate = ""
-    @AppStorage("china_visa_expiry_date") private var chinaVisaExpiryDate = ""
+    @AppStorage(ProfileStorageKeys.faaMedicalExpiryDate) private var faaMedicalExpiryDate = ""
+    @AppStorage(ProfileStorageKeys.passportExpiryDate) private var passportExpiryDate = ""
+    @AppStorage(ProfileStorageKeys.chinaVisaExpiryDate) private var chinaVisaExpiryDate = ""
     @AppStorage(OperationalSettings.crewBaseKey) private var crewDomicileRawValue = OperationalSettings.defaultCrewBase.rawValue
 
     @State private var currentBidPeriod: CalendarBidPeriod? = nil

@@ -16,6 +16,7 @@ struct ProfileTabView: View {
     @State private var isShowingAvatarEditor = false
     @State private var verifyDOBDate = Date()
     @State private var isShowingDeleteAccountConfirmation = false
+    @State private var isDeletingAccount = false
     let showsCloseButton: Bool
 
     init(showsCloseButton: Bool = false) {
@@ -132,21 +133,23 @@ struct ProfileTabView: View {
             }
             .onAppear {
                 seedFromVerifiedIdentityIfNeeded()
+                repairSwappedIdentityFieldsIfNeeded()
                 recordLastSeen()
             }
             .onDisappear {
                 // Upload any edits made during this session.
+                guard !isDeletingAccount else { return }
                 Task { await viewModel.uploadProfileToCloudKit() }
             }
             // Per-field changes: stamp updatedAt immediately so the timestamp
             // is accurate even if the app is killed before onDisappear fires.
             // The CloudKit upload itself is batched to onDisappear to avoid
             // per-keystroke network calls while the user is still typing.
-            .onChange(of: displayName) { _, _ in viewModel.markProfileUpdated() }
-            .onChange(of: fleetRawValue) { _, _ in viewModel.markProfileUpdated() }
-            .onChange(of: baseRawValue) { _, _ in viewModel.markProfileUpdated() }
-            .onChange(of: qualificationRawValue) { _, _ in viewModel.markProfileUpdated() }
-            .onChange(of: avatarImageData) { _, _ in viewModel.markProfileUpdated() }
+            .onChange(of: displayName) { _, _ in markProfileUpdatedIfNeeded() }
+            .onChange(of: fleetRawValue) { _, _ in markProfileUpdatedIfNeeded() }
+            .onChange(of: baseRawValue) { _, _ in markProfileUpdatedIfNeeded() }
+            .onChange(of: qualificationRawValue) { _, _ in markProfileUpdatedIfNeeded() }
+            .onChange(of: avatarImageData) { _, _ in markProfileUpdatedIfNeeded() }
             .alert("Delete Account?", isPresented: $isShowingDeleteAccountConfirmation) {
                 Button("Cancel", role: .cancel) {}
                 Button("Delete Account", role: .destructive) {
@@ -363,6 +366,8 @@ struct ProfileTabView: View {
     }
 
     private func deleteAccount() {
+        isDeletingAccount = true
+        viewModel.deleteLocalProfileAccount()
         avatarImageData = Data()
         displayName = ""
         gemsID = ""
@@ -370,17 +375,34 @@ struct ProfileTabView: View {
         baseRawValue = ProfileBase.anc.rawValue
         qualificationRawValue = PilotQualification.captain.rawValue
         isShowingAvatarEditor = false
-        viewModel.deleteLocalProfileAccount()
+        dismiss()
     }
 
     private func verifyIdentity() {
         dismissKeyboard()
+        repairSwappedIdentityFieldsIfNeeded()
         Task {
             await viewModel.verifyIdentity(
                 gemsID: gemsID,
                 dateOfBirth: Self.dobText(from: verifyDOBDate)
             )
         }
+    }
+
+    private func repairSwappedIdentityFieldsIfNeeded() {
+        guard !viewModel.isIdentityVerified else { return }
+        let repaired = ProfileIdentityInput(
+            displayName: displayName,
+            gemsID: gemsID
+        ).repairingClearlySwappedFields()
+        guard repaired.displayName != displayName || repaired.gemsID != gemsID else { return }
+        displayName = repaired.displayName
+        gemsID = repaired.gemsID
+    }
+
+    private func markProfileUpdatedIfNeeded() {
+        guard !isDeletingAccount else { return }
+        viewModel.markProfileUpdated()
     }
 
     private func dismissKeyboard() {

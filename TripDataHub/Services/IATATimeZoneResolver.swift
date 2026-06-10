@@ -12,7 +12,7 @@ protocol IATATimeZoneResolving: AnyObject, Sendable {
 final class IATATimeZoneResolver: IATATimeZoneResolving, @unchecked Sendable {
     static let shared = IATATimeZoneResolver()
 
-    private static let baseMappingVersion = "iata-tz-2026-02-24"
+    private static let baseMappingVersion = "iata-tz-2026-06-09"
     private static let overridesUserDefaultsKey = "iata_tz_user_overrides_v1"
     private let lock = NSLock()
 
@@ -149,6 +149,7 @@ final class IATATimeZoneResolver: IATATimeZoneResolving, @unchecked Sendable {
         "KKJ": "Asia/Tokyo",
         "ICN": "Asia/Seoul",
         "PVG": "Asia/Shanghai",
+        "HGH": "Asia/Shanghai",
         "TPE": "Asia/Taipei",
         "HKG": "Asia/Hong_Kong",
         "SZX": "Asia/Shanghai",
@@ -343,6 +344,7 @@ final class IATATimeZoneResolver: IATATimeZoneResolving, @unchecked Sendable {
         "KKJ": .init(airport_name: "Kitakyushu Airport", city_name: "Kitakyushu"),
         "ICN": .init(airport_name: "Incheon International Airport", city_name: "Seoul"),
         "PVG": .init(airport_name: "Shanghai Pudong International Airport", city_name: "Shanghai"),
+        "HGH": .init(airport_name: "Hangzhou Xiaoshan International Airport", city_name: "Hangzhou"),
         "TPE": .init(airport_name: "Taiwan Taoyuan International Airport", city_name: "Taipei"),
         "HKG": .init(airport_name: "Hong Kong International Airport", city_name: "Hong Kong"),
         "SZX": .init(airport_name: "Shenzhen Bao'an International Airport", city_name: "Shenzhen"),

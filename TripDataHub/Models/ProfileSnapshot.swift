@@ -10,6 +10,9 @@ struct ProfileSnapshot: Codable, Equatable {
     var base: String
     var position: String
     var avatarImageData: Data?
+    var faaMedicalExpiryDate: String? = nil
+    var passportExpiryDate: String? = nil
+    var chinaVisaExpiryDate: String? = nil
     var updatedAt: Date
     var lastSeenAt: Date?
 }
@@ -17,6 +20,34 @@ struct ProfileSnapshot: Codable, Equatable {
 // MARK: - UserDefaults persistence
 
 extension ProfileSnapshot {
+
+    func mergingLegacyReadinessDates(from local: ProfileSnapshot) -> (snapshot: ProfileSnapshot, didMerge: Bool) {
+        guard GEMSIDNormalizer.normalize(gemsID) == GEMSIDNormalizer.normalize(local.gemsID) else {
+            return (self, false)
+        }
+
+        var merged = self
+        var didMerge = false
+        if faaMedicalExpiryDate == nil,
+           let value = local.faaMedicalExpiryDate,
+           !value.isEmpty {
+            merged.faaMedicalExpiryDate = value
+            didMerge = true
+        }
+        if passportExpiryDate == nil,
+           let value = local.passportExpiryDate,
+           !value.isEmpty {
+            merged.passportExpiryDate = value
+            didMerge = true
+        }
+        if chinaVisaExpiryDate == nil,
+           let value = local.chinaVisaExpiryDate,
+           !value.isEmpty {
+            merged.chinaVisaExpiryDate = value
+            didMerge = true
+        }
+        return (merged, didMerge)
+    }
 
     /// Loads the current profile from UserDefaults.
     /// Returns a zero-dated snapshot when no profile has ever been saved.
@@ -37,6 +68,15 @@ extension ProfileSnapshot {
                 ?? OperationalSettings.defaultCrewBase.rawValue,
             position: position,
             avatarImageData: defaults.data(forKey: ProfileStorageKeys.avatarImageData),
+            faaMedicalExpiryDate: normalizedOptionalDate(
+                defaults.string(forKey: ProfileStorageKeys.faaMedicalExpiryDate)
+            ),
+            passportExpiryDate: normalizedOptionalDate(
+                defaults.string(forKey: ProfileStorageKeys.passportExpiryDate)
+            ),
+            chinaVisaExpiryDate: normalizedOptionalDate(
+                defaults.string(forKey: ProfileStorageKeys.chinaVisaExpiryDate)
+            ),
             updatedAt: Date(timeIntervalSince1970: defaults.double(forKey: ProfileStorageKeys.updatedAt)),
             lastSeenAt: {
                 let raw = defaults.double(forKey: ProfileStorageKeys.lastSeenAt)
@@ -51,6 +91,9 @@ extension ProfileSnapshot {
             defaults.set("", forKey: ProfileStorageKeys.gemsID)
             defaults.set("", forKey: ProfileStorageKeys.displayName)
             defaults.removeObject(forKey: ProfileStorageKeys.avatarImageData)
+            defaults.removeObject(forKey: ProfileStorageKeys.faaMedicalExpiryDate)
+            defaults.removeObject(forKey: ProfileStorageKeys.passportExpiryDate)
+            defaults.removeObject(forKey: ProfileStorageKeys.chinaVisaExpiryDate)
             defaults.set(updatedAt.timeIntervalSince1970, forKey: ProfileStorageKeys.updatedAt)
             defaults.removeObject(forKey: ProfileStorageKeys.lastSeenAt)
             return
@@ -72,6 +115,9 @@ extension ProfileSnapshot {
         } else {
             defaults.removeObject(forKey: ProfileStorageKeys.avatarImageData)
         }
+        persistOptionalDate(faaMedicalExpiryDate, forKey: ProfileStorageKeys.faaMedicalExpiryDate, defaults: defaults)
+        persistOptionalDate(passportExpiryDate, forKey: ProfileStorageKeys.passportExpiryDate, defaults: defaults)
+        persistOptionalDate(chinaVisaExpiryDate, forKey: ProfileStorageKeys.chinaVisaExpiryDate, defaults: defaults)
         defaults.set(updatedAt.timeIntervalSince1970, forKey: ProfileStorageKeys.updatedAt)
         if let lastSeen = lastSeenAt {
             defaults.set(lastSeen.timeIntervalSince1970, forKey: ProfileStorageKeys.lastSeenAt)
@@ -92,6 +138,22 @@ extension ProfileSnapshot {
             && base.isEmpty
             && position.isEmpty
             && avatarImageData == nil
+            && (faaMedicalExpiryDate ?? "").isEmpty
+            && (passportExpiryDate ?? "").isEmpty
+            && (chinaVisaExpiryDate ?? "").isEmpty
             && updatedAt.timeIntervalSince1970 > 0
+    }
+
+    private static func normalizedOptionalDate(_ value: String?) -> String? {
+        guard let value, !value.isEmpty else { return nil }
+        return value
+    }
+
+    private func persistOptionalDate(_ value: String?, forKey key: String, defaults: UserDefaults) {
+        if let value, !value.isEmpty {
+            defaults.set(value, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
     }
 }

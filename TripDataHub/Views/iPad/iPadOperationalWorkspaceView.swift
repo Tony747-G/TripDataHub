@@ -16,9 +16,9 @@ struct IPadOperationalWorkspaceView: View {
     @AppStorage("appearance_mode") private var appearanceModeRawValue = AppearanceMode.system.rawValue
     @AppStorage("pilot_qualification") private var pilotQualificationRawValue = PilotQualification.captain.rawValue
     @AppStorage("bid_transition_timeline_enabled") private var bidTransitionTimelineEnabled = true
-    @AppStorage("faa_medical_expiry_date") private var faaMedicalExpiryDate = ""
-    @AppStorage("passport_expiry_date") private var passportExpiryDate = ""
-    @AppStorage("china_visa_expiry_date") private var chinaVisaExpiryDate = ""
+    @AppStorage(ProfileStorageKeys.faaMedicalExpiryDate) private var faaMedicalExpiryDate = ""
+    @AppStorage(ProfileStorageKeys.passportExpiryDate) private var passportExpiryDate = ""
+    @AppStorage(ProfileStorageKeys.chinaVisaExpiryDate) private var chinaVisaExpiryDate = ""
     @AppStorage(OperationalSettings.crewBaseKey) private var crewDomicileRawValue = OperationalSettings.defaultCrewBase.rawValue
     @Environment(\.scenePhase) private var scenePhase
 
@@ -39,6 +39,8 @@ struct IPadOperationalWorkspaceView: View {
     @State private var sidebarContent: IPadSidebarContent = .ownTimeline
     @State private var timelineScrollTrigger = UUID()
     @State private var menuExpanded = false
+    @State private var showingFriends = false
+    @State private var showingOpenTime = false
     @State private var showingBrowser = false
     @State private var showingSettings = false
     @State private var showingAddEvent = false
@@ -131,6 +133,14 @@ struct IPadOperationalWorkspaceView: View {
         }
         .sheet(isPresented: $showingBrowser) {
             NavigationStack { BrowserTabView(presentsImportPreview: true) }
+                .environmentObject(viewModel)
+        }
+        .sheet(isPresented: $showingFriends) {
+            IPadFriendsSheet()
+                .environmentObject(viewModel)
+        }
+        .sheet(isPresented: $showingOpenTime) {
+            OpenTimeTabView()
                 .environmentObject(viewModel)
         }
         .sheet(isPresented: $isShowingImportPreviewFromExternalOpen) {
@@ -240,8 +250,19 @@ struct IPadOperationalWorkspaceView: View {
 
     // MARK: Floating menu
 
-    private let verticalMenuItemCount = 5
     private let verticalMenuItemSpacing: CGFloat = 58
+
+    private var verticalMenuItemCount: Int {
+        5
+            + (AppEnvironment.isFriendSharingVisible ? 1 : 0)
+            + (AppEnvironment.isOpenTimeVisible ? 1 : 0)
+    }
+
+    private var browserMenuIndex: Int {
+        1
+            + (AppEnvironment.isFriendSharingVisible ? 1 : 0)
+            + (AppEnvironment.isOpenTimeVisible ? 1 : 0)
+    }
 
     private var floatingMenu: some View {
         ZStack {
@@ -250,21 +271,37 @@ struct IPadOperationalWorkspaceView: View {
                 timelineScrollTrigger = UUID()
                 withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
             }
-            verticalMenuItem(index: 1, icon: "globe", label: "Browser") {
+            if AppEnvironment.isFriendSharingVisible {
+                verticalMenuItem(index: 1, icon: "person.2", label: "Friends") {
+                    showingFriends = true
+                    withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
+                }
+            }
+            if AppEnvironment.isOpenTimeVisible {
+                verticalMenuItem(
+                    index: AppEnvironment.isFriendSharingVisible ? 2 : 1,
+                    icon: "clock",
+                    label: "OpenTime"
+                ) {
+                    showingOpenTime = true
+                    withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
+                }
+            }
+            verticalMenuItem(index: browserMenuIndex, icon: "globe", label: "Browser") {
                 showingBrowser = true
                 withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
             }
-            verticalMenuItem(index: 2, icon: "plus", label: "Add Event") {
+            verticalMenuItem(index: browserMenuIndex + 1, icon: "plus", label: "Add Event") {
                 showingAddEvent = true
                 withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
             }
-            verticalMenuItem(index: 3, icon: "square.and.arrow.up", label: "Print") {
+            verticalMenuItem(index: browserMenuIndex + 2, icon: "square.and.arrow.up", label: "Print") {
                 exportIncludesBidLayer = bidTransitionTimelineEnabled
                 exportIncludesPersonalLayer = true
                 showingBidPeriodExportOptions = true
                 withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
             }
-            verticalMenuItem(index: 4, icon: "gearshape", label: "Settings") {
+            verticalMenuItem(index: browserMenuIndex + 3, icon: "gearshape", label: "Settings") {
                 showingSettings = true
                 withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
             }

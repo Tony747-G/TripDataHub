@@ -13,9 +13,9 @@ struct SettingsTabView: View {
     @AppStorage("notification_48h_enabled") private var notify48h = false
     @AppStorage("notification_24h_enabled") private var notify24h = false
     @AppStorage("notification_12h_enabled") private var notify12h = false
-    @AppStorage("faa_medical_expiry_date") private var faaMedicalExpiryDate = ""
-    @AppStorage("passport_expiry_date") private var passportExpiryDate = ""
-    @AppStorage("china_visa_expiry_date") private var chinaVisaExpiryDate = ""
+    @AppStorage(ProfileStorageKeys.faaMedicalExpiryDate) private var faaMedicalExpiryDate = ""
+    @AppStorage(ProfileStorageKeys.passportExpiryDate) private var passportExpiryDate = ""
+    @AppStorage(ProfileStorageKeys.chinaVisaExpiryDate) private var chinaVisaExpiryDate = ""
     @State private var showNotificationDeniedAlert = false
     @State private var showLogTenExportWarning = false
     @State private var logTenExportOutput: LogTenExportOutput?
@@ -71,9 +71,9 @@ struct SettingsTabView: View {
             )
 
             SettingsReadinessExpirySection(
-                faaMedicalExpiryDate: $faaMedicalExpiryDate,
-                passportExpiryDate: $passportExpiryDate,
-                chinaVisaExpiryDate: $chinaVisaExpiryDate,
+                faaMedicalExpiryDate: syncedProfileBinding($faaMedicalExpiryDate),
+                passportExpiryDate: syncedProfileBinding($passportExpiryDate),
+                chinaVisaExpiryDate: syncedProfileBinding($chinaVisaExpiryDate),
                 domicileTimeZone: DomicileSupport.timeZone(for: crewBaseRawValue)
             )
 
@@ -186,6 +186,17 @@ struct SettingsTabView: View {
             }
 #endif
         }
+    }
+
+    private func syncedProfileBinding(_ binding: Binding<String>) -> Binding<String> {
+        Binding(
+            get: { binding.wrappedValue },
+            set: { newValue in
+                guard binding.wrappedValue != newValue else { return }
+                binding.wrappedValue = newValue
+                viewModel.profileSettingsDidChange()
+            }
+        )
     }
 
     private func openSystemSettings() {

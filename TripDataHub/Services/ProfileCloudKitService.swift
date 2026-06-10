@@ -20,9 +20,47 @@ protocol ProfileCloudKitServicing: Sendable {
     func deleteProfile() async throws
 }
 
+// MARK: - Serial write queue
+
+/// Serializes profile record writes so two `saveProfile` calls (e.g. an in-flight
+/// settings upload and the account-delete tombstone) never modify the shared
+/// `currentUserProfile` CKRecord concurrently. Concurrent saves would race on the
+/// record change tag — one would fail with `serverRecordChanged` and, for the
+/// tombstone, silently leave the account on CloudKit. Chaining also guarantees the
+/// last-enqueued write (the tombstone, enqueued after any pending upload) wins.
+private actor ProfileWriteQueue {
+    private var tail: Task<Void, Never> = Task {}
+
+    func run(_ work: @escaping @Sendable () async throws -> Void) async throws {
+        // Runs atomically on the actor up to the first `await`: capture the current
+        // tail and append this write before yielding, so writes execute strictly in
+        // enqueue order.
+        let previous = tail
+        let task = Task<Result<Void, Error>, Never> {
+            await previous.value
+            do {
+                try await work()
+                return .success(())
+            } catch {
+                return .failure(error)
+            }
+        }
+        tail = Task { _ = await task.value }
+
+        switch await task.value {
+        case .success:
+            return
+        case .failure(let error):
+            throw error
+        }
+    }
+}
+
 // MARK: - Implementation
 
 final class ProfileCloudKitService: ProfileCloudKitServicing, @unchecked Sendable {
+
+    private let writeQueue = ProfileWriteQueue()
 
     private enum RecordType {
         static let profile = "Profile"
@@ -35,6 +73,9 @@ final class ProfileCloudKitService: ProfileCloudKitServicing, @unchecked Sendabl
         static let base = "base"
         static let position = "position"
         static let avatarAsset = "avatarAsset"
+        static let faaMedicalExpiryDate = "faaMedicalExpiryDate"
+        static let passportExpiryDate = "passportExpiryDate"
+        static let chinaVisaExpiryDate = "chinaVisaExpiryDate"
         static let updatedAt = "updatedAt"
         static let lastSeenAt = "lastSeenAt"
     }
@@ -80,10 +121,24 @@ final class ProfileCloudKitService: ProfileCloudKitServicing, @unchecked Sendabl
     // MARK: - Save
 
     func saveProfile(_ snapshot: ProfileSnapshot) async throws {
+        try await writeQueue.run { [self] in
+            try await performSave(snapshot)
+        }
+    }
+
+    private func performSave(_ snapshot: ProfileSnapshot) async throws {
         let database = databaseProvider()
         let record: CKRecord
         do {
             record = try await database.record(for: Self.recordID)
+            // Last-write-wins guard: never let an older snapshot overwrite a newer
+            // cloud record. This rejects a stale upload that began before — but
+            // executed after — a newer write such as the account-delete tombstone,
+            // so a deleted account cannot be resurrected even if the writes race.
+            if let existingUpdatedAt = record[Field.updatedAt] as? Date,
+               existingUpdatedAt > snapshot.updatedAt {
+                return
+            }
         } catch let error as CKError where error.code == .unknownItem {
             record = CKRecord(recordType: RecordType.profile, recordID: Self.recordID)
         }
@@ -93,6 +148,9 @@ final class ProfileCloudKitService: ProfileCloudKitServicing, @unchecked Sendabl
         record[Field.fleet] = snapshot.fleet as CKRecordValue
         record[Field.base] = snapshot.base as CKRecordValue
         record[Field.position] = snapshot.position as CKRecordValue
+        record[Field.faaMedicalExpiryDate] = (snapshot.faaMedicalExpiryDate ?? "") as CKRecordValue
+        record[Field.passportExpiryDate] = (snapshot.passportExpiryDate ?? "") as CKRecordValue
+        record[Field.chinaVisaExpiryDate] = (snapshot.chinaVisaExpiryDate ?? "") as CKRecordValue
         record[Field.updatedAt] = snapshot.updatedAt as CKRecordValue
         if let lastSeen = snapshot.lastSeenAt {
             record[Field.lastSeenAt] = lastSeen as CKRecordValue
@@ -150,8 +208,16 @@ final class ProfileCloudKitService: ProfileCloudKitServicing, @unchecked Sendabl
             base: record[Field.base] as? String ?? OperationalSettings.defaultCrewBase.rawValue,
             position: record[Field.position] as? String ?? ProfilePosition.ca.rawValue,
             avatarImageData: avatarData,
+            faaMedicalExpiryDate: normalizedOptionalDate(record[Field.faaMedicalExpiryDate] as? String),
+            passportExpiryDate: normalizedOptionalDate(record[Field.passportExpiryDate] as? String),
+            chinaVisaExpiryDate: normalizedOptionalDate(record[Field.chinaVisaExpiryDate] as? String),
             updatedAt: record[Field.updatedAt] as? Date ?? Date(timeIntervalSince1970: 0),
             lastSeenAt: record[Field.lastSeenAt] as? Date
         )
+    }
+
+    private func normalizedOptionalDate(_ value: String?) -> String? {
+        guard let value, !value.isEmpty else { return nil }
+        return value
     }
 }

@@ -132,10 +132,7 @@ enum SharedScheduleExporter {
     }
 
     static func normalizedFlightNumber(_ raw: String) -> String {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard !trimmed.isEmpty else { return "" }
-        if trimmed.hasPrefix("5X") { return trimmed }
-        return "5X\(trimmed)"
+        FlightNumberNormalizer.displayValue(raw)
     }
 }
 
