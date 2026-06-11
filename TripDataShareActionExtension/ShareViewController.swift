@@ -2,10 +2,10 @@ import UIKit
 import UniformTypeIdentifiers
 
 final class ShareViewController: UIViewController {
-    // NOTE: Must match AppGroupImportConfig in main app (AppViewModel.swift).
-    private static let appGroupIdentifier = "group.com.sfune.BidProSchedule"
-    private static let sharedDirectoryName = "CrewAccessSharedImports"
-    private static let pendingFileName = "pending_import.json"
+    // Handoff contract (identifiers + queue-file format) is shared with the main
+    // app via AppGroupImportHandoff.swift, compiled into both targets.
+    private static let appGroupIdentifier = AppGroupImportHandoff.appGroupIdentifier
+    private static let sharedDirectoryName = AppGroupImportHandoff.directoryName
 
     private enum SharedPDFPayload {
         case file(url: URL, sourceName: String)
@@ -207,14 +207,15 @@ final class ShareViewController: UIViewController {
 
         let directory = container.appendingPathComponent(Self.sharedDirectoryName, isDirectory: true)
         try fm.createDirectory(at: directory, withIntermediateDirectories: true)
-        let pendingURL = directory.appendingPathComponent(Self.pendingFileName)
 
-        let payload: [String: String] = [
-            "fileName": fileName,
-            "createdAtISO8601": ISO8601DateFormatter().string(from: Date())
-        ]
-        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
-        try data.write(to: pendingURL, options: .atomic)
+        // One queue file per share, never touching existing files: a shared mutable
+        // manifest would race against the app consuming (and deleting) it.
+        let queueURL = directory.appendingPathComponent(AppGroupImportHandoff.makeQueueFileName())
+        let entry = AppGroupImportHandoff.Entry(
+            fileName: fileName,
+            createdAtISO8601: ISO8601DateFormatter().string(from: Date())
+        )
+        try AppGroupImportHandoff.encodeEntry(entry).write(to: queueURL, options: .atomic)
     }
 
     private func openMainApp(url: URL) async -> Bool {

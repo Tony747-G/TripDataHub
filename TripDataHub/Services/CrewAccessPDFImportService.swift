@@ -605,9 +605,8 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
     }
 
     private func normalizeFlightNumber(_ raw: String, isDeadhead _: Bool) -> String {
-        // Normalize identically whether or not a 5X airline prefix is present, so
-        // numeric ("003") and prefixed ("5X003") flights both yield "XX003" and
-        // stay matchable against a friend's copy of the same flight.
+        // CrewAccess sometimes omits the 5X prefix for company flights. Preserve
+        // explicit airline codes and add 5X only when the source is digits alone.
         FlightNumberNormalizer.displayValue(raw)
     }
 

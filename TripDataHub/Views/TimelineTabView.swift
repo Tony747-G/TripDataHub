@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TimelineTabView: View {
     let scrollTrigger: Int
+    let showsAddEventButton: Bool
     @EnvironmentObject private var viewModel: AppViewModel
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("app_font_size_option") private var appFontSizeOptionRawValue = AppFontSizeOption.medium.rawValue
@@ -122,6 +123,11 @@ struct TimelineTabView: View {
         viewModel.displaySchedules(filter: .crewAccess)
     }
 
+    init(scrollTrigger: Int, showsAddEventButton: Bool = true) {
+        self.scrollTrigger = scrollTrigger
+        self.showsAddEventButton = showsAddEventButton
+    }
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottomTrailing) {
@@ -138,14 +144,11 @@ struct TimelineTabView: View {
                     Color.gray.opacity(0.10)
                         .frame(height: 10)
                 }
-                addEventButton
+                if showsAddEventButton {
+                    addEventButton
+                }
             }
-            .onAppear {
-                viewModel.lastImportSummaryMessage = nil
-                refreshLegData()
-                refreshTripDataCards()
-                refreshFriendScheduleMatches()
-            }
+            .onAppear { viewModel.lastImportSummaryMessage = nil }
             .sheet(item: $friendMatchAlert) { presentation in
                 FriendMatchPresentationView(presentation: presentation)
             }

@@ -7,10 +7,27 @@ private let calendarEngineUTCCalendar: Calendar = {
     return calendar
 }()
 
+// Calendar construction is expensive and this helper runs per day cell / per trip
+// segment during calendar layout. Cache one calendar per timezone (small fixed set
+// of domicile/airport zones). Lock-protected: layout helpers may run off-main.
+private final class CalendarByTimeZoneCache: @unchecked Sendable {
+    static let shared = CalendarByTimeZoneCache()
+    private let lock = NSLock()
+    private var calendars: [String: Calendar] = [:]
+
+    func calendar(for timeZone: TimeZone) -> Calendar {
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached = calendars[timeZone.identifier] { return cached }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        calendars[timeZone.identifier] = calendar
+        return calendar
+    }
+}
+
 private func calendarInTimeZone(_ timeZone: TimeZone) -> Calendar {
-    var calendar = Calendar(identifier: .gregorian)
-    calendar.timeZone = timeZone
-    return calendar
+    CalendarByTimeZoneCache.shared.calendar(for: timeZone)
 }
 
 private func localDateComponents(

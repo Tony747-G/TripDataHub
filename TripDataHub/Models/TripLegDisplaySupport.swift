@@ -4,13 +4,10 @@ enum FlightNumberNormalizer {
     static func displayValue(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !trimmed.isEmpty else { return "" }
-        if trimmed.hasPrefix("5X") {
-            return "XX\(trimmed.dropFirst(2))"
-        }
         if trimmed.contains(where: \.isLetter) {
             return trimmed
         }
-        return "XX\(trimmed)"
+        return "5X\(trimmed)"
     }
 }
 
@@ -20,9 +17,6 @@ extension TripLeg {
         let base = FlightNumberNormalizer.displayValue(flight)
         if normalized == "DH" || normalized == "CML" {
             return base.isEmpty ? normalized : "\(normalized) \(base)"
-        }
-        if normalized == "-" {
-            return base
         }
         return base
     }

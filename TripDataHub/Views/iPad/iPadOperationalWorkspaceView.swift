@@ -117,20 +117,18 @@ struct IPadOperationalWorkspaceView: View {
                 }
             }
         }
-        .sheet(isPresented: Binding(
-            get: { portraitTripSheetID != nil },
-            set: { if !$0 { portraitTripSheetID = nil } }
-        )) {
-            NavigationStack {
-                IPadTimelineSidebarView(selectedTripID: $portraitTripSheetID, scrollToDefaultTrigger: $timelineScrollTrigger)
-                    .environmentObject(viewModel)
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Done") { portraitTripSheetID = nil }
-                        }
-                    }
+        // Portrait: tapping a calendar trip bar opens a centered popup scoped to
+        // that trip (titled by its Trip Id), replacing the full-timeline sheet.
+        .overlay {
+            if let tripID = portraitTripSheetID {
+                CalendarTripTimelinePopup(tripID: tripID) {
+                    portraitTripSheetID = nil
+                }
+                .environmentObject(viewModel)
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
         }
+        .animation(.easeOut(duration: 0.16), value: portraitTripSheetID)
         .sheet(isPresented: $showingBrowser) {
             NavigationStack { BrowserTabView(presentsImportPreview: true) }
                 .environmentObject(viewModel)
@@ -250,116 +248,38 @@ struct IPadOperationalWorkspaceView: View {
 
     // MARK: Floating menu
 
-    private let verticalMenuItemSpacing: CGFloat = 58
-
-    private var verticalMenuItemCount: Int {
-        5
-            + (AppEnvironment.isFriendSharingVisible ? 1 : 0)
-            + (AppEnvironment.isOpenTimeVisible ? 1 : 0)
-    }
-
-    private var browserMenuIndex: Int {
-        1
-            + (AppEnvironment.isFriendSharingVisible ? 1 : 0)
-            + (AppEnvironment.isOpenTimeVisible ? 1 : 0)
-    }
-
     private var floatingMenu: some View {
-        ZStack {
-            verticalMenuItem(index: 0, icon: "calendar", label: "Timeline", isActive: isOwnTimeline) {
+        var items: [ExpandableFloatingMenuItem] = [
+            ExpandableFloatingMenuItem(icon: "calendar", label: "Timeline", isActive: isOwnTimeline) {
                 sidebarContent = .ownTimeline
                 timelineScrollTrigger = UUID()
-                withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
             }
-            if AppEnvironment.isFriendSharingVisible {
-                verticalMenuItem(index: 1, icon: "person.2", label: "Friends") {
-                    showingFriends = true
-                    withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
-                }
-            }
-            if AppEnvironment.isOpenTimeVisible {
-                verticalMenuItem(
-                    index: AppEnvironment.isFriendSharingVisible ? 2 : 1,
-                    icon: "clock",
-                    label: "OpenTime"
-                ) {
-                    showingOpenTime = true
-                    withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
-                }
-            }
-            verticalMenuItem(index: browserMenuIndex, icon: "globe", label: "Browser") {
-                showingBrowser = true
-                withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
-            }
-            verticalMenuItem(index: browserMenuIndex + 1, icon: "plus", label: "Add Event") {
-                showingAddEvent = true
-                withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
-            }
-            verticalMenuItem(index: browserMenuIndex + 2, icon: "square.and.arrow.up", label: "Print") {
-                exportIncludesBidLayer = bidTransitionTimelineEnabled
-                exportIncludesPersonalLayer = true
-                showingBidPeriodExportOptions = true
-                withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
-            }
-            verticalMenuItem(index: browserMenuIndex + 3, icon: "gearshape", label: "Settings") {
-                showingSettings = true
-                withAnimation(.spring(duration: 0.22)) { menuExpanded = false }
-            }
-            menuToggleButton
+        ]
+        if AppEnvironment.isFriendSharingVisible {
+            items.append(ExpandableFloatingMenuItem(icon: "person.2", label: "Friends") {
+                showingFriends = true
+            })
         }
-    }
-
-    private func verticalMenuItem(
-        index: Int,
-        icon: String,
-        label: String,
-        isActive: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        let yOffset = -CGFloat(verticalMenuItemCount - index) * verticalMenuItemSpacing
-        let delay = menuExpanded
-            ? Double(index) * 0.045
-            : Double(verticalMenuItemCount - 1 - index) * 0.03
-        return menuItem(icon: icon, label: label, isActive: isActive, action: action)
-            .offset(x: 0, y: menuExpanded ? yOffset : 0)
-            .scaleEffect(menuExpanded ? 1 : 0.1)
-            .opacity(menuExpanded ? 1 : 0)
-            .animation(
-                .spring(response: 0.4, dampingFraction: 0.72).delay(delay),
-                value: menuExpanded
-            )
-    }
-
-    private var menuToggleButton: some View {
-        Button {
-            withAnimation(.spring(duration: 0.22)) { menuExpanded.toggle() }
-        } label: {
-            Image(systemName: menuExpanded ? "xmark" : "line.3.horizontal")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.primary)
-                .frame(width: 44, height: 44)
-                .background(Color(.tertiarySystemFill))
-                .clipShape(Circle())
+        if AppEnvironment.isOpenTimeVisible {
+            items.append(ExpandableFloatingMenuItem(icon: "clock", label: "OpenTime") {
+                showingOpenTime = true
+            })
         }
-        .buttonStyle(.plain)
-    }
-
-    private func menuItem(
-        icon: String,
-        label: String,
-        isActive: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 20))
-                .foregroundStyle(isActive ? Color.accentColor : .secondary)
-                .frame(width: 44, height: 44)
-                .background(Color(.tertiarySystemFill))
-                .clipShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
+        items.append(ExpandableFloatingMenuItem(icon: "globe", label: "Browser") {
+            showingBrowser = true
+        })
+        items.append(ExpandableFloatingMenuItem(icon: "plus", label: "Add Event") {
+            showingAddEvent = true
+        })
+        items.append(ExpandableFloatingMenuItem(icon: "square.and.arrow.up", label: "Print") {
+            exportIncludesBidLayer = bidTransitionTimelineEnabled
+            exportIncludesPersonalLayer = true
+            showingBidPeriodExportOptions = true
+        })
+        items.append(ExpandableFloatingMenuItem(icon: "gearshape", label: "Settings") {
+            showingSettings = true
+        })
+        return ExpandableFloatingMenu(isExpanded: $menuExpanded, items: items, itemSpacing: 58)
     }
 
     private var isOwnTimeline: Bool {

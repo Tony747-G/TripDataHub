@@ -45,6 +45,7 @@ struct IPadTripBarSpanView: View {
     let isSelected: Bool
     let regressedRanges: [ClosedRange<Double>]
     let hasRegression: Bool
+    let labelFontSize: CGFloat
     let onTap: () -> Void
 
     private var visibleRegressionRanges: [ClosedRange<Double>] {
@@ -84,7 +85,7 @@ struct IPadTripBarSpanView: View {
                     }
 
                     Text(label)
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .font(.system(size: labelFontSize, weight: .semibold, design: .monospaced))
                         .foregroundStyle(barTextColor)
                         .lineLimit(1)
                         .padding(.horizontal, 4)

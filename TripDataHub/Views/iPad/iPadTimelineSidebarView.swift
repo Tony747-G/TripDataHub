@@ -4,6 +4,10 @@ struct IPadTimelineSidebarView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @Binding var selectedTripID: String?
     @Binding var scrollToDefaultTrigger: UUID
+    /// When set ("payPeriod|pairing"), the view renders only that trip's legs —
+    /// no "Timeline" header, no next-report strip, no row selection or delete.
+    /// Used by the calendar's trip popup.
+    var focusedTripID: String? = nil
     @Environment(\.colorScheme) private var colorScheme
     @State private var tripDataByTripID: [String: CrewAccessTripSummary] = [:]
     @State private var deleteTripConfirmPairing: String? = nil
@@ -59,7 +63,21 @@ struct IPadTimelineSidebarView: View {
         // Match iPhone Timeline semantics: only explicitly imported CrewAccess
         // trips appear in Timeline. TripBoard/BidPro schedules are not import
         // files and should not surface here as unexpected future trips.
-        viewModel.crewAccessSchedules
+        guard let focusedTripID else { return viewModel.crewAccessSchedules }
+        return viewModel.crewAccessSchedules.compactMap { schedule in
+            let legs = schedule.legs.filter { "\($0.payPeriod)|\($0.pairing)" == focusedTripID }
+            guard !legs.isEmpty else { return nil }
+            return PayPeriodSchedule(
+                id: schedule.id,
+                label: schedule.label,
+                tripCount: 1,
+                legCount: legs.count,
+                openTimeCount: 0,
+                updatedAt: schedule.updatedAt,
+                legs: legs,
+                openTimeTrips: []
+            )
+        }
     }
 
     /// Selects the active/next report from the pre-built (cached) windows.
@@ -91,11 +109,13 @@ struct IPadTimelineSidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            sidebarHeader
-            if let report = nextReportInfo {
-                nextReportStrip(report: report)
+            if focusedTripID == nil {
+                sidebarHeader
+                if let report = nextReportInfo {
+                    nextReportStrip(report: report)
+                }
+                Divider()
             }
-            Divider()
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
@@ -106,7 +126,8 @@ struct IPadTimelineSidebarView: View {
                             let startLegs = section.legs.filter { cachedTripStartLegIDs.contains($0.id) }
                             if !startLegs.isEmpty {
                                 ForEach(startLegs, id: \.id) { startLeg in
-                                    let isTripSelected = selectedTripID == "\(startLeg.payPeriod)|\(startLeg.pairing)"
+                                    let isTripSelected = focusedTripID == nil
+                                        && selectedTripID == "\(startLeg.payPeriod)|\(startLeg.pairing)"
                                     let isTripHighlighted = deleteTripConfirmPairing == startLeg.pairing
                                     tripSummaryCard(for: startLeg, isPast: section.isPast, isHighlighted: isTripHighlighted)
                                         .background(isTripSelected ? Color.accentColor.opacity(0.12) : Color.clear)
@@ -118,6 +139,7 @@ struct IPadTimelineSidebarView: View {
                                         .id("ipad.tripdata.\(startLeg.id.uuidString)")
                                         .simultaneousGesture(
                                             LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                                guard focusedTripID == nil else { return }
                                                 deleteTripConfirmPairing = startLeg.pairing
                                             }
                                         )
@@ -129,13 +151,14 @@ struct IPadTimelineSidebarView: View {
                                     case .leg(let leg):
                                         let tripID = "\(leg.payPeriod)|\(leg.pairing)"
                                         let rowID = "\(tripID)|\(leg.leg)|\(leg.id.uuidString)"
-                                        let isSelected = selectedTripID == tripID
+                                        let isSelected = focusedTripID == nil && selectedTripID == tripID
 
                                         let isHighlighted = deleteTripConfirmPairing == leg.pairing
                                         let flightMatches = friendScheduleMatches.flightMatchesByLegID[leg.id] ?? []
                                         let hasFlightMatch = !flightMatches.isEmpty
                                         Group {
                                             Button {
+                                                guard focusedTripID == nil else { return }
                                                 selectedTripID = selectedTripID == tripID ? nil : tripID
                                             } label: {
                                                 TimelineFlightRow(
@@ -162,6 +185,7 @@ struct IPadTimelineSidebarView: View {
                                             }
                                             .simultaneousGesture(
                                                 LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                                    guard focusedTripID == nil else { return }
                                                     deleteTripConfirmPairing = leg.pairing
                                                 }
                                             )
@@ -170,6 +194,7 @@ struct IPadTimelineSidebarView: View {
                                                 let station = leg.layoverStation ?? leg.arrAirport
                                                 let hotel = leg.layoverHotelName
                                                     ?? tripDataByTripID[tripDataKeyByLegID[leg.id] ?? Self.fileKey(for: leg)]?.hotelByStation[CrewAccessTripSummaryStore.stationKey(station)]
+                                                    ?? tripDataByTripID[leg.pairing]?.hotelByStation[CrewAccessTripSummaryStore.stationKey(station)]
                                                     ?? ""
                                                 let restOverlaps = friendScheduleMatches.restOverlapsByArrivalLegID[leg.id] ?? []
                                                 let hasRestOverlap = !restOverlaps.isEmpty
@@ -208,6 +233,7 @@ struct IPadTimelineSidebarView: View {
                                                 .id("ipad.layover.\(leg.id.uuidString)")
                                                 .simultaneousGesture(
                                                     LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                                        guard focusedTripID == nil else { return }
                                                         deleteTripConfirmPairing = leg.pairing
                                                     }
                                                 )
@@ -253,6 +279,16 @@ struct IPadTimelineSidebarView: View {
                             }
                         }
                     }
+                    .background {
+                        if focusedTripID != nil {
+                            GeometryReader { contentGeo in
+                                Color.clear.preference(
+                                    key: FocusedTimelineContentHeightKey.self,
+                                    value: contentGeo.size.height
+                                )
+                            }
+                        }
+                    }
                 }
                 .onChange(of: selectedTripID) { _, newID in
                     if let id = newID,
@@ -266,6 +302,7 @@ struct IPadTimelineSidebarView: View {
                 // from a calendar tap), scroll to that trip first. Otherwise fall
                 // back to the next upcoming event.
                 .task {
+                    guard focusedTripID == nil else { return }
                     let initialTarget: String? = selectedTripID.flatMap { selectedTripScrollTargetID(for: $0) }
                         ?? nextScrollTargetID()
                     if let rowID = initialTarget { proxy.scrollTo(rowID, anchor: .top) }
@@ -281,6 +318,7 @@ struct IPadTimelineSidebarView: View {
                     }
                 }
                 .onChange(of: scrollToDefaultTrigger) { _, _ in
+                    guard focusedTripID == nil else { return }
                     Task {
                         try? await Task.sleep(nanoseconds: 80_000_000)
                         if let rowID = nextScrollTargetID() {
@@ -291,6 +329,7 @@ struct IPadTimelineSidebarView: View {
                     }
                 }
                 .onChange(of: viewModel.scheduleDataRevision) { _, _ in
+                    guard focusedTripID == nil else { return }
                     Task {
                         try? await Task.sleep(nanoseconds: 120_000_000)
                         if let rowID = nextScrollTargetID() {
@@ -302,6 +341,7 @@ struct IPadTimelineSidebarView: View {
                 }
                 .onChange(of: viewModel.manualOperationalEvents) { _, _ in
                     refreshLegData()
+                    guard focusedTripID == nil else { return }
                     Task {
                         try? await Task.sleep(nanoseconds: 120_000_000)
                         if let rowID = nextScrollTargetID() {
@@ -760,7 +800,7 @@ struct IPadTimelineSidebarView: View {
         let schedules = sidebarSchedules
         let data = TimelineLegData(
             schedules: schedules,
-            manualOperationalEvents: viewModel.manualOperationalEvents,
+            manualOperationalEvents: focusedTripID == nil ? viewModel.manualOperationalEvents : [],
             displayTimeZone: selectedClockDisplay == .utc ? (TimeZone(secondsFromGMT: 0) ?? .gmt) : selectedDomicileTimeZone
         )
         legData = data
@@ -806,18 +846,23 @@ struct IPadTimelineSidebarView: View {
         firstTripSummaryIDByTripID = summaryMap
 
         // Cache only the window list; time-based selection stays in computed nextReportInfo.
-        cachedReportWindows = NextReportWindowBuilder.build(
-            schedules: schedules,
-            domicileAirportCode: selectedCrewDomicile.reportAirportCode,
-            domicileTimeZone: selectedDomicileTimeZone
-        ).sorted { $0.reportTime < $1.reportTime }
+        // Focused mode hides the next-report strip, so skip the window build entirely.
+        cachedReportWindows = focusedTripID == nil
+            ? NextReportWindowBuilder.build(
+                schedules: schedules,
+                domicileAirportCode: selectedCrewDomicile.reportAirportCode,
+                domicileTimeZone: selectedDomicileTimeZone
+            ).sorted { $0.reportTime < $1.reportTime }
+            : []
     }
 
     private func refreshTripDataCards() {
         Task.detached(priority: .utility) {
             let result = CrewAccessTripSummaryStore.load()
             await MainActor.run {
-                tripDataByTripID = result.byFileKey
+                tripDataByTripID = result.byFileKey.merging(result.byTripID) { fileKeyValue, _ in
+                    fileKeyValue
+                }
             }
         }
     }
@@ -883,6 +928,93 @@ struct IPadTimelineSidebarView: View {
         return "\(safeMinutes / 60)h \(safeMinutes % 60)m"
     }
 
+}
+
+/// Reports the focused trip's timeline content height up to the popup so it can
+/// size to fit short trips.
+fileprivate struct FocusedTimelineContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Screen-centered popup showing a single trip's timeline. Presented when a trip
+/// bar is tapped on the calendar (iPhone and iPad portrait). Titled by the Trip Id
+/// — deliberately no generic "Timeline" header.
+struct CalendarTripTimelinePopup: View {
+    @EnvironmentObject private var viewModel: AppViewModel
+
+    /// "payPeriod|pairing" — same identifier the calendar trip bars use.
+    let tripID: String
+    let onDismiss: () -> Void
+
+    @State private var scrollTrigger = UUID()
+    @State private var unusedSelection: String?
+    @State private var timelineContentHeight: CGFloat?
+
+    private static let maxTimelineHeight: CGFloat = 530
+
+    private var tripDisplayID: String {
+        tripID.split(separator: "|").last.map(String.init) ?? tripID
+    }
+
+    /// Hug short trips; cap (and scroll) long ones.
+    private var timelineHeight: CGFloat {
+        guard let measured = timelineContentHeight, measured > 0 else {
+            return Self.maxTimelineHeight
+        }
+        return min(max(measured, 120), Self.maxTimelineHeight)
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.28)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { onDismiss() }
+
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Trip Id: \(tripDisplayID)")
+                        .font(.system(size: 16, weight: .bold))
+                    Spacer()
+                    Button {
+                        onDismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 21))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Close")
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                Divider()
+
+                IPadTimelineSidebarView(
+                    selectedTripID: $unusedSelection,
+                    scrollToDefaultTrigger: $scrollTrigger,
+                    focusedTripID: tripID
+                )
+                .environmentObject(viewModel)
+                .onPreferenceChange(FocusedTimelineContentHeightKey.self) { height in
+                    timelineContentHeight = height
+                }
+                .frame(height: timelineHeight)
+            }
+            .frame(maxWidth: 460)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color(.systemBackground))
+                    .shadow(color: .black.opacity(0.24), radius: 20, y: 8)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.horizontal, 24)
+            .padding(.vertical, 40)
+        }
+    }
 }
 
 #Preview {

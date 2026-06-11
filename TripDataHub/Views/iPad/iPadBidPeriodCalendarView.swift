@@ -5,10 +5,16 @@ import UIKit
 
 // MARK: - Main View
 
+enum BidPeriodCalendarPresentationStyle {
+    case iPad
+    case iPhone
+}
+
 struct IPadBidPeriodCalendarView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @Binding var selectedTripID: String?
     @Binding var selectedBidPeriodID: String?
+    let presentationStyle: BidPeriodCalendarPresentationStyle
     @AppStorage("pilot_qualification") private var pilotQualificationRawValue = PilotQualification.captain.rawValue
     @AppStorage("bid_transition_timeline_enabled") private var bidTransitionTimelineEnabled = true
     @AppStorage(ProfileStorageKeys.faaMedicalExpiryDate) private var faaMedicalExpiryDate = ""
@@ -26,6 +32,18 @@ struct IPadBidPeriodCalendarView: View {
     @State private var dayLayerCache: [String: IPadCalendarDayLayerData] = [:]
     @State private var selectedManualOperationalEvent: ManualOperationalEvent?
     @State private var selectedManualPersonalEvent: ManualPersonalEvent?
+    @State private var selectedDay: CalendarDaySelection?
+    @State private var selectedEventPanel: CalendarEventPanelSelection?
+
+    init(
+        selectedTripID: Binding<String?>,
+        selectedBidPeriodID: Binding<String?>,
+        presentationStyle: BidPeriodCalendarPresentationStyle = .iPad
+    ) {
+        _selectedTripID = selectedTripID
+        _selectedBidPeriodID = selectedBidPeriodID
+        self.presentationStyle = presentationStyle
+    }
 
     // BP date range labels (e.g. "May 17 – Jul 11, 2026") must render the BP's UTC calendar
     // dates verbatim. Without an explicit UTC timezone, the device's local timezone shifts the
@@ -61,41 +79,27 @@ struct IPadBidPeriodCalendarView: View {
         PilotQualification(rawValue: pilotQualificationRawValue) ?? .captain
     }
 
+    private var usesCompactPhoneLayout: Bool {
+        presentationStyle == .iPhone
+    }
+
     private var gridDays: [IPadCalendarGridDay] {
         guard let bp = currentBidPeriod else { return [] }
         return iPadCalendarGrid(for: bp, domicile: domicile)
     }
 
-    /// Renders the active BP plus 1 BP before and 2 BPs after, each as its own
-    /// section. BP26-07 (4-week BP) renders only its real 4 weeks — no duplicate
-    /// next-BP padding rows. Header tracking updates as the user scrolls between
-    /// sections.
+    /// Renders the active BP with cached surrounding sections. iPhone keeps
+    /// BP -2...BP +2; iPad retains its existing BP -1...BP +2 window.
+    /// BP26-07 (4-week BP) renders only its real 4 weeks.
     private var displayedBidPeriodSections: [IPadBidPeriodGridSection] {
         guard let currentBidPeriod else { return [] }
-        var collected: [CalendarBidPeriod] = []
-
-        // 1 BP before
-        var cursor = currentBidPeriod
-        var prevs: [CalendarBidPeriod] = []
-        for _ in 0..<1 {
-            guard let prev = bidPeriod(for: cursor.startDateUTC.addingTimeInterval(-1), domicile: domicile) else { break }
-            prevs.append(prev)
-            cursor = prev
-        }
-        collected.append(contentsOf: prevs.reversed())
-
-        // Active
-        collected.append(currentBidPeriod)
-
-        // 2 BPs after
-        cursor = currentBidPeriod
-        for _ in 0..<2 {
-            guard let next = bidPeriod(for: cursor.endDateUTC, domicile: domicile) else { break }
-            collected.append(next)
-            cursor = next
-        }
-
-        return collected.map { bp in
+        let previousCount = usesCompactPhoneLayout ? 2 : 1
+        return bidPeriodWindow(
+            centeredOn: currentBidPeriod,
+            previousCount: previousCount,
+            nextCount: 2,
+            domicile: domicile
+        ).map { bp in
             IPadBidPeriodGridSection(bidPeriod: bp, rowRange: 0..<activeRowCount(for: bp))
         }
     }
@@ -114,7 +118,9 @@ struct IPadBidPeriodCalendarView: View {
             // 8-week BP fills the visible grid area without scrolling on iPad Pro
             // 11-inch landscape. ±2 BPs are reachable by scrolling.
             GeometryReader { geo in
-                let rowHeight = max(72, geo.size.height / 8)
+                let rowHeight = usesCompactPhoneLayout
+                    ? 90
+                    : max(72, geo.size.height / 8)
                 gridScrollView(rowHeight: rowHeight)
             }
             .background(Color(.systemBackground))
@@ -131,7 +137,6 @@ struct IPadBidPeriodCalendarView: View {
         .onChange(of: chinaVisaExpiryDate) { _, _ in refreshCalendarLayouts() }
         .onChange(of: domicile) { _, _ in
             loadBidPeriod(for: Date())
-            refreshCalendarLayouts()
         }
         .onChange(of: currentBidPeriod) { _, bp in
             selectedBidPeriodID = bp?.id
@@ -146,11 +151,53 @@ struct IPadBidPeriodCalendarView: View {
             ManualEventDetailSheet(personalEvent: event)
                 .environmentObject(viewModel)
         }
+        .sheet(item: $selectedDay) { selection in
+            CalendarDayDetailView(
+                selection: selection,
+                trips: trips(on: selection.day),
+                operationalEvents: operationalEvents(on: selection.day),
+                personalEvents: personalEvents(on: selection.day),
+                personalIndicators: (dayLayerCache[selection.day.displayDateKey]?.personalChips ?? [])
+                    .filter { $0.manualPersonalEventID == nil },
+                bidEvents: dayLayerCache[selection.day.displayDateKey]?.bidEventChips ?? [],
+                financialIndicator: dayLayerCache[selection.day.displayDateKey]?.financialIndicator,
+                onTripTap: showTripFromDayDetail,
+                onOperationalEventTap: showOperationalEventFromDayDetail,
+                onPersonalEventTap: showPersonalEventFromDayDetail
+            )
+            .environmentObject(viewModel)
+        }
+        // Centered wide panel for the day-cell event stack. Rendered at the calendar
+        // level (not inside the cell) so titles get the full screen width to breathe.
+        .overlay {
+            if let panel = selectedEventPanel {
+                CalendarEventListPanel(
+                    selection: panel,
+                    onManualPersonalEventTap: { eventID in
+                        selectedEventPanel = nil
+                        showManualPersonalEvent(id: eventID)
+                    },
+                    onDismiss: { selectedEventPanel = nil }
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
+        }
+        .animation(.easeOut(duration: 0.16), value: selectedEventPanel?.id)
     }
 
     // MARK: Header
 
     private var headerView: some View {
+        Group {
+            if usesCompactPhoneLayout {
+                compactHeaderView
+            } else {
+                regularHeaderView
+            }
+        }
+    }
+
+    private var regularHeaderView: some View {
         HStack(spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(activeHeaderBidPeriod?.id ?? "—")
@@ -207,6 +254,57 @@ struct IPadBidPeriodCalendarView: View {
         }
     }
 
+    private var compactHeaderView: some View {
+        ZStack {
+            VStack(spacing: 1) {
+                Text(activeHeaderBidPeriod?.id ?? "—")
+                    .font(.system(size: 16, weight: .bold, design: .monospaced))
+                Text(bidPeriodRangeLabel)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .lineLimit(1)
+            .allowsHitTesting(false)
+
+            HStack(spacing: 8) {
+                Button {
+                    navigateToPreviousBP()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 13, weight: .bold))
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.bordered)
+                .disabled(currentBidPeriod == nil)
+                .accessibilityLabel("Previous Bid Period")
+
+                Spacer()
+
+                Button("Today") {
+                    loadBidPeriod(for: Date())
+                    scrollTrigger = UUID()
+                }
+                .font(.system(size: 11, weight: .semibold))
+                .buttonStyle(.borderedProminent)
+
+                Button {
+                    navigateToNextBP()
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .bold))
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.bordered)
+                .disabled(currentBidPeriod == nil)
+                .accessibilityLabel("Next Bid Period")
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 48)
+        .background(Color(.secondarySystemBackground))
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
     // MARK: Day-of-Week Header
 
     private static let dowLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
@@ -215,7 +313,7 @@ struct IPadBidPeriodCalendarView: View {
         HStack(spacing: 0) {
             ForEach(Self.dowLabels, id: \.self) { label in
                 Text(label)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: usesCompactPhoneLayout ? 10 : 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 5)
@@ -230,10 +328,9 @@ struct IPadBidPeriodCalendarView: View {
     private func gridScrollView(rowHeight: CGFloat) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical) {
-                // Not LazyVStack: lazy stacks don't materialize views that are
-                // off-screen, so scrollTo(bp.id) fails silently for BPs that
-                // aren't yet in the rendered window. With at most 4 BP sections
-                // (40 rows total) the performance cost of eager VStack is negligible.
+                // Trip bars are geometry overlays spanning multiple day columns.
+                // Keep rows eager so every overlay gets a stable parent width and
+                // scrollTo can always materialize the requested BP anchor.
                 VStack(spacing: 0) {
                     Rectangle().fill(Color(.separator)).frame(height: 1)
                     ForEach(Array(displayedBidPeriodSections.enumerated()), id: \.element.id) { sectionIndex, section in
@@ -284,8 +381,9 @@ struct IPadBidPeriodCalendarView: View {
                         )
                         if row < section.rowRange.upperBound - 1 {
                             let isPayPeriodBoundary = hasPayPeriodBoundary(after: row, in: grid)
+                            let payPeriodDividerHeight = usesCompactPhoneLayout ? 3.0 : 5.0
                             Divider()
-                                .frame(height: isPayPeriodBoundary ? 5 : 1)
+                                .frame(height: isPayPeriodBoundary ? payPeriodDividerHeight : 1)
                                 .background(isPayPeriodBoundary ? Color(.separator) : Color.clear)
                         }
                     }
@@ -388,7 +486,15 @@ struct IPadBidPeriodCalendarView: View {
                                 financialIndicator: layerData.financialIndicator,
                                 personalChips: layerData.personalChips,
                                 bidEventChips: layerData.bidEventChips,
-                                onManualPersonalEventTap: showManualPersonalEvent
+                                onManualPersonalEventTap: showManualPersonalEvent,
+                                onDayTap: usesCompactPhoneLayout ? { selectedDay = CalendarDaySelection(day: rowDays[col].calendarDay) } : nil,
+                                onEventStackTap: { chips in
+                                    selectedEventPanel = CalendarEventPanelSelection(
+                                        day: rowDays[col].calendarDay,
+                                        chips: chips
+                                    )
+                                },
+                                usesCompactPhoneLayout: usesCompactPhoneLayout
                             )
                                 .frame(maxWidth: .infinity)
                             if col < 6 { Divider() }
@@ -415,7 +521,8 @@ struct IPadBidPeriodCalendarView: View {
                             label: tripBarLabel(for: trip),
                             isSelected: selectedTripID == span.tripID,
                             regressedRanges: span.regressedRanges,
-                            hasRegression: span.hasRegression
+                            hasRegression: span.hasRegression,
+                            labelFontSize: usesCompactPhoneLayout ? 10 : 12
                         ) {
                             selectedTripID = selectedTripID == span.tripID ? nil : span.tripID
                         }
@@ -432,7 +539,8 @@ struct IPadBidPeriodCalendarView: View {
                             label: event.code.rawValue,
                             isSelected: false,
                             regressedRanges: [],
-                            hasRegression: false
+                            hasRegression: false,
+                            labelFontSize: usesCompactPhoneLayout ? 10 : 12
                         ) {
                             selectedManualOperationalEvent = event
                         }
@@ -554,6 +662,46 @@ struct IPadBidPeriodCalendarView: View {
 
     private func showManualPersonalEvent(id: UUID) {
         selectedManualPersonalEvent = viewModel.manualPersonalEvents.first { $0.id == id }
+    }
+
+    private func trips(on day: CalendarDay) -> [CalendarTrip] {
+        cachedAllTrips.filter { $0.startUTC < day.dayEndUTC && $0.endUTC > day.dayStartUTC }
+    }
+
+    private func operationalEvents(on day: CalendarDay) -> [ManualOperationalEvent] {
+        viewModel.manualOperationalEvents
+            .filter { $0.startUTC < day.dayEndUTC && $0.endUTC > day.dayStartUTC }
+            .sorted { $0.startUTC < $1.startUTC }
+    }
+
+    private func personalEvents(on day: CalendarDay) -> [ManualPersonalEvent] {
+        viewModel.manualPersonalEvents
+            .filter { $0.startUTC < day.dayEndUTC && $0.endUTC > day.dayStartUTC }
+            .sorted { $0.startUTC < $1.startUTC }
+    }
+
+    private func showTripFromDayDetail(_ tripID: String) {
+        selectedDay = nil
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            selectedTripID = tripID
+        }
+    }
+
+    private func showOperationalEventFromDayDetail(_ event: ManualOperationalEvent) {
+        selectedDay = nil
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            selectedManualOperationalEvent = event
+        }
+    }
+
+    private func showPersonalEventFromDayDetail(_ event: ManualPersonalEvent) {
+        selectedDay = nil
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            selectedManualPersonalEvent = event
+        }
     }
 
     // MARK: Navigation helpers
@@ -752,34 +900,66 @@ private enum IPadCalendarCycleData {
         ("2026-12-31", "BP27-02")
     ]
 
+    /// Day-number since epoch for the two paycheck anchor dates. Precomputed so the
+    /// per-day indicator check is integer arithmetic instead of repeated date parsing
+    /// (this runs for every visible day cell — ~280 per calendar refresh).
+    private static let smallCheckBaseDay: Int? = epochDay(from: smallCheckBase)
+    private static let bigCheckBaseDay: Int? = epochDay(from: bigCheckBase)
+
     static func financialIndicator(for dateKey: String) -> IPadCalendarFinancialIndicator? {
-        if isRepeatingDate(dateKey, from: smallCheckBase, everyDays: 28) {
+        guard let day = epochDay(from: dateKey) else { return nil }
+        if let base = smallCheckBaseDay, day >= base, (day - base) % 28 == 0 {
             return .smallCheck
         }
-        if isRepeatingDate(dateKey, from: bigCheckBase, everyDays: 28) {
+        if let base = bigCheckBaseDay, day >= base, (day - base) % 28 == 0 {
             return .bigCheck
         }
         return nil
     }
 
+    /// All bid-transition chips, fully expanded from the static tables and keyed by
+    /// date for O(1) per-day lookup. Built once per qualification; the uncached path
+    /// did ~100 DateFormatter operations per visible day.
+    private static var chipsByDateKeyCache: [PilotQualification: [String: [IPadCalendarEventChip]]] = [:]
+    private static let chipsCacheLock = NSLock()
+
     static func bidEventChips(for dateKey: String, qualification: PilotQualification) -> [IPadCalendarEventChip] {
-        var chips: [IPadCalendarEventChip] = []
-
-        for (eventDate, bp) in bidPackageOutByBP where eventDate == dateKey {
-            chips.append(bidChip(id: "bid-package-\(bp)", title: "Bid Package Out \(bp)", compactTitle: "BID PACKAGE OUT"))
+        chipsCacheLock.lock()
+        defer { chipsCacheLock.unlock() }
+        if let table = chipsByDateKeyCache[qualification] {
+            return table[dateKey] ?? []
         }
+        let table = buildChipsByDateKey(qualification: qualification)
+        chipsByDateKeyCache[qualification] = table
+        return table[dateKey] ?? []
+    }
 
-        for (caCloseDate, bp) in caBidCloseByBP {
-            appendDerivedBidEvents(
-                fromCAClose: caCloseDate,
-                bidPeriod: bp,
-                targetDateKey: dateKey,
-                qualification: qualification,
-                into: &chips
+    private static func buildChipsByDateKey(qualification: PilotQualification) -> [String: [IPadCalendarEventChip]] {
+        var table: [String: [IPadCalendarEventChip]] = [:]
+
+        for (eventDate, bp) in bidPackageOutByBP {
+            table[eventDate, default: []].append(
+                bidChip(id: "bid-package-\(bp)", title: "Bid Package Out \(bp)", compactTitle: "BID PACKAGE OUT")
             )
         }
 
-        return chips
+        for (caCloseDate, bp) in caBidCloseByBP {
+            for (offset, title, compactTitle, idPrefix) in derivedBidEvents(for: qualification) {
+                guard let date = dateKey(byAddingDays: offset, to: caCloseDate) else { continue }
+                table[date, default: []].append(bidChip(
+                    id: "\(idPrefix)-\(bp)",
+                    title: "\(title) \(bp)",
+                    compactTitle: compactTitle
+                ))
+            }
+        }
+
+        return table
+    }
+
+    private static func epochDay(from dateKey: String) -> Int? {
+        guard let date = date(from: dateKey) else { return nil }
+        return Int((date.timeIntervalSince1970 / 86_400).rounded(.down))
     }
 
     static func daysFromToday(to dateKey: String) -> Int? {
@@ -798,38 +978,22 @@ private enum IPadCalendarCycleData {
         return .normal
     }
 
-    private static func appendDerivedBidEvents(
-        fromCAClose caCloseDate: String,
-        bidPeriod: String,
-        targetDateKey: String,
-        qualification: PilotQualification,
-        into chips: inout [IPadCalendarEventChip]
-    ) {
-        let events: [(Int, String, String, String)]
+    private static func derivedBidEvents(for qualification: PilotQualification) -> [(Int, String, String, String)] {
         switch qualification {
         case .captain:
-            events = [
+            return [
                 (0, "Schedule Bid Close", "SCHD BID CLOSE", "ca-bid-close"),
                 (10, "VTO Published", "VTO PUBLISHED", "ca-vto-published"),
                 (12, "VTO Bid Close", "VTO BID CLOSE", "ca-vto-close"),
                 (18, "LITT Accepted", "LITT ACCEPT", "ca-litt")
             ]
         case .firstOfficer:
-            events = [
+            return [
                 (4, "Schedule Bid Close", "SCHD BID CLOSE", "fo-bid-close"),
                 (11, "VTO Published", "VTO PUBLISHED", "fo-vto-published"),
                 (13, "VTO Bid Close", "VTO BID CLOSE", "fo-vto-close"),
                 (20, "LITT Accepted", "LITT ACCEPT", "fo-litt")
             ]
-        }
-
-        for (offset, title, compactTitle, idPrefix) in events {
-            guard let date = dateKey(byAddingDays: offset, to: caCloseDate), date == targetDateKey else { continue }
-            chips.append(bidChip(
-                id: "\(idPrefix)-\(bidPeriod)",
-                title: "\(title) \(bidPeriod)",
-                compactTitle: compactTitle
-            ))
         }
     }
 
@@ -840,12 +1004,6 @@ private enum IPadCalendarCycleData {
             compactTitle: compactTitle,
             layer: .bid
         )
-    }
-
-    private static func isRepeatingDate(_ dateKey: String, from baseKey: String, everyDays interval: Int) -> Bool {
-        guard let targetDate = date(from: dateKey), let base = date(from: baseKey) else { return false }
-        let dayDelta = calendar.dateComponents([.day], from: base, to: targetDate).day ?? Int.min
-        return dayDelta >= 0 && dayDelta % interval == 0
     }
 
     private static func dateKey(byAddingDays days: Int, to baseKey: String) -> String? {
@@ -976,9 +1134,14 @@ private struct CalendarDayCell: View {
     let personalChips: [IPadCalendarEventChip]
     let bidEventChips: [IPadCalendarEventChip]
     let onManualPersonalEventTap: (UUID) -> Void
+    let onDayTap: (() -> Void)?
+    /// Invoked when the event stack is tapped. The panel itself is rendered by the
+    /// calendar view, centered on screen — a day cell is far too narrow to show
+    /// full event titles.
+    let onEventStackTap: (([IPadCalendarEventChip]) -> Void)?
+    let usesCompactPhoneLayout: Bool
 
     @State private var isShowingPayPeriodPopover = false
-    @State private var isShowingEventPopover = false
 
     struct Metrics {
         let dateHeaderHeight: CGFloat = 28
@@ -1007,20 +1170,24 @@ private struct CalendarDayCell: View {
         return f
     }()
 
+    // Shared static calendar: these properties run for every visible day cell, and
+    // per-access Calendar(identifier:) construction was measurable in open latency.
+    private static let utcCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        return calendar
+    }()
+
     private var dayDate: Date { gridDay.calendarDay.dayStartUTC }
     private var isToday: Bool {
-        var utcCal = Calendar(identifier: .gregorian)
-        utcCal.timeZone = .gmt
-        let cell = utcCal.dateComponents([.year, .month, .day], from: dayDate)
+        let cell = Self.utcCalendar.dateComponents([.year, .month, .day], from: dayDate)
         let local = Calendar.current.dateComponents([.year, .month, .day], from: Date())
         return cell.year == local.year && cell.month == local.month && cell.day == local.day
     }
     private var isSunday: Bool { gridDay.calendarDay.weekdayIndex == 0 }
     private var isSaturday: Bool { gridDay.calendarDay.weekdayIndex == 6 }
     private var isFirstOfMonth: Bool {
-        var utc = Calendar(identifier: .gregorian)
-        utc.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
-        return utc.component(.day, from: dayDate) == 1
+        Self.utcCalendar.component(.day, from: dayDate) == 1
     }
     private var isPayPeriodStart: Bool {
         !gridDay.isOverflow && gridDay.calendarDay.index % 28 == 0
@@ -1033,47 +1200,53 @@ private struct CalendarDayCell: View {
         ZStack(alignment: .topLeading) {
             cellBackground
 
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: usesCompactPhoneLayout ? 0 : 3) {
                 Group {
                     if isToday {
                         Text(Self.dayFormatter.string(from: dayDate))
-                            .font(.system(size: 16, weight: .bold))
+                            .font(.system(size: usesCompactPhoneLayout ? 14 : 16, weight: .bold))
                             .foregroundStyle(.white)
-                            .frame(width: 26, height: 26)
+                            .frame(
+                                width: usesCompactPhoneLayout ? 20 : 26,
+                                height: usesCompactPhoneLayout ? 22 : 26
+                            )
                             .background(Circle().fill(Color.accentColor))
                     } else {
                         Text(Self.dayFormatter.string(from: dayDate))
-                            .font(.system(size: 16, weight: gridDay.isOverflow ? .light : .semibold))
+                            .font(.system(
+                                size: usesCompactPhoneLayout ? 14 : 16,
+                                weight: gridDay.isOverflow ? .light : .semibold
+                            ))
                             .foregroundStyle(gridDay.isOverflow ? .tertiary : .primary)
-                            .frame(width: 26, height: 26)
+                            .frame(
+                                width: usesCompactPhoneLayout ? 20 : 26,
+                                height: usesCompactPhoneLayout ? 22 : 26
+                            )
                     }
                 }
                 if isFirstOfMonth || gridDay.calendarDay.index == 0 {
                     Text(Self.monthFormatter.string(from: dayDate).uppercased())
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: usesCompactPhoneLayout ? 7.5 : 13, weight: .semibold))
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
             }
-            .padding(.leading, 5)
+            .padding(.leading, usesCompactPhoneLayout ? 2 : 5)
             .padding(.top, 3)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onDayTap?()
+            }
 
             if let financialIndicator {
                 financialBadge(financialIndicator)
                     .padding(.top, 5)
-                    .padding(.trailing, 6)
+                    .padding(.trailing, usesCompactPhoneLayout ? 3 : 6)
                     .frame(maxWidth: .infinity, alignment: .topTrailing)
             }
 
             if !eventStackChips.isEmpty {
-                if isShowingEventPopover {
-                    eventStackPanel
-                        .padding(.horizontal, Self.metrics.layerHorizontalInset)
-                        .padding(.bottom, Self.metrics.eventStackBottomPadding + 22)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                        .zIndex(2)
-                }
-
                 eventStack
                     .padding(.horizontal, Self.metrics.layerHorizontalInset)
                     .padding(.bottom, Self.metrics.eventStackBottomPadding)
@@ -1082,7 +1255,6 @@ private struct CalendarDayCell: View {
             }
         }
         .opacity(gridDay.isOverflow ? 0.35 : 1)
-        .animation(.easeOut(duration: 0.16), value: isShowingEventPopover)
     }
 
     @ViewBuilder
@@ -1141,7 +1313,10 @@ private struct CalendarDayCell: View {
     private func financialBadge(_ indicator: IPadCalendarFinancialIndicator) -> some View {
         let isBigCheck = indicator == .bigCheck
         return Image(systemName: isBigCheck ? "dollarsign.circle.fill" : "dollarsign.circle")
-            .font(.system(size: isBigCheck ? 15 : 13, weight: isBigCheck ? .semibold : .medium))
+            .font(.system(
+                size: usesCompactPhoneLayout ? (isBigCheck ? 10 : 9) : (isBigCheck ? 15 : 13),
+                weight: isBigCheck ? .semibold : .medium
+            ))
             .foregroundStyle(isBigCheck ? Color(hex: "#FCB900") : Color(hex: "#B8871B"))
             .shadow(color: isBigCheck ? Color(hex: "#FCB900").opacity(0.28) : .clear, radius: 4)
             .accessibilityLabel(isBigCheck ? "Big check payday" : "Small check payday")
@@ -1162,7 +1337,7 @@ private struct CalendarDayCell: View {
                 .fill(eventColor(for: chip.layer))
                 .frame(width: 5, height: 5)
             Text(chip.compactTitle)
-                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .font(.system(size: usesCompactPhoneLayout ? 9 : 10, weight: .bold, design: .rounded))
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
         }
@@ -1184,10 +1359,9 @@ private struct CalendarDayCell: View {
         Button {
             if eventStackChips.count == 1,
                let eventID = eventStackChips.first?.manualPersonalEventID {
-                isShowingEventPopover = false
                 onManualPersonalEventTap(eventID)
             } else {
-                isShowingEventPopover.toggle()
+                onEventStackTap?(eventStackChips)
             }
         } label: {
             VStack(spacing: 0) {
@@ -1202,7 +1376,7 @@ private struct CalendarDayCell: View {
 
                     if eventStackChips.count > 1 {
                         Text("+\(eventStackChips.count - 1)")
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .font(.system(size: usesCompactPhoneLayout ? 9 : 11, weight: .bold, design: .rounded))
                             .foregroundStyle(eventForegroundColor(for: eventStackChips.first?.layer ?? .bid))
                             .frame(height: 15)
                     }
@@ -1219,48 +1393,9 @@ private struct CalendarDayCell: View {
         .accessibilityLabel(eventStackChips.map(\.title).joined(separator: ", "))
     }
 
-    private var eventStackPanel: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            ForEach(eventStackChips) { chip in
-                if let eventID = chip.manualPersonalEventID {
-                    Button {
-                        isShowingEventPopover = false
-                        onManualPersonalEventTap(eventID)
-                    } label: {
-                        eventPopoverRow(chip)
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    eventPopoverRow(chip)
-                }
-            }
-        }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 6)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.systemBackground).opacity(0.96))
-        .overlay(
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .stroke(Color(.separator).opacity(0.55), lineWidth: 0.7)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-        .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
-    }
-
-    private func eventPopoverRow(_ chip: IPadCalendarEventChip) -> some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(eventColor(for: chip.layer))
-                .frame(width: 8, height: 8)
-            Text(chip.title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(eventForegroundColor(for: chip.layer))
-        }
-    }
-
     private func eventChipView(_ chip: IPadCalendarEventChip) -> some View {
         Text(chip.compactTitle)
-            .font(.system(size: 10, weight: .bold, design: .rounded))
+            .font(.system(size: usesCompactPhoneLayout ? 9 : 10, weight: .bold, design: .rounded))
             .foregroundStyle(eventForegroundColor(for: chip.layer))
             .lineLimit(1)
             .minimumScaleFactor(0.7)
@@ -1268,43 +1403,291 @@ private struct CalendarDayCell: View {
     }
 
     private func eventColor(for layer: IPadCalendarEventChip.Layer) -> Color {
-        switch layer {
-        case .bid:
-            return Color(hex: "#B8871B")
-        case .personal(let state):
-            switch state {
-            case .normal:
-                return .teal
-            case .yellow:
-                return .yellow
-            case .orange:
-                return .orange
-            case .red, .expired:
-                return .red
-            }
-        case .operational:
-            return .cyan
-        }
+        calendarEventColor(for: layer)
     }
 
     private func eventFillColor(for layer: IPadCalendarEventChip.Layer) -> Color {
-        switch layer {
-        case .personal(.expired):
-            return .red.opacity(0.24)
-        case .bid, .personal(_), .operational:
-            return eventColor(for: layer).opacity(0.14)
-        }
+        calendarEventFillColor(for: layer)
     }
 
     private func eventForegroundColor(for layer: IPadCalendarEventChip.Layer) -> Color {
-        switch layer {
-        case .personal(.expired):
+        calendarEventForegroundColor(for: layer, colorScheme: colorScheme)
+    }
+}
+
+// Shared by CalendarDayCell chips and the centered event list panel.
+private func calendarEventColor(for layer: IPadCalendarEventChip.Layer) -> Color {
+    switch layer {
+    case .bid:
+        return Color(hex: "#B8871B")
+    case .personal(let state):
+        switch state {
+        case .normal:
+            return .teal
+        case .yellow:
+            return .yellow
+        case .orange:
+            return .orange
+        case .red, .expired:
             return .red
-        case .bid:
-            return colorScheme == .dark ? Color(hex: "#FFB500") : Color(hex: "#301506")
-        case .personal(_), .operational:
-            return eventColor(for: layer)
         }
+    case .operational:
+        return .cyan
+    }
+}
+
+private func calendarEventFillColor(for layer: IPadCalendarEventChip.Layer) -> Color {
+    switch layer {
+    case .personal(.expired):
+        return .red.opacity(0.24)
+    case .bid, .personal(_), .operational:
+        return calendarEventColor(for: layer).opacity(0.14)
+    }
+}
+
+private func calendarEventForegroundColor(for layer: IPadCalendarEventChip.Layer, colorScheme: ColorScheme) -> Color {
+    switch layer {
+    case .personal(.expired):
+        return .red
+    case .bid:
+        return colorScheme == .dark ? Color(hex: "#FFB500") : Color(hex: "#301506")
+    case .personal(_), .operational:
+        return calendarEventColor(for: layer)
+    }
+}
+
+private struct CalendarDaySelection: Identifiable {
+    let day: CalendarDay
+    var id: String { day.displayDateKey }
+}
+
+private struct CalendarEventPanelSelection: Identifiable {
+    let day: CalendarDay
+    let chips: [IPadCalendarEventChip]
+    var id: String { day.displayDateKey }
+}
+
+/// Wide, screen-centered list of a day's event chips. The in-cell stack only has
+/// the day-column width, which truncates every title; tapping it opens this panel.
+private struct CalendarEventListPanel: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let selection: CalendarEventPanelSelection
+    let onManualPersonalEventTap: (UUID) -> Void
+    let onDismiss: () -> Void
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "EEE, MMM d, yyyy"
+        return formatter
+    }()
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.28)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { onDismiss() }
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text(Self.dateFormatter.string(from: selection.day.dayStartUTC))
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        onDismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Close")
+                }
+                .padding(.bottom, 10)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(selection.chips) { chip in
+                        if let eventID = chip.manualPersonalEventID {
+                            Button {
+                                onManualPersonalEventTap(eventID)
+                            } label: {
+                                row(chip, showsChevron: true)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            row(chip, showsChevron: false)
+                        }
+                    }
+                }
+            }
+            .padding(18)
+            .frame(maxWidth: 420, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(.systemBackground))
+                    .shadow(color: .black.opacity(0.22), radius: 18, y: 6)
+            )
+            .padding(.horizontal, 32)
+        }
+    }
+
+    private func row(_ chip: IPadCalendarEventChip, showsChevron: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Circle()
+                .fill(calendarEventColor(for: chip.layer))
+                .frame(width: 9, height: 9)
+            Text(chip.title)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(calendarEventForegroundColor(for: chip.layer, colorScheme: colorScheme))
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .contentShape(Rectangle())
+    }
+}
+
+private struct CalendarDayDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let selection: CalendarDaySelection
+    let trips: [CalendarTrip]
+    let operationalEvents: [ManualOperationalEvent]
+    let personalEvents: [ManualPersonalEvent]
+    let personalIndicators: [IPadCalendarEventChip]
+    let bidEvents: [IPadCalendarEventChip]
+    let financialIndicator: IPadCalendarFinancialIndicator?
+    let onTripTap: (String) -> Void
+    let onOperationalEventTap: (ManualOperationalEvent) -> Void
+    let onPersonalEventTap: (ManualPersonalEvent) -> Void
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "EEEE, MMMM d, yyyy"
+        return formatter
+    }()
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if trips.isEmpty,
+                   operationalEvents.isEmpty,
+                   personalEvents.isEmpty,
+                   personalIndicators.isEmpty,
+                   bidEvents.isEmpty,
+                   financialIndicator == nil {
+                    ContentUnavailableView(
+                        "No Events",
+                        systemImage: "calendar",
+                        description: Text("Nothing is scheduled for this day.")
+                    )
+                }
+
+                if !trips.isEmpty {
+                    Section("Flights") {
+                        ForEach(trips, id: \.id) { trip in
+                            Button {
+                                onTripTap(trip.id)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Trip \(trip.pairing)")
+                                        .font(.headline)
+                                    Text(tripBarLabel(for: trip))
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                    ForEach(legs(on: selection.day, in: trip), id: \.id) { leg in
+                                        Text(legSummary(leg))
+                                            .font(.caption.monospaced())
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                if !operationalEvents.isEmpty {
+                    Section("Operational") {
+                        ForEach(operationalEvents) { event in
+                            Button {
+                                onOperationalEventTap(event)
+                            } label: {
+                                Label(event.code.rawValue, systemImage: "airplane.circle.fill")
+                            }
+                        }
+                    }
+                }
+
+                if !personalEvents.isEmpty || !personalIndicators.isEmpty {
+                    Section("Personal") {
+                        ForEach(personalEvents) { event in
+                            Button {
+                                onPersonalEventTap(event)
+                            } label: {
+                                Label(event.code.rawValue, systemImage: "person.crop.circle")
+                            }
+                        }
+                        ForEach(personalIndicators) { indicator in
+                            Label(indicator.title, systemImage: "person.crop.circle")
+                        }
+                    }
+                }
+
+                if !bidEvents.isEmpty {
+                    Section("Bid") {
+                        ForEach(bidEvents) { event in
+                            Label(event.title, systemImage: "doc.text")
+                        }
+                    }
+                }
+
+                if let financialIndicator {
+                    Section("Financial") {
+                        Label(
+                            financialIndicator == .bigCheck ? "+Pay Day" : "Pay Day",
+                            systemImage: "dollarsign.circle.fill"
+                        )
+                    }
+                }
+            }
+            .navigationTitle(Self.dateFormatter.string(from: selection.day.dayStartUTC))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func legs(on day: CalendarDay, in trip: CalendarTrip) -> [TripLeg] {
+        trip.legs.filter { leg in
+            guard let departure = LegConnectionTextBuilder.parseUTC(leg.depUTC),
+                  let arrival = LegConnectionTextBuilder.parseUTC(leg.arrUTC) else {
+                return false
+            }
+            return departure < day.dayEndUTC && arrival > day.dayStartUTC
+        }
+    }
+
+    private func legSummary(_ leg: TripLeg) -> String {
+        // displayFlightNumberText is the canonical flight label (handles DH/CML
+        // prefixes and airline-code normalization consistently with Timeline).
+        "\(leg.displayFlightNumberText)  \(leg.depAirport)-\(leg.arrAirport)  \(leg.depLocal)-\(leg.arrLocal)"
     }
 }
 

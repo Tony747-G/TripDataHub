@@ -175,8 +175,8 @@ struct PDFTripParser {
                 let dayNum    = Int(g[0]) ?? 1
                 let isDH      = !g[1].trimmingCharacters(in: .whitespaces).isEmpty
                 let rawFlight = g[2]
-                // Preserve the original digits (including leading zeros) so numeric
-                // and 5X-prefixed flights normalize to the same "XX…" form.
+                // Preserve explicit airline codes; numeric company flights receive
+                // their real 5X prefix while keeping leading zeros.
                 let flightNum = FlightNumberNormalizer.displayValue(rawFlight)
                 let dep       = g[3], arr = g[4]
                 let depUTC    = g[5], depLT = g[6]

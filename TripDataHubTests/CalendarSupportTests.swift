@@ -59,6 +59,24 @@ final class CalendarBidPeriodGenerationTests: XCTestCase {
         XCTAssertEqual(bidPeriod(for: period!.endDateUTC)?.id, "BP27-01")
     }
 
+    func test_bidPeriodWindow_keepsTwoPeriodsOnEachSide() throws {
+        let center = try XCTUnwrap(bidPeriod(identifier: "BP26-04"))
+
+        XCTAssertEqual(
+            bidPeriodWindow(centeredOn: center, previousCount: 2, nextCount: 2).map(\.id),
+            ["BP26-02", "BP26-03", "BP26-04", "BP26-05", "BP26-06"]
+        )
+    }
+
+    func test_bidPeriodWindow_clampsAtKnownCalendarEdges() throws {
+        let center = try XCTUnwrap(bidPeriod(identifier: "BP26-01"))
+
+        XCTAssertEqual(
+            bidPeriodWindow(centeredOn: center, previousCount: 2, nextCount: 2).map(\.id),
+            ["BP26-01", "BP26-02", "BP26-03"]
+        )
+    }
+
     func test_bidPeriod_matchesPayPeriodPairs() {
         let bp2604 = bidPeriod(for: Self.iso.date(from: "2026-05-17T12:00:00Z")!)
         XCTAssertEqual(bp2604?.id, "BP26-04")
@@ -1343,6 +1361,24 @@ final class TimelineChronologySupportTests: XCTestCase {
             XCTAssertEqual(entryLeg.id, flight.id)
         } else {
             XCTFail("Flight should remain in chronology after the manual duty")
+        }
+    }
+
+    /// Bid-period definitions are a hardcoded table that must be extended by hand.
+    /// When the table runs out, the calendar silently returns nil for every lookup
+    /// and the BP/PP UI stops working. This test fails ~90 days before the horizon
+    /// so a release goes red while there is still time to add the next year's table.
+    func test_bidPeriodDefinitions_coverAtLeastNinetyDaysAhead() {
+        let ninetyDaysAhead = Date().addingTimeInterval(90 * 24 * 60 * 60)
+        for domicile in ["ANC", "SDF"] {
+            XCTAssertNotNil(
+                bidPeriod(for: ninetyDaysAhead, domicile: domicile),
+                """
+                Bid-period table covers less than 90 days ahead for \(domicile). \
+                Append the next bid periods to bidPeriodDefinitions in BidPeriodService.swift \
+                (and the matching bid-event tables in iPadBidPeriodCalendarView.swift).
+                """
+            )
         }
     }
 }

@@ -164,10 +164,11 @@ actor ExternalOpenImportCoordinator {
 }
 
 private enum AppGroupImportConfig {
-    // NOTE: Must match constants in TripDataShareActionExtension/ShareViewController.swift
-    static let appGroupIdentifier = "group.com.sfune.BidProSchedule"
-    static let importDirectoryName = "CrewAccessSharedImports"
-    static let pendingHandoffFileName = "pending_import.json"
+    // Single source of truth shared with the share extension (compiled into both
+    // targets via AppGroupImportHandoff.swift).
+    static let appGroupIdentifier = AppGroupImportHandoff.appGroupIdentifier
+    static let importDirectoryName = AppGroupImportHandoff.directoryName
+    static let legacyManifestFileName = AppGroupImportHandoff.legacyManifestFileName
 }
 
 struct LogTenExportOutput: Identifiable, Sendable {
@@ -283,7 +284,7 @@ final class AppViewModel: ObservableObject {
     private var lastAutoFetchAt: Date?
     private var externalConsumerTask: Task<Void, Never>?
     private var pendingProfileUploadTask: Task<Void, Never>?
-    private var lastConsumedAppGroupHandoffFileName: String?
+    private var recentlyConsumedHandoffFileNames: Set<String> = []
     private var isConsumingAppGroupHandoff = false
     private var crewAccessLegImportReferenceTimes: [String: Date] = [:]
     private var logTenExportBacklog: [LogTenExportBacklogRecord] = []
@@ -642,39 +643,66 @@ final class AppViewModel: ObservableObject {
             guard let self else { return }
             defer { isConsumingAppGroupHandoff = false }
 
-            guard let handoff = await Task.detached(priority: .utility, operation: {
-                Self.readPendingAppGroupHandoff()
-            }).value else {
-                return
-            }
-
-            let fileExists = await Task.detached(priority: .utility, operation: {
-                FileManager.default.fileExists(atPath: handoff.fileURL.path)
+            let handoffs = await Task.detached(priority: .utility, operation: {
+                Self.readPendingAppGroupHandoffs()
             }).value
 
-            if lastConsumedAppGroupHandoffFileName == handoff.fileName {
-                logger.info("[Import] appGroup handoff skipped (already consumed) file=\(handoff.fileName, privacy: .private)")
+            guard !handoffs.isEmpty else {
+                // Nothing left to consume and nothing awaiting review: previously
+                // queued PDFs have been imported (and deleted by cleanup), so the
+                // session dedup set can reset instead of growing forever.
+                if pendingImport == nil {
+                    recentlyConsumedHandoffFileNames.removeAll()
+                }
+                // No pending share: opportunistically clear PDFs that were never
+                // consumed so the App Group container does not grow unbounded.
+                let protected = recentlyConsumedHandoffFileNames
                 await Task.detached(priority: .utility, operation: {
-                    Self.removePendingAppGroupHandoffBestEffort()
+                    Self.sweepStaleAppGroupImportFilesBestEffort(excludingFileNames: protected)
                 }).value
                 return
             }
 
-            guard fileExists else {
-                crewAccessImportMessage = "Import failed: shared PDF is missing. Please share the PDF again."
-                logNonFatal("AppGroup handoff missing shared file: \(handoff.fileURL.path)")
-                await Task.detached(priority: .utility, operation: {
-                    Self.removePendingAppGroupHandoffBestEffort()
+            // The queue files are the authoritative list of shared PDFs: only files
+            // the extension explicitly registered are imported — never other PDFs
+            // that happen to sit in the directory. Each queue file is deleted
+            // individually right after its entry is handled; a queue file written
+            // concurrently by the extension is untouched and picked up on the next
+            // consume, so a racing share can be delayed but never lost.
+            for handoff in handoffs {
+                defer {
+                    if let queueFileURL = handoff.queueFileURL {
+                        Task.detached(priority: .utility) {
+                            try? FileManager.default.removeItem(at: queueFileURL)
+                        }
+                    }
+                }
+
+                if recentlyConsumedHandoffFileNames.contains(handoff.fileName) {
+                    logger.info("[Import] appGroup handoff skipped (already consumed) file=\(handoff.fileName, privacy: .private)")
+                    continue
+                }
+
+                let fileExists = await Task.detached(priority: .utility, operation: {
+                    FileManager.default.fileExists(atPath: handoff.fileURL.path)
                 }).value
-                return
+                guard fileExists else {
+                    crewAccessImportMessage = "Import failed: shared PDF is missing. Please share the PDF again."
+                    logNonFatal("AppGroup handoff missing shared file: \(handoff.fileURL.path)")
+                    continue
+                }
+
+                logger.info("[Import] appGroup handoff queued file=\(handoff.fileName, privacy: .private)")
+                recentlyConsumedHandoffFileNames.insert(handoff.fileName)
+                queueExternalOpenURL(handoff.fileURL)
             }
 
-            logger.info("[Import] appGroup handoff queued file=\(handoff.fileName, privacy: .private)")
-            lastConsumedAppGroupHandoffFileName = handoff.fileName
+            // Never sweep a PDF that was queued for import (this pass or earlier in
+            // the session) — the import pipeline reads it asynchronously.
+            let protected = recentlyConsumedHandoffFileNames
             await Task.detached(priority: .utility, operation: {
-                Self.removePendingAppGroupHandoffBestEffort()
+                Self.sweepStaleAppGroupImportFilesBestEffort(excludingFileNames: protected)
             }).value
-            queueExternalOpenURL(handoff.fileURL)
         }
     }
 
@@ -732,8 +760,7 @@ final class AppViewModel: ObservableObject {
 
     private var isAppReviewMockVerifiedIdentity: Bool {
         guard let gemsID = verifiedIdentity?.gemsID else { return false }
-        let normalized = GEMSIDNormalizer.normalize(gemsID)
-        return normalized == "0000001" || normalized == "0000002"
+        return AppReviewDemo.isDemoGEMSID(gemsID)
     }
 
     var seniorityCount: Int { gemsVerificationRecordCount }
@@ -2263,19 +2290,16 @@ final class AppViewModel: ObservableObject {
         in rebuiltSchedules: [PayPeriodSchedule]
     ) -> [PayPeriodSchedule] {
         guard let gemsID = verifiedIdentity?.gemsID else { return rebuiltSchedules }
-        let mockSchedules: [PayPeriodSchedule]
-        switch GEMSIDNormalizer.normalize(gemsID) {
-        case "0000001":
-            mockSchedules = Self.appReviewPilotOneSchedules(updatedAt: Self.appReviewMockUpdatedAt)
-        case "0000002":
-            mockSchedules = [Self.appReviewPilotTwoSchedule(updatedAt: Self.appReviewMockUpdatedAt)]
-        default:
+        guard let mockSchedules = Self.appReviewMockSchedules(
+            for: gemsID,
+            updatedAt: Self.appReviewMockUpdatedAt
+        ) else {
             return rebuiltSchedules
         }
-
-        let mockIDs = Set(mockSchedules.map(\.id))
-        return (rebuiltSchedules.filter { !mockIDs.contains($0.id) } + mockSchedules)
-            .sorted { scheduleDisplaySortKey($0) < scheduleDisplaySortKey($1) }
+        return Self.replacingCachedAppReviewMockSchedules(
+            in: rebuiltSchedules,
+            with: mockSchedules
+        )
     }
 
     func deleteCrewAccessImportFiles(urls: [URL]) async {
@@ -3305,14 +3329,13 @@ final class AppViewModel: ObservableObject {
         logger.info("[Import] cleanupExternalFile skip (not managed path) url=\(url.absoluteString, privacy: .private)")
     }
 
-    private struct AppGroupPendingImportHandoff: Codable {
-        let fileName: String
-        let createdAtISO8601: String?
-    }
-
     private struct AppGroupPendingImportReference {
         let fileName: String
         let fileURL: URL
+        /// The per-share queue file this reference came from; nil when it came from
+        /// the legacy single-slot manifest. Deleted individually after consumption —
+        /// never as a bulk "clear everything" that could race a concurrent share.
+        let queueFileURL: URL?
     }
 
     private nonisolated static func appGroupImportDirectoryURL() -> URL? {
@@ -3322,27 +3345,94 @@ final class AppViewModel: ObservableObject {
         return container.appendingPathComponent(AppGroupImportConfig.importDirectoryName, isDirectory: true)
     }
 
-    private nonisolated static func readPendingAppGroupHandoff() -> AppGroupPendingImportReference? {
-        guard let directoryURL = appGroupImportDirectoryURL() else { return nil }
-        let handoffURL = directoryURL.appendingPathComponent(AppGroupImportConfig.pendingHandoffFileName, isDirectory: false)
-        guard FileManager.default.fileExists(atPath: handoffURL.path) else { return nil }
-        do {
-            let data = try Data(contentsOf: handoffURL)
-            let handoff = try JSONDecoder().decode(AppGroupPendingImportHandoff.self, from: data)
-            let fileURL = directoryURL.appendingPathComponent(handoff.fileName, isDirectory: false)
-            return AppGroupPendingImportReference(fileName: handoff.fileName, fileURL: fileURL)
-        } catch {
-            logger.error("[Import] appGroup handoff decode failed error=\(error.localizedDescription, privacy: .public)")
-            removePendingAppGroupHandoffBestEffort()
-            return nil
+    private nonisolated static func readPendingAppGroupHandoffs() -> [AppGroupPendingImportReference] {
+        guard let directoryURL = appGroupImportDirectoryURL() else { return [] }
+        let fm = FileManager.default
+        var references: [AppGroupPendingImportReference] = []
+
+        // Per-share queue files (current format). Sorted by share timestamp so a
+        // rapid multi-share imports in the order the user shared.
+        let queueFileURLs = ((try? fm.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )) ?? [])
+            .filter { AppGroupImportHandoff.isQueueFileName($0.lastPathComponent) }
+
+        var queueReferences: [(createdAt: String, reference: AppGroupPendingImportReference)] = []
+        for queueFileURL in queueFileURLs {
+            guard let data = try? Data(contentsOf: queueFileURL),
+                  let entry = AppGroupImportHandoff.decodeEntries(from: data).first else {
+                logger.error("[Import] appGroup queue file unreadable — discarding name=\(queueFileURL.lastPathComponent, privacy: .private)")
+                try? fm.removeItem(at: queueFileURL)
+                continue
+            }
+            queueReferences.append((
+                createdAt: entry.createdAtISO8601 ?? "",
+                reference: AppGroupPendingImportReference(
+                    fileName: entry.fileName,
+                    fileURL: directoryURL.appendingPathComponent(entry.fileName, isDirectory: false),
+                    queueFileURL: queueFileURL
+                )
+            ))
         }
+        references += queueReferences
+            .sorted { $0.createdAt < $1.createdAt }
+            .map(\.reference)
+
+        // Legacy single-slot manifest from a pre-update extension. Read once here;
+        // consumed entries delete it. New code never writes this file, so deleting
+        // it after consumption cannot race a concurrent share.
+        let legacyURL = directoryURL.appendingPathComponent(AppGroupImportConfig.legacyManifestFileName, isDirectory: false)
+        if let data = try? Data(contentsOf: legacyURL) {
+            let entries = AppGroupImportHandoff.decodeEntries(from: data)
+            if entries.isEmpty {
+                logger.error("[Import] appGroup legacy manifest unreadable — discarding")
+                try? fm.removeItem(at: legacyURL)
+            }
+            references += entries.map { entry in
+                AppGroupPendingImportReference(
+                    fileName: entry.fileName,
+                    fileURL: directoryURL.appendingPathComponent(entry.fileName, isDirectory: false),
+                    queueFileURL: legacyURL
+                )
+            }
+        }
+
+        return references
     }
 
-    private nonisolated static func removePendingAppGroupHandoffBestEffort() {
+    /// Deletes share-directory PDFs and queue files that were never consumed
+    /// (e.g. leftovers of a failed import). Without this the App Group container
+    /// grows forever. `excludingFileNames` protects PDFs that were queued for
+    /// import in this session: a share left unconsumed past the age threshold is
+    /// still queued by consume, and the sweep must not delete it out from under
+    /// the (asynchronous) import pipeline.
+    private nonisolated static func sweepStaleAppGroupImportFilesBestEffort(
+        olderThanDays days: Int = 7,
+        excludingFileNames excluded: Set<String> = []
+    ) {
         guard let directoryURL = appGroupImportDirectoryURL() else { return }
-        let handoffURL = directoryURL.appendingPathComponent(AppGroupImportConfig.pendingHandoffFileName, isDirectory: false)
-        guard FileManager.default.fileExists(atPath: handoffURL.path) else { return }
-        try? FileManager.default.removeItem(at: handoffURL)
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: [.creationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        let cutoff = Date().addingTimeInterval(-Double(days) * 24 * 60 * 60)
+        for url in entries {
+            let name = url.lastPathComponent
+            guard !excluded.contains(name) else { continue }
+            let isSweepable = url.pathExtension.lowercased() == "pdf"
+                || AppGroupImportHandoff.isQueueFileName(name)
+                || name == AppGroupImportConfig.legacyManifestFileName
+            guard isSweepable else { continue }
+            let created = (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+            if created < cutoff {
+                try? fm.removeItem(at: url)
+            }
+        }
     }
 
     private nonisolated static func readCrewAccessTripHeader(from url: URL) -> CrewAccessTripHeader? {
@@ -4283,30 +4373,24 @@ final class AppViewModel: ObservableObject {
     }
 
     private func appReviewMockVerificationResult(gemsID: String, normalizedDOB: String) -> GEMSVerificationResult? {
-        guard normalizedDOB == "01/01/1990" else { return nil }
-        switch GEMSIDNormalizer.normalize(gemsID) {
-        case "0000001", "0000002":
-            return GEMSVerificationResult(gemsID: gemsID, domicile: DomicileSupport.defaultDomicile)
-        default:
-            return nil
-        }
+        guard AppReviewDemo.isDemoCredential(gemsID: gemsID, normalizedDOB: normalizedDOB) else { return nil }
+        return GEMSVerificationResult(gemsID: gemsID, domicile: DomicileSupport.defaultDomicile)
     }
 
     private func linkAppReviewMockFriendIfNeeded(myGEMSID: String, friendGEMSID: String) -> Bool {
-        let my = GEMSIDNormalizer.normalize(myGEMSID)
-        let friend = GEMSIDNormalizer.normalize(friendGEMSID)
-        guard my == "0000001", friend == "0000002" else { return false }
+        guard AppReviewDemo.role(for: myGEMSID) == .pilotOne,
+              AppReviewDemo.role(for: friendGEMSID) == .pilotTwo else { return false }
 
         let linkedAt = Date()
         upsertAppReviewMockPilotTwoFriend(linkedAt: linkedAt)
         friendCloudKitSyncMessage = "App Review mock friend linked locally."
-        friendActionMessage = "Friend linked: \(friend)"
+        friendActionMessage = "Friend linked: \(AppReviewDemo.pilotTwoGEMSID)"
         return true
     }
 
     private func upsertAppReviewMockPilotTwoFriend(linkedAt: Date) {
         enableScheduleSharingForFriends()
-        let friend = "0000002"
+        let friend = AppReviewDemo.pilotTwoGEMSID
         let existing = friendConnections.first { $0.employeeID == friend }
         let mockFriend = FriendConnection(
             id: existing?.id ?? UUID(),
@@ -4330,24 +4414,17 @@ final class AppViewModel: ObservableObject {
 
     private func seedAppReviewMockScheduleIfNeeded(for gemsID: String) {
         let normalized = GEMSIDNormalizer.normalize(gemsID)
-        let mockSchedules: [PayPeriodSchedule]
-        switch normalized {
-        case "0000001":
-            mockSchedules = Self.appReviewPilotOneSchedules(updatedAt: Self.appReviewMockUpdatedAt)
-        case "0000002":
-            mockSchedules = [Self.appReviewPilotTwoSchedule(updatedAt: Self.appReviewMockUpdatedAt)]
-        default:
+        guard let mockSchedules = Self.appReviewMockSchedules(
+            for: normalized,
+            updatedAt: Self.appReviewMockUpdatedAt
+        ) else {
             return
         }
 
-        let mockScheduleIDs = Set(mockSchedules.map(\.id))
-        let mockPairings = Set(mockSchedules.flatMap { $0.legs.map(\.pairing) })
-        var updatedCrewAccess = crewAccessSchedules.filter { existing in
-            !mockScheduleIDs.contains(existing.id)
-                && existing.legs.allSatisfy { !mockPairings.contains($0.pairing) }
-        }
-        updatedCrewAccess.append(contentsOf: mockSchedules)
-        updatedCrewAccess.sort { $0.label < $1.label }
+        let updatedCrewAccess = Self.replacingCachedAppReviewMockSchedules(
+            in: crewAccessSchedules,
+            with: mockSchedules
+        )
         crewAccessSchedules = updatedCrewAccess
         schedules = mergeAndSortSchedules(crew: updatedCrewAccess, bidpro: bidproSchedules)
         let persistedLastSyncAt = lastSyncAt ?? Date()
@@ -4366,10 +4443,54 @@ final class AppViewModel: ObservableObject {
         }
         let pairings = mockSchedules.compactMap { $0.legs.first?.pairing }.joined(separator: ", ")
         lastImportSummaryMessage = "Loaded App Review sample trips \(pairings)."
-        if normalized == "0000001",
-           friendConnections.contains(where: { $0.employeeID == "0000002" }) {
+        if AppReviewDemo.role(for: normalized) == .pilotOne,
+           friendConnections.contains(where: { $0.employeeID == AppReviewDemo.pilotTwoGEMSID }) {
             upsertAppReviewMockPilotTwoFriend(linkedAt: Date())
         }
+    }
+
+    static func replacingCachedAppReviewMockSchedules(
+        in schedules: [PayPeriodSchedule],
+        for gemsID: String,
+        updatedAt: Date
+    ) -> [PayPeriodSchedule] {
+        guard let mockSchedules = appReviewMockSchedules(for: gemsID, updatedAt: updatedAt) else {
+            return schedules
+        }
+        return replacingCachedAppReviewMockSchedules(in: schedules, with: mockSchedules)
+    }
+
+    private static func appReviewMockSchedules(
+        for gemsID: String,
+        updatedAt: Date
+    ) -> [PayPeriodSchedule]? {
+        switch AppReviewDemo.role(for: gemsID) {
+        case .pilotOne:
+            return appReviewPilotOneSchedules(updatedAt: updatedAt)
+        case .pilotTwo:
+            return [appReviewPilotTwoSchedule(updatedAt: updatedAt)]
+        case nil:
+            return nil
+        }
+    }
+
+    private static func replacingCachedAppReviewMockSchedules(
+        in schedules: [PayPeriodSchedule],
+        with selectedAccountSchedules: [PayPeriodSchedule]
+    ) -> [PayPeriodSchedule] {
+        let allMockSchedules =
+            appReviewPilotOneSchedules(updatedAt: appReviewMockUpdatedAt)
+            + [appReviewPilotTwoSchedule(updatedAt: appReviewMockUpdatedAt)]
+        let allMockIDs = Set(allMockSchedules.map(\.id))
+        let allMockPairings = Set(allMockSchedules.flatMap { $0.legs.map(\.pairing) })
+        return (
+            schedules.filter { existing in
+                !allMockIDs.contains(existing.id)
+                    && existing.legs.allSatisfy { !allMockPairings.contains($0.pairing) }
+            }
+            + selectedAccountSchedules
+        )
+        .sorted { $0.label < $1.label }
     }
 
     /// Fixed timestamp for App Review demo schedules. Using a constant (rather than
@@ -5228,8 +5349,12 @@ final class AppViewModel: ObservableObject {
         return false
     }
 
+    /// Failures that are recoverable but should never be invisible. Logged at
+    /// `.error` so they persist in the unified log store and stand out in Console;
+    /// `.public` is kept deliberately because these messages are the only signal
+    /// in TestFlight sysdiagnose captures.
     private func logNonFatal(_ message: String) {
-        logger.info("\(message, privacy: .public)")
+        logger.error("\(message, privacy: .public)")
     }
 
     private func isServerDownError(_ error: Error) -> Bool {

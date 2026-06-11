@@ -238,10 +238,11 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertEqual(matches.flightMatchesByLegID[myLegID]?.count, 1)
     }
 
-    func test_normalizedFlightNumber_preservesExplicitXXPrefix() {
+    func test_normalizedFlightNumber_preservesAirlinePrefixAndAddsCompanyPrefixToDigits() {
         XCTAssertEqual(SharedScheduleExporter.normalizedFlightNumber("XX003"), "XX003")
-        XCTAssertEqual(SharedScheduleExporter.normalizedFlightNumber("003"), "XX003")
-        XCTAssertEqual(SharedScheduleExporter.normalizedFlightNumber("5X003"), "XX003")
+        XCTAssertEqual(SharedScheduleExporter.normalizedFlightNumber("003"), "5X003")
+        XCTAssertEqual(SharedScheduleExporter.normalizedFlightNumber("5X003"), "5X003")
+        XCTAssertEqual(SharedScheduleExporter.normalizedFlightNumber("UA123"), "UA123")
     }
 
     func test_friendCloudKitRequest_usesOneRecordForBothDirections() async throws {

@@ -63,6 +63,40 @@ final class ProfileSyncTests: XCTestCase {
         XCTAssertEqual(leg.displayFlightNumberText, "XX001")
     }
 
+    func test_tripLegDisplay_usesCompanyPrefixForNumericFlight() {
+        let leg = TripLeg(
+            payPeriod: "PP26-07",
+            pairing: "A12345",
+            leg: 1,
+            flight: "123",
+            depAirport: "ANC",
+            depLocal: "2026-06-14 05:00",
+            arrAirport: "SDF",
+            arrLocal: "2026-06-14 15:00",
+            status: "-",
+            block: "06:00"
+        )
+
+        XCTAssertEqual(leg.displayFlightNumberText, "5X123")
+    }
+
+    func test_tripLegDisplay_preservesCommercialDeadheadAirlinePrefix() {
+        let leg = TripLeg(
+            payPeriod: "PP26-07",
+            pairing: "A12345",
+            leg: 2,
+            flight: "UA123",
+            depAirport: "SDF",
+            depLocal: "2026-06-15 05:00",
+            arrAirport: "ORD",
+            arrLocal: "2026-06-15 06:30",
+            status: "CML",
+            block: "01:30"
+        )
+
+        XCTAssertEqual(leg.displayFlightNumberText, "CML UA123")
+    }
+
     func test_appReviewSchedules_matchFriendFlightAndLayover() throws {
         let now = Date(timeIntervalSince1970: 1_780_000_000)
         let mySchedules = AppViewModel.appReviewPilotOneSchedules(updatedAt: now)
@@ -81,6 +115,22 @@ final class ProfileSyncTests: XCTestCase {
 
         XCTAssertEqual(matches.flightMatchesByLegID[sharedFlightLeg.id]?.count, 1)
         XCTAssertEqual(matches.restOverlapsByArrivalLegID[hndArrivalLeg.id]?.count, 1)
+    }
+
+    func test_appReviewScheduleReplacement_removesPreviousDemoAccountTrips() {
+        let now = Date(timeIntervalSince1970: 1_780_000_000)
+        let pilotTwo = AppViewModel.appReviewPilotTwoSchedule(updatedAt: now)
+        let pilotTwoPairings = Set(pilotTwo.legs.map(\.pairing))
+
+        let result = AppViewModel.replacingCachedAppReviewMockSchedules(
+            in: [pilotTwo],
+            for: "0000001",
+            updatedAt: now
+        )
+        let resultPairings = Set(result.flatMap { $0.legs.map(\.pairing) })
+
+        XCTAssertTrue(resultPairings.isDisjoint(with: pilotTwoPairings))
+        XCTAssertEqual(resultPairings, ["A00001", "A00010", "A00020"])
     }
 
     func test_iataResolver_resolvesHangzhouAirport() {

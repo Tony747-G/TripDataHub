@@ -50,25 +50,78 @@ private let bidPeriodUTCCalendar: Calendar = {
     return calendar
 }()
 
+/// Bid-period definitions are a fixed table and domiciles are a small fixed set,
+/// so every derived value (calendar, boundary date, full CalendarBidPeriod) is
+/// deterministic and cacheable forever. Uncached, one bidPeriod(for:) lookup
+/// created ~42 DateFormatters (14 definitions × 3 boundary computations) — the
+/// dominant cost behind slow calendar opens.
+private final class BidPeriodComputationCache: @unchecked Sendable {
+    static let shared = BidPeriodComputationCache()
+    private let lock = NSLock()
+    private var calendarsByTimeZoneID: [String: Calendar] = [:]
+    private var boundariesByKey: [String: Date] = [:]
+    private var bidPeriodsByKey: [String: CalendarBidPeriod] = [:]
+
+    func calendar(for timeZone: TimeZone) -> Calendar {
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached = calendarsByTimeZoneID[timeZone.identifier] { return cached }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        calendarsByTimeZoneID[timeZone.identifier] = calendar
+        return calendar
+    }
+
+    func boundary(raw: String, timeZone: TimeZone, compute: () -> Date) -> Date {
+        let key = "\(raw)|\(timeZone.identifier)"
+        lock.lock()
+        if let cached = boundariesByKey[key] {
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+        let value = compute()
+        lock.lock()
+        boundariesByKey[key] = value
+        lock.unlock()
+        return value
+    }
+
+    func bidPeriod(id: String, timeZone: TimeZone, compute: () -> CalendarBidPeriod) -> CalendarBidPeriod {
+        let key = "\(id)|\(timeZone.identifier)"
+        lock.lock()
+        if let cached = bidPeriodsByKey[key] {
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+        let value = compute()
+        lock.lock()
+        bidPeriodsByKey[key] = value
+        lock.unlock()
+        return value
+    }
+}
+
 private func bidPeriodDomicileCalendar(for domicile: String?) -> Calendar {
-    var calendar = Calendar(identifier: .gregorian)
-    calendar.timeZone = DomicileSupport.timeZone(for: domicile)
-    return calendar
+    BidPeriodComputationCache.shared.calendar(for: DomicileSupport.timeZone(for: domicile))
 }
 
 private func bidPeriodBoundaryUTCDate(_ raw: String, domicile: String?) -> Date {
     let calendar = bidPeriodDomicileCalendar(for: domicile)
-    let formatter = DateFormatter()
-    formatter.calendar = calendar
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.timeZone = calendar.timeZone
-    formatter.dateFormat = "yyyy-MM-dd HH:mm"
-    // PP/BP operational boundaries are 03:00 Local Domicile Time for the pilot's base.
-    // The returned Date is UTC absolute time.
-    guard let date = formatter.date(from: "\(raw) 03:00") else {
-        preconditionFailure("Invalid bid period date: \(raw)")
+    return BidPeriodComputationCache.shared.boundary(raw: raw, timeZone: calendar.timeZone) {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        // PP/BP operational boundaries are 03:00 Local Domicile Time for the pilot's base.
+        // The returned Date is UTC absolute time.
+        guard let date = formatter.date(from: "\(raw) 03:00") else {
+            preconditionFailure("Invalid bid period date: \(raw)")
+        }
+        return date
     }
-    return date
 }
 
 private func bidPeriodStartBoundaryUTC(for definition: BidPeriodDefinition, domicile: String?) -> Date {
@@ -100,18 +153,24 @@ func bidPeriod(for dateUTC: Date, domicile: String = DomicileSupport.defaultDomi
         return nil
     }
 
-    let startBoundaryUTC = bidPeriodStartBoundaryUTC(for: matchingDefinition, domicile: domicile)
-    let days = generateBidPeriodDays(
-        startUTC: startBoundaryUTC,
-        payPeriodCount: matchingDefinition.payPeriodCount,
-        domicile: domicile
-    )
-    return CalendarBidPeriod(
-        id: matchingDefinition.id,
-        startDateUTC: startBoundaryUTC,
-        endDateUTC: bidPeriodEndBoundaryUTC(for: matchingDefinition, domicile: domicile),
-        days: days
-    )
+    return cachedBidPeriod(for: matchingDefinition, domicile: domicile)
+}
+
+private func cachedBidPeriod(for definition: BidPeriodDefinition, domicile: String) -> CalendarBidPeriod {
+    let timeZone = DomicileSupport.timeZone(for: domicile)
+    return BidPeriodComputationCache.shared.bidPeriod(id: definition.id, timeZone: timeZone) {
+        let startBoundaryUTC = bidPeriodStartBoundaryUTC(for: definition, domicile: domicile)
+        return CalendarBidPeriod(
+            id: definition.id,
+            startDateUTC: startBoundaryUTC,
+            endDateUTC: bidPeriodEndBoundaryUTC(for: definition, domicile: domicile),
+            days: generateBidPeriodDays(
+                startUTC: startBoundaryUTC,
+                payPeriodCount: definition.payPeriodCount,
+                domicile: domicile
+            )
+        )
+    }
 }
 
 func bidPeriod(identifier: String, domicile: String = DomicileSupport.defaultDomicile) -> CalendarBidPeriod? {
@@ -120,18 +179,28 @@ func bidPeriod(identifier: String, domicile: String = DomicileSupport.defaultDom
         return nil
     }
 
-    let startBoundaryUTC = bidPeriodStartBoundaryUTC(for: definition, domicile: domicile)
-    let days = generateBidPeriodDays(
-        startUTC: startBoundaryUTC,
-        payPeriodCount: definition.payPeriodCount,
-        domicile: domicile
-    )
-    return CalendarBidPeriod(
-        id: definition.id,
-        startDateUTC: startBoundaryUTC,
-        endDateUTC: bidPeriodEndBoundaryUTC(for: definition, domicile: domicile),
-        days: days
-    )
+    return cachedBidPeriod(for: definition, domicile: domicile)
+}
+
+func bidPeriodWindow(
+    centeredOn center: CalendarBidPeriod,
+    previousCount: Int,
+    nextCount: Int,
+    domicile: String = DomicileSupport.defaultDomicile
+) -> [CalendarBidPeriod] {
+    guard previousCount >= 0,
+          nextCount >= 0,
+          let centerIndex = bidPeriodDefinitions.firstIndex(where: { $0.id == center.id })
+    else {
+        return [center]
+    }
+
+    let lowerBound = max(0, centerIndex - previousCount)
+    let upperBound = min(bidPeriodDefinitions.count - 1, centerIndex + nextCount)
+
+    return bidPeriodDefinitions[lowerBound...upperBound].compactMap {
+        bidPeriod(identifier: $0.id, domicile: domicile)
+    }
 }
 
 func generateBidPeriodDays(startUTC: Date, payPeriodCount: Int = 2) -> [CalendarDay] {

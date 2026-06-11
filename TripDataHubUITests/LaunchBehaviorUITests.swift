@@ -10,10 +10,6 @@ final class LaunchBehaviorUITests: XCTestCase {
         app.launchArguments += ["UITEST_TIMELINE_SEED"]
         app.launch()
 
-        let timelineTab = app.tabBars.buttons["Timeline"]
-        XCTAssertTrue(timelineTab.waitForExistence(timeout: 5))
-        timelineTab.tap()
-
         // Use matching(identifier:) rather than subscript to ensure lookup by accessibility identifier.
         let dateHeader = app.staticTexts.matching(identifier: "timeline.dayHeader.2026-06-09").firstMatch
         XCTAssertTrue(dateHeader.waitForExistence(timeout: 10))
@@ -29,9 +25,7 @@ final class LaunchBehaviorUITests: XCTestCase {
         app.launchArguments += ["UITEST_LOGGED_OUT_VERIFIED"]
         app.launch()
 
-        let settingsTab = app.tabBars.buttons["Settings"]
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
-        settingsTab.tap()
+        openSettings(in: app)
 
         let loginButton = app.buttons["settings.tripboardAction"]
         XCTAssertTrue(loginButton.waitForExistence(timeout: 5))
@@ -44,9 +38,7 @@ final class LaunchBehaviorUITests: XCTestCase {
         app.launchArguments += ["UITEST_OPENTIME_DEMO"]
         app.launch()
 
-        let settingsTab = app.tabBars.buttons["Settings"]
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
-        settingsTab.tap()
+        openSettings(in: app)
 
         let demoSwitch = app.switches["settings.openTimeDemoMode"]
         XCTAssertTrue(demoSwitch.waitForExistence(timeout: 5))
@@ -54,6 +46,53 @@ final class LaunchBehaviorUITests: XCTestCase {
         let demoLoadButton = app.buttons["settings.tripboardAction"]
         XCTAssertTrue(demoLoadButton.waitForExistence(timeout: 5))
         XCTAssertEqual(demoLoadButton.label, "Load Demo OpenTime")
+    }
+
+    func test_phoneNavigationUsesExpandableMenuWithoutTabBar() {
+        let app = XCUIApplication()
+        app.launchArguments += ["UITEST_TIMELINE_SEED"]
+        app.launch()
+
+        XCTAssertEqual(app.tabBars.count, 0)
+
+        let menuButton = app.buttons["Open Menu"]
+        XCTAssertTrue(menuButton.waitForExistence(timeout: 5))
+        menuButton.tap()
+
+        XCTAssertTrue(app.buttons["Timeline"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["Calendar"].exists)
+        XCTAssertTrue(app.buttons["Browser"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["Add Event"].exists)
+        XCTAssertTrue(app.buttons["Settings"].exists)
+
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "iPhone expandable navigation menu"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        app.buttons["Calendar"].tap()
+        // Match any bid-period header rather than a hardcoded id: the calendar
+        // opens on *today's* BP, so a literal like "BP26-04" rots as soon as the
+        // next bid period starts.
+        let bidPeriodHeader = app.staticTexts
+            .matching(NSPredicate(format: "label MATCHES %@", #"BP\d{2}-\d{2}"#))
+            .firstMatch
+        XCTAssertTrue(bidPeriodHeader.waitForExistence(timeout: 5))
+
+        let calendarScreenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        calendarScreenshot.name = "iPhone calendar layout"
+        calendarScreenshot.lifetime = .keepAlways
+        add(calendarScreenshot)
+    }
+
+    private func openSettings(in app: XCUIApplication) {
+        let menuButton = app.buttons["Open Menu"]
+        XCTAssertTrue(menuButton.waitForExistence(timeout: 5))
+        menuButton.tap()
+
+        let settingsButton = app.buttons["Settings"]
+        XCTAssertTrue(settingsButton.waitForExistence(timeout: 2))
+        settingsButton.tap()
     }
 
 }

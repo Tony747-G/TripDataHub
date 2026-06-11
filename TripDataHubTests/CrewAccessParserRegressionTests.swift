@@ -65,7 +65,7 @@ final class CrewAccessParserRegressionTests: XCTestCase {
         XCTAssertEqual(payload.tripId, "A00001")
         XCTAssertEqual(payload.crew.count, 0)
         XCTAssertEqual(payload.items.count, 3)
-        XCTAssertEqual(payload.items.map(\.flight), ["XX001", "XX002", "XX003"])
+        XCTAssertEqual(payload.items.map(\.flight), ["5X001", "5X002", "5X003"])
         XCTAssertEqual(payload.items.map(\.depAirport), ["ANC", "CVG", "HND"])
         XCTAssertEqual(payload.items.map(\.arrAirport), ["CVG", "HND", "ANC"])
         XCTAssertEqual(payload.items.map(\.deadhead), [false, false, true])

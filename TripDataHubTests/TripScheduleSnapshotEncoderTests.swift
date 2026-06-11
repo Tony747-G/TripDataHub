@@ -20,7 +20,7 @@ final class TripScheduleSnapshotEncoderTests: XCTestCase {
         XCTAssertEqual(payload.owner.displayName, "0554744")
         XCTAssertEqual(payload.scheduleItems.count, 1)
         XCTAssertEqual(payload.scheduleItems[0].type, "flight")
-        XCTAssertEqual(payload.scheduleItems[0].label, "XX123 ANC-SDF")
+        XCTAssertEqual(payload.scheduleItems[0].label, "5X123 ANC-SDF")
         XCTAssertEqual(payload.scheduleItems[0].startUTC, "2026-05-05T10:00:00Z")
         XCTAssertEqual(payload.scheduleItems[0].endUTC, "2026-05-05T17:30:00Z")
     }
@@ -115,7 +115,7 @@ final class TripScheduleSnapshotEncoderTests: XCTestCase {
             now: iso("2026-05-04T00:00:00Z")
         )
 
-        XCTAssertEqual(payload.scheduleItems.map(\.label), ["XX050 SDF-ONT", "XX100 ANC-SDF"])
+        XCTAssertEqual(payload.scheduleItems.map(\.label), ["5X050 SDF-ONT", "5X100 ANC-SDF"])
     }
 
     func test_currentTrip_setWhenNowIsWithinTrip() {
@@ -192,7 +192,7 @@ final class TripScheduleSnapshotEncoderTests: XCTestCase {
             now: iso("2026-05-04T20:00:00Z")
         )
 
-        XCTAssertEqual(payload.nextFlight?.flightNumber, "XX002")
+        XCTAssertEqual(payload.nextFlight?.flightNumber, "5X002")
         XCTAssertEqual(payload.nextFlight?.departureAirport, "SDF")
         XCTAssertEqual(payload.nextFlight?.arrivalAirport, "ONT")
     }
@@ -263,7 +263,7 @@ final class TripScheduleSnapshotEncoderTests: XCTestCase {
         XCTAssertEqual(payload.trips[0].route, "ANC-SDF-ONT")
         XCTAssertEqual(payload.trips[0].hotelDetails, ["Hotel details SDF: Test Hotel / +1 555 0100"])
         XCTAssertEqual(payload.trips[0].dutyTotals, ["Duty 1 Time 12:30 Block 9:00 Rest 24:00"])
-        XCTAssertEqual(payload.scheduleItems.map(\.label), ["XX100 ANC-SDF", "XX101 SDF-ONT"])
+        XCTAssertEqual(payload.scheduleItems.map(\.label), ["5X100 ANC-SDF", "5X101 SDF-ONT"])
     }
 
     func test_crewAccessTrips_buildsTimelineCardsWithLayover() {
@@ -275,7 +275,7 @@ final class TripScheduleSnapshotEncoderTests: XCTestCase {
 
         XCTAssertEqual(payload.timelineCards.map(\.type), ["flight", "layover", "flight"])
         XCTAssertEqual(payload.timelineCards[0].title, "ANC - SDF")
-        XCTAssertEqual(payload.timelineCards[0].subtitle, "XX100")
+        XCTAssertEqual(payload.timelineCards[0].subtitle, "5X100")
         XCTAssertEqual(payload.timelineCards[0].detail, "Block: 4:00")
         XCTAssertEqual(payload.timelineCards[1].title, "Layover at SDF")
         XCTAssertEqual(payload.timelineCards[1].hotelName, "Test Hotel")
@@ -323,9 +323,9 @@ final class TripScheduleSnapshotEncoderTests: XCTestCase {
         )
 
         let flightCards = payload.timelineCards.filter { $0.type == "flight" }
-        XCTAssertEqual(flightCards[0].subtitle, "DH XX100")
+        XCTAssertEqual(flightCards[0].subtitle, "DH 5X100")
         XCTAssertEqual(flightCards[0].icon, "paperplane")
-        XCTAssertEqual(flightCards[1].subtitle, "XX101")
+        XCTAssertEqual(flightCards[1].subtitle, "5X101")
         XCTAssertEqual(flightCards[1].icon, "airplane")
     }
 
