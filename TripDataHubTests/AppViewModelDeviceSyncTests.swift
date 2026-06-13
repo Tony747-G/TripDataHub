@@ -172,6 +172,32 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         XCTAssertEqual(vm.crewAccessSchedules[0].id, "CA26-local")
     }
 
+    func test_fetchCrewAccessImports_retriesPreviouslySkippedLocalUpload() async throws {
+        try removeCrewAccessImportDirectory()
+        defer { try? removeCrewAccessImportDirectory() }
+
+        let fileName = "2026-06-01_RETRY01.json"
+        let payload = makeCrewAccessJSON(
+            tripId: "RETRY01",
+            tripInformationDate: "01Jun2026",
+            startUtc: "2026-06-01T08:00:00Z",
+            endUtc: "2026-06-01T10:00:00Z"
+        )
+        try writeCrewAccessJSON(payload, fileName: fileName)
+
+        let importCloudKitService = CapturingCrewAccessImportCloudKitService()
+        let vm = makeViewModel(
+            deviceService: FakeDeviceScheduleCloudKitService(),
+            importCloudKitService: importCloudKitService
+        )
+        setVerifiedIdentity(on: vm)
+
+        await vm.fetchCrewAccessImportFilesIfNeeded(reason: "test recovery")
+
+        let uploadedFileNames = await importCloudKitService.uploadedFileNames
+        XCTAssertEqual(uploadedFileNames, [fileName])
+    }
+
     // MARK: - LogTen backlog survival
 
     func test_fetchDeviceSchedule_logTenBacklogSurvivesRemoteReplacement() async throws {
@@ -215,7 +241,8 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             friendScheduleCloudKitService: NoopFriendCloudKitService(),
             gemsVerificationCloudKitService: NoopGEMSVerificationService(),
             deviceScheduleCloudKitService: deviceService,
-            crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService()
+            crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService(),
+            keychainService: EmptyKeychainService()
         )
 
         let sampleURL = repositoryRootURL()
@@ -259,7 +286,8 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             friendScheduleCloudKitService: NoopFriendCloudKitService(),
             gemsVerificationCloudKitService: NoopGEMSVerificationService(),
             deviceScheduleCloudKitService: deviceService,
-            crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService()
+            crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService(),
+            keychainService: EmptyKeychainService()
         )
 
         let payload = makeCrewAccessJSON(
@@ -303,7 +331,8 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             friendScheduleCloudKitService: NoopFriendCloudKitService(),
             gemsVerificationCloudKitService: NoopGEMSVerificationService(),
             deviceScheduleCloudKitService: deviceService,
-            crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService()
+            crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService(),
+            keychainService: EmptyKeychainService()
         )
         setVerifiedIdentity(on: vm)
 
@@ -391,7 +420,8 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             friendScheduleCloudKitService: NoopFriendCloudKitService(),
             gemsVerificationCloudKitService: NoopGEMSVerificationService(),
             deviceScheduleCloudKitService: FakeDeviceScheduleCloudKitService(),
-            crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService()
+            crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService(),
+            keychainService: EmptyKeychainService()
         )
         setVerifiedIdentity(on: vm)
         vm.crewAccessSchedules = [
@@ -422,7 +452,10 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func makeViewModel(deviceService: DeviceScheduleCloudKitServicing) -> AppViewModel {
+    private func makeViewModel(
+        deviceService: DeviceScheduleCloudKitServicing,
+        importCloudKitService: CrewAccessImportCloudKitServicing = NoopCrewAccessImportCloudKitService()
+    ) -> AppViewModel {
         AppViewModel(
             syncService: NoopSyncService(),
             authService: NoopAuthService(),
@@ -432,7 +465,8 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             friendScheduleCloudKitService: NoopFriendCloudKitService(),
             gemsVerificationCloudKitService: NoopGEMSVerificationService(),
             deviceScheduleCloudKitService: deviceService,
-            crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService()
+            crewAccessImportCloudKitService: importCloudKitService,
+            keychainService: EmptyKeychainService()
         )
     }
 
@@ -714,6 +748,32 @@ private struct NoopCrewAccessImportCloudKitService: CrewAccessImportCloudKitServ
     ) async throws {}
 
     func fetchImportFiles(gemsID: String) async throws -> [CrewAccessImportCloudKitRecord] { [] }
+
+    func tombstoneImportFile(gemsID: String, fileName: String) async throws {}
+}
+
+private final class EmptyKeychainService: KeychainServiceProtocol {
+    func save(data: Data, account: String) throws {}
+    func load(account: String) throws -> Data? { nil }
+    func delete(account: String) throws {}
+}
+
+private actor CapturingCrewAccessImportCloudKitService: CrewAccessImportCloudKitServicing {
+    private(set) var uploadedFileNames: [String] = []
+
+    func uploadImportFile(
+        gemsID: String,
+        fileName: String,
+        jsonData: Data,
+        tripInformationDate: String?,
+        firstDepartureUTC: String?
+    ) async throws {
+        uploadedFileNames.append(fileName)
+    }
+
+    func fetchImportFiles(gemsID: String) async throws -> [CrewAccessImportCloudKitRecord] {
+        []
+    }
 
     func tombstoneImportFile(gemsID: String, fileName: String) async throws {}
 }

@@ -163,6 +163,7 @@ struct RootTabView: View {
     private var floatingMenu: some View {
         var items: [ExpandableFloatingMenuItem] = [
             ExpandableFloatingMenuItem(
+                id: "timeline",
                 icon: "list.bullet.rectangle",
                 label: "Timeline",
                 isActive: primaryScreen == .timeline
@@ -171,6 +172,7 @@ struct RootTabView: View {
                 timelineScrollTrigger += 1
             },
             ExpandableFloatingMenuItem(
+                id: "calendar",
                 icon: "calendar",
                 label: "Calendar",
                 isActive: primaryScreen == .calendar
@@ -179,22 +181,22 @@ struct RootTabView: View {
             }
         ]
         if AppEnvironment.isFriendSharingVisible {
-            items.append(ExpandableFloatingMenuItem(icon: "person.2", label: "Friends") {
+            items.append(ExpandableFloatingMenuItem(id: "friends", icon: "person.2", label: "Friends") {
                 showingFriends = true
             })
         }
         if AppEnvironment.isOpenTimeVisible {
-            items.append(ExpandableFloatingMenuItem(icon: "clock", label: "OpenTime") {
+            items.append(ExpandableFloatingMenuItem(id: "open-time", icon: "clock", label: "OpenTime") {
                 showingOpenTime = true
             })
         }
-        items.append(ExpandableFloatingMenuItem(icon: "globe", label: "Browser") {
+        items.append(ExpandableFloatingMenuItem(id: "browser", icon: "globe", label: "Browser") {
             showingBrowser = true
         })
-        items.append(ExpandableFloatingMenuItem(icon: "plus", label: "Add Event") {
+        items.append(ExpandableFloatingMenuItem(id: "add-event", icon: "plus", label: "Add Event") {
             showingAddEvent = true
         })
-        items.append(ExpandableFloatingMenuItem(icon: "gearshape", label: "Settings") {
+        items.append(ExpandableFloatingMenuItem(id: "settings", icon: "gearshape", label: "Settings") {
             showingSettings = true
         })
         return ExpandableFloatingMenu(isExpanded: $menuExpanded, items: items, itemSpacing: verticalMenuItemSpacing)

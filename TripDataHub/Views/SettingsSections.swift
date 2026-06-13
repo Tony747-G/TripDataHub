@@ -711,19 +711,22 @@ struct ManualEventDetailSheet: View {
 
     let operationalEvent: ManualOperationalEvent?
     let personalEvent: ManualPersonalEvent?
+    let onDismiss: (() -> Void)?
 
     @State private var showingEdit = false
     @State private var showingDeleteConfirm = false
     @State private var actionError: String?
 
-    init(operationalEvent: ManualOperationalEvent) {
+    init(operationalEvent: ManualOperationalEvent, onDismiss: (() -> Void)? = nil) {
         self.operationalEvent = operationalEvent
         self.personalEvent = nil
+        self.onDismiss = onDismiss
     }
 
-    init(personalEvent: ManualPersonalEvent) {
+    init(personalEvent: ManualPersonalEvent, onDismiss: (() -> Void)? = nil) {
         self.operationalEvent = nil
         self.personalEvent = personalEvent
+        self.onDismiss = onDismiss
     }
 
     private var title: String {
@@ -780,19 +783,19 @@ struct ManualEventDetailSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                    Button("Done") { closePresentation() }
                 }
             }
         }
         .sheet(isPresented: $showingEdit) {
             if let operationalEvent {
                 ManualEventAddSheet(editingOperationalEvent: operationalEvent) {
-                    dismiss()
+                    closePresentation()
                 }
                 .environmentObject(viewModel)
             } else if let personalEvent {
                 ManualEventAddSheet(editingPersonalEvent: personalEvent) {
-                    dismiss()
+                    closePresentation()
                 }
                 .environmentObject(viewModel)
             }
@@ -818,9 +821,17 @@ struct ManualEventDetailSheet: View {
             } else if let personalEvent {
                 try viewModel.deleteManualPersonalEvent(id: personalEvent.id)
             }
-            dismiss()
+            closePresentation()
         } catch {
             actionError = "Unable to delete event: \(error.localizedDescription)"
+        }
+    }
+
+    private func closePresentation() {
+        if let onDismiss {
+            onDismiss()
+        } else {
+            dismiss()
         }
     }
 

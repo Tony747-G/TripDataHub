@@ -7,8 +7,8 @@ struct ExpandableFloatingMenuItem: Identifiable {
     var isActive: Bool = false
     let action: () -> Void
 
-    init(icon: String, label: String, isActive: Bool = false, action: @escaping () -> Void) {
-        self.id = label
+    init(id: String, icon: String, label: String, isActive: Bool = false, action: @escaping () -> Void) {
+        self.id = id
         self.icon = icon
         self.label = label
         self.isActive = isActive

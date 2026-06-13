@@ -184,6 +184,30 @@ final class ProfileSyncTests: XCTestCase {
         XCTAssertEqual(ProfileSnapshot.loadFromLocalStorage(defaults: defaults), snapshot)
     }
 
+    func test_appViewModel_usesCachedVerificationBeforeCloudKitIdentityResolves() throws {
+        let identity = VerifiedIdentityProfile(
+            cloudKitRecordName: "_cached_cloudkit_record",
+            name: "Cached Pilot",
+            gemsID: "1234567",
+            domicile: "ANC",
+            equipment: "747",
+            seat: "CA",
+            dateOfHire: "2000-01-01",
+            isAdminEligible: false,
+            adminPolicyFingerprint: nil,
+            verifiedAt: Date()
+        )
+        let keychain = InMemoryKeychainService(
+            values: ["verified_identity_profile_v1": try JSONEncoder().encode(identity)]
+        )
+
+        let viewModel = AppViewModel(keychainService: keychain)
+
+        XCTAssertEqual(viewModel.verifiedIdentity, identity)
+        XCTAssertEqual(viewModel.currentCloudKitRecordName, identity.cloudKitRecordName)
+        XCTAssertTrue(viewModel.isIdentityVerified)
+    }
+
     func test_profileSnapshot_migratesLocalDatesIntoLegacyCloudRecord() {
         let remote = ProfileSnapshot(
             gemsID: "1234567",
@@ -883,6 +907,26 @@ final class ProfileSyncTests: XCTestCase {
 }
 
 // MARK: - Mock
+
+private final class InMemoryKeychainService: KeychainServiceProtocol {
+    private var values: [String: Data]
+
+    init(values: [String: Data] = [:]) {
+        self.values = values
+    }
+
+    func save(data: Data, account: String) throws {
+        values[account] = data
+    }
+
+    func load(account: String) throws -> Data? {
+        values[account]
+    }
+
+    func delete(account: String) throws {
+        values.removeValue(forKey: account)
+    }
+}
 
 final class MockProfileCloudKitService: ProfileCloudKitServicing, @unchecked Sendable {
     var fetchResult: ProfileSnapshot?

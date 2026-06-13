@@ -432,6 +432,11 @@ final class AppViewModel: ObservableObject {
         )
         let loadedVerifiedIdentity = loadVerifiedIdentity()
         self.verifiedIdentity = loadedVerifiedIdentity
+        if useCloudKitIdentity, let loadedVerifiedIdentity {
+            // Keep the locally verified account usable while CloudKit account status
+            // is still resolving or is restricted by device management.
+            self.currentCloudKitRecordName = loadedVerifiedIdentity.cloudKitRecordName
+        }
         // Re-save to drop any legacy fields from older app builds (e.g. DOB).
         if let loadedVerifiedIdentity {
             saveVerifiedIdentity(loadedVerifiedIdentity)
@@ -473,9 +478,7 @@ final class AppViewModel: ObservableObject {
             await MainActor.run {
                 self?.refreshCloudKitIdentity()
             }
-            // Fetch remote import files before reconcile so iPad gets iOS-imported files.
-            await self?.fetchCrewAccessImportFilesIfNeeded(reason: "startup")
-            await self?.applyCrewAccessRetentionPolicy()
+            await self?.recoverCloudSyncAfterIdentityAvailable(reason: "startup")
             await self?.refreshNotificationAuthorizationStatus()
             await self?.rescheduleNotificationsIfAuthorized()
             await self?.syncProfileWithCloudKit()
@@ -487,9 +490,7 @@ final class AppViewModel: ObservableObject {
             queue: nil
         ) { [weak self] _ in
             Task {
-                await self?.fetchCrewAccessImportFilesIfNeeded(reason: "foreground")
-                await self?.fetchDeviceScheduleIfNeeded(reason: "foreground")
-                await self?.fetchManualEventsIfNeeded(reason: "foreground")
+                await self?.recoverCloudSyncAfterIdentityAvailable(reason: "foreground")
                 await self?.syncProfileWithCloudKit()
             }
         }
@@ -1454,6 +1455,12 @@ final class AppViewModel: ObservableObject {
 
         do {
             let records = try await crewAccessImportCloudKitService.fetchImportFiles(gemsID: verifiedIdentity.gemsID)
+            let recordsByFileName = Dictionary(
+                records.map { ($0.fileName, $0) },
+                uniquingKeysWith: { current, candidate in
+                    candidate.updatedAt > current.updatedAt ? candidate : current
+                }
+            )
             var writtenCount = 0
             for record in records {
                 let url = dir.appendingPathComponent(record.fileName)
@@ -1478,6 +1485,26 @@ final class AppViewModel: ObservableObject {
                 guard localModifiedAt == nil || record.updatedAt > localModifiedAt! else { continue }
                 try? record.jsonData.write(to: fileURL)
                 writtenCount += 1
+            }
+
+            // Retry uploads that were skipped while identity or CloudKit was unavailable.
+            // Comparing payload bytes avoids rewriting every CloudKit record on each launch.
+            if fm.fileExists(atPath: dir.path) {
+                let localURLs = (try? fm.contentsOfDirectory(
+                    at: dir,
+                    includingPropertiesForKeys: nil,
+                    options: [.skipsHiddenFiles]
+                )) ?? []
+                for url in localURLs where url.pathExtension.lowercased() == "json" {
+                    guard let data = try? Data(contentsOf: url),
+                          let json = try? JSONDecoder().decode(CrewAccessTripJSON.self, from: data)
+                    else { continue }
+                    let remote = recordsByFileName[url.lastPathComponent]
+                    if remote?.deletedAt == nil, remote?.jsonData == data {
+                        continue
+                    }
+                    await uploadCrewAccessImportFile(at: url, json: json)
+                }
             }
             lastCrewAccessImportFetchAt = Date()
             UserDefaults.standard.set(lastCrewAccessImportFetchAt, forKey: crewAccessImportFetchAtKey)
@@ -1608,8 +1635,7 @@ final class AppViewModel: ObservableObject {
                     }
                     self.updateAdminStatus()
                     if self.isIdentityVerified {
-                        Task { await self.fetchDeviceScheduleIfNeeded(reason: "identity verified") }
-                        Task { await self.fetchManualEventsIfNeeded(reason: "identity verified") }
+                        self.logNonFatal("CloudKit identity confirmed for cached GEMS verification.")
                     }
                 case let .failure(error):
                     if case CloudKitIdentityFetchError.timeout = error {
@@ -1641,9 +1667,9 @@ final class AppViewModel: ObservableObject {
             }
             updateAdminStatus()
         case .restricted:
-            cloudKitIdentityMessage = "iCloud access is restricted on this device."
-            currentCloudKitRecordName = nil
-            updateAdminStatus()
+            keepCachedIdentityAfterTransientCloudKitFailure(
+                "iCloud access is restricted on this device. Using the locally verified GEMS identity."
+            )
         case .couldNotDetermine:
             keepCachedIdentityAfterTransientCloudKitFailure("CloudKit account status could not be confirmed. Using the last verified GEMS identity for now.")
         case .temporarilyUnavailable:
@@ -1660,6 +1686,19 @@ final class AppViewModel: ObservableObject {
             currentCloudKitRecordName = verifiedIdentity.cloudKitRecordName
         }
         updateAdminStatus()
+    }
+
+    private func recoverCloudSyncAfterIdentityAvailable(reason: String) async {
+        guard isIdentityVerified else { return }
+
+        // Download first, reconcile the local timeline, then retry uploads that may
+        // have been skipped during a prior restricted/offline session.
+        await fetchCrewAccessImportFilesIfNeeded(reason: reason)
+        await applyCrewAccessRetentionPolicy()
+        await fetchDeviceScheduleIfNeeded(reason: reason)
+        await uploadDeviceScheduleIfNeeded(reason: "\(reason) recovery")
+        await fetchManualEventsIfNeeded(reason: reason)
+        await uploadManualEventsIfNeeded(reason: "\(reason) recovery")
     }
 
     private func logCloudKitIdentityDiagnostic(_ message: String) {
@@ -3390,11 +3429,14 @@ final class AppViewModel: ObservableObject {
                 logger.error("[Import] appGroup legacy manifest unreadable — discarding")
                 try? fm.removeItem(at: legacyURL)
             }
-            references += entries.map { entry in
+            references += entries.enumerated().map { index, entry in
                 AppGroupPendingImportReference(
                     fileName: entry.fileName,
                     fileURL: directoryURL.appendingPathComponent(entry.fileName, isDirectory: false),
-                    queueFileURL: legacyURL
+                    // The legacy array is one shared manifest. Assign cleanup to
+                    // exactly one reference so later entries do not all claim
+                    // ownership of the same file.
+                    queueFileURL: index == 0 ? legacyURL : nil
                 )
             }
         }
@@ -4362,14 +4404,8 @@ final class AppViewModel: ObservableObject {
             ? "Verified as bootstrap admin. Upload GEMS verification records to CloudKit."
             : "Verified as GEMS \(gemsID) / \(domicile)."
         async let friendRestore: Void = syncFriendCloudKit(reason: "identity verified")
-        async let timelineRestore: Void = fetchDeviceScheduleIfNeeded(reason: "identity verified")
-        async let manualEventRestore: Void = restoreManualEventsAfterIdentityVerification()
-        _ = await (friendRestore, timelineRestore, manualEventRestore)
-    }
-
-    private func restoreManualEventsAfterIdentityVerification() async {
-        await fetchManualEventsIfNeeded(reason: "identity verified")
-        await uploadManualEventsIfNeeded(reason: "identity verified")
+        async let deviceRestore: Void = recoverCloudSyncAfterIdentityAvailable(reason: "identity verified")
+        _ = await (friendRestore, deviceRestore)
     }
 
     private func appReviewMockVerificationResult(gemsID: String, normalizedDOB: String) -> GEMSVerificationResult? {

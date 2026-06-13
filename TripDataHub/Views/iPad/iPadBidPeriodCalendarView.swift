@@ -137,6 +137,9 @@ struct IPadBidPeriodCalendarView: View {
         .onChange(of: chinaVisaExpiryDate) { _, _ in refreshCalendarLayouts() }
         .onChange(of: domicile) { _, _ in
             loadBidPeriod(for: Date())
+            // The active BP can remain equal across domiciles, so its onChange
+            // may not fire. Rebuild timezone-dependent grids and event layers.
+            refreshCalendarLayouts()
         }
         .onChange(of: currentBidPeriod) { _, bp in
             selectedBidPeriodID = bp?.id
@@ -147,7 +150,10 @@ struct IPadBidPeriodCalendarView: View {
             ManualEventDetailSheet(operationalEvent: event)
                 .environmentObject(viewModel)
         }
-        .sheet(item: $selectedManualPersonalEvent) { event in
+        .sheet(item: Binding(
+            get: { usesCompactPhoneLayout ? nil : selectedManualPersonalEvent },
+            set: { selectedManualPersonalEvent = $0 }
+        )) { event in
             ManualEventDetailSheet(personalEvent: event)
                 .environmentObject(viewModel)
         }
@@ -170,7 +176,13 @@ struct IPadBidPeriodCalendarView: View {
         // Centered wide panel for the day-cell event stack. Rendered at the calendar
         // level (not inside the cell) so titles get the full screen width to breathe.
         .overlay {
-            if let panel = selectedEventPanel {
+            if usesCompactPhoneLayout, let event = selectedManualPersonalEvent {
+                CalendarPersonalEventPopup(event: event) {
+                    selectedManualPersonalEvent = nil
+                }
+                .environmentObject(viewModel)
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            } else if let panel = selectedEventPanel {
                 CalendarEventListPanel(
                     selection: panel,
                     onManualPersonalEventTap: { eventID in
@@ -183,6 +195,7 @@ struct IPadBidPeriodCalendarView: View {
             }
         }
         .animation(.easeOut(duration: 0.16), value: selectedEventPanel?.id)
+        .animation(.easeOut(duration: 0.16), value: selectedManualPersonalEvent?.id)
     }
 
     // MARK: Header
@@ -1465,6 +1478,36 @@ private struct CalendarEventPanelSelection: Identifiable {
     let day: CalendarDay
     let chips: [IPadCalendarEventChip]
     var id: String { day.displayDateKey }
+}
+
+/// iPhone calendar presentation for a manual personal event. This mirrors the
+/// centered trip timeline popup instead of taking over the screen as a sheet.
+private struct CalendarPersonalEventPopup: View {
+    let event: ManualPersonalEvent
+    let onDismiss: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.28)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { onDismiss() }
+
+            ManualEventDetailSheet(
+                personalEvent: event,
+                onDismiss: onDismiss
+            )
+            .frame(maxWidth: 460, maxHeight: 360)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color(.systemBackground))
+                    .shadow(color: .black.opacity(0.24), radius: 20, y: 8)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.horizontal, 24)
+            .padding(.vertical, 40)
+        }
+    }
 }
 
 /// Wide, screen-centered list of a day's event chips. The in-cell stack only has

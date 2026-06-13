@@ -51,8 +51,9 @@ struct IPadOperationalWorkspaceView: View {
     @State private var exportIncludesBidLayer = true
     @State private var exportIncludesPersonalLayer = true
     @State private var isShowingImportPreviewFromExternalOpen = false
-    /// ポートレート時にトリップバータップで表示するシートのトリップID
-    @State private var portraitTripSheetID: String? = nil
+    /// Calendar trip bars open a focused popup in both orientations. Keep this
+    /// separate from the landscape sidebar's own row-selection state.
+    @State private var calendarPopupTripID: String?
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -61,9 +62,9 @@ struct IPadOperationalWorkspaceView: View {
                 let isPortrait = geo.size.height > geo.size.width
                 let sidebarWidth = geo.size.width * 0.30
                 if isPortrait {
-                    // ポートレート: カレンダーのみ全幅、トリップバータップでシート
+                    // Portrait: full-width calendar with a focused trip popup.
                     IPadBidPeriodCalendarView(
-                        selectedTripID: $portraitTripSheetID,
+                        selectedTripID: $calendarPopupTripID,
                         selectedBidPeriodID: $selectedBidPeriodID
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -74,7 +75,7 @@ struct IPadOperationalWorkspaceView: View {
                             .clipped()
                         Divider()
                         IPadBidPeriodCalendarView(
-                            selectedTripID: $selectedTripID,
+                            selectedTripID: $calendarPopupTripID,
                             selectedBidPeriodID: $selectedBidPeriodID
                         )
                         .frame(width: geo.size.width - sidebarWidth - 1)
@@ -117,18 +118,17 @@ struct IPadOperationalWorkspaceView: View {
                 }
             }
         }
-        // Portrait: tapping a calendar trip bar opens a centered popup scoped to
-        // that trip (titled by its Trip Id), replacing the full-timeline sheet.
+        // Calendar trip bars use the same focused popup in portrait and landscape.
         .overlay {
-            if let tripID = portraitTripSheetID {
+            if let tripID = calendarPopupTripID {
                 CalendarTripTimelinePopup(tripID: tripID) {
-                    portraitTripSheetID = nil
+                    calendarPopupTripID = nil
                 }
                 .environmentObject(viewModel)
                 .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
         }
-        .animation(.easeOut(duration: 0.16), value: portraitTripSheetID)
+        .animation(.easeOut(duration: 0.16), value: calendarPopupTripID)
         .sheet(isPresented: $showingBrowser) {
             NavigationStack { BrowserTabView(presentsImportPreview: true) }
                 .environmentObject(viewModel)
@@ -250,33 +250,33 @@ struct IPadOperationalWorkspaceView: View {
 
     private var floatingMenu: some View {
         var items: [ExpandableFloatingMenuItem] = [
-            ExpandableFloatingMenuItem(icon: "calendar", label: "Timeline", isActive: isOwnTimeline) {
+            ExpandableFloatingMenuItem(id: "timeline", icon: "calendar", label: "Timeline", isActive: isOwnTimeline) {
                 sidebarContent = .ownTimeline
                 timelineScrollTrigger = UUID()
             }
         ]
         if AppEnvironment.isFriendSharingVisible {
-            items.append(ExpandableFloatingMenuItem(icon: "person.2", label: "Friends") {
+            items.append(ExpandableFloatingMenuItem(id: "friends", icon: "person.2", label: "Friends") {
                 showingFriends = true
             })
         }
         if AppEnvironment.isOpenTimeVisible {
-            items.append(ExpandableFloatingMenuItem(icon: "clock", label: "OpenTime") {
+            items.append(ExpandableFloatingMenuItem(id: "open-time", icon: "clock", label: "OpenTime") {
                 showingOpenTime = true
             })
         }
-        items.append(ExpandableFloatingMenuItem(icon: "globe", label: "Browser") {
+        items.append(ExpandableFloatingMenuItem(id: "browser", icon: "globe", label: "Browser") {
             showingBrowser = true
         })
-        items.append(ExpandableFloatingMenuItem(icon: "plus", label: "Add Event") {
+        items.append(ExpandableFloatingMenuItem(id: "add-event", icon: "plus", label: "Add Event") {
             showingAddEvent = true
         })
-        items.append(ExpandableFloatingMenuItem(icon: "square.and.arrow.up", label: "Print") {
+        items.append(ExpandableFloatingMenuItem(id: "print", icon: "square.and.arrow.up", label: "Print") {
             exportIncludesBidLayer = bidTransitionTimelineEnabled
             exportIncludesPersonalLayer = true
             showingBidPeriodExportOptions = true
         })
-        items.append(ExpandableFloatingMenuItem(icon: "gearshape", label: "Settings") {
+        items.append(ExpandableFloatingMenuItem(id: "settings", icon: "gearshape", label: "Settings") {
             showingSettings = true
         })
         return ExpandableFloatingMenu(isExpanded: $menuExpanded, items: items, itemSpacing: 58)
