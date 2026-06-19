@@ -186,6 +186,7 @@ final class AppViewModel: ObservableObject {
     static let defaultCrewAccessRetentionSelection = "ALL"
     static let crewAccessRetentionDefaultMigrationKey = "crewaccess_trip_data_retained_default_all_migrated_v1"
     static let openTimeDemoModeKey = "opentime_demo_mode_enabled_v1"
+    static let lastTripSyncCompletedAtKey = "crewaccess_trip_sync_completed_at_v1"
 
     // MARK: - Import dedup (4-layer architecture)
     // Layer 1: ExternalOpenLaunchGate (BidProScheduleApp.swift) — catches iOS triple-delivery at onOpenURL
@@ -259,6 +260,7 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var isRefreshingCloudKitIdentity = false
     @Published private(set) var hasSeniorityDataOnDisk = false
     @Published private(set) var isDeviceSyncing = false
+    @Published private(set) var isTripSyncing = false
     @Published private(set) var deviceSyncStatusMessage: String?
     @Published private(set) var manualOperationalEvents: [ManualOperationalEvent] = []
     @Published private(set) var manualPersonalEvents: [ManualPersonalEvent] = []
@@ -308,6 +310,11 @@ final class AppViewModel: ObservableObject {
     private var lastManualEventFetchAt: Date?
     private var cachedDeviceID: String?
     private var isFetchingCrewAccessImports = false
+    private var needsCrewAccessImportFetch = false
+    private var pendingCrewAccessImportFetchReason: String?
+    private var isSyncingCrewAccessDeviceData = false
+    private var needsCrewAccessDeviceDataSync = false
+    private var pendingCrewAccessDeviceDataSyncReason: String?
     private var lastCrewAccessImportFetchAt: Date?
 
     private let notification48hKey = "notification_48h_enabled"
@@ -1212,7 +1219,8 @@ final class AppViewModel: ObservableObject {
 
     // MARK: - Device Schedule Sync
 
-    func uploadDeviceScheduleIfNeeded(reason: String) async {
+    @discardableResult
+    func uploadDeviceScheduleIfNeeded(reason: String) async -> Bool {
         // Coalescing: if an upload is already in flight, queue the request and return.
         // The in-flight upload will loop until no more pending requests remain (same pattern
         // as uploadSharedScheduleIfNeeded).
@@ -1220,12 +1228,13 @@ final class AppViewModel: ObservableObject {
             needsDeviceScheduleUpload = true
             pendingDeviceScheduleUploadReason = reason
             logNonFatal("Device schedule upload coalesced: \(reason)")
-            return
+            return false
         }
 
         isUploadingDeviceSchedule = true
         isDeviceSyncing = true
         var nextReason: String? = reason
+        var allSucceeded = true
         defer {
             isUploadingDeviceSchedule = false
             needsDeviceScheduleUpload = false
@@ -1237,23 +1246,25 @@ final class AppViewModel: ObservableObject {
             nextReason = nil
             needsDeviceScheduleUpload = false
             pendingDeviceScheduleUploadReason = nil
-            await performDeviceScheduleUpload(reason: currentReason)
+            let succeeded = await performDeviceScheduleUpload(reason: currentReason)
+            allSucceeded = allSucceeded && succeeded
             if needsDeviceScheduleUpload {
                 nextReason = pendingDeviceScheduleUploadReason ?? "coalesced"
             }
         }
+        return allSucceeded
     }
 
-    private func performDeviceScheduleUpload(reason: String) async {
+    private func performDeviceScheduleUpload(reason: String) async -> Bool {
         guard isIdentityVerified,
               let verifiedIdentity,
-              let currentCloudKitRecordName else { return }
+              let currentCloudKitRecordName else { return false }
 
         let schedules = crewAccessSchedules
         // Upload even if empty: an empty snapshot signals "all trips deleted" to other devices.
-        guard let data = try? JSONEncoder().encode(schedules) else { return }
+        guard let data = try? JSONEncoder().encode(schedules) else { return false }
         let fingerprint = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-        guard fingerprint != lastDeviceScheduleUploadFingerprint else { return }
+        guard fingerprint != lastDeviceScheduleUploadFingerprint else { return true }
 
         let myDeviceID = getOrCreateDeviceID()
         let source: DeviceScheduleSyncSource = UIDevice.current.userInterfaceIdiom == .pad ? .ipad : .iphone
@@ -1270,34 +1281,37 @@ final class AppViewModel: ObservableObject {
             UserDefaults.standard.set(fingerprint, forKey: deviceScheduleUploadFingerprintKey)
             deviceSyncStatusMessage = "Device schedule synced."
             logNonFatal("Device schedule uploaded: \(reason) tripCount=\(schedules.count)")
+            return true
         } catch {
             deviceSyncStatusMessage = "Device sync upload failed."
             logNonFatal("Device schedule upload failed: \(error.localizedDescription) reason=\(reason)")
+            return false
         }
     }
 
-    func fetchDeviceScheduleIfNeeded(reason: String) async {
+    @discardableResult
+    func fetchDeviceScheduleIfNeeded(reason: String) async -> Bool {
         guard isIdentityVerified,
-              let verifiedIdentity else { return }
+              let verifiedIdentity else { return false }
         isDeviceSyncing = true
         defer { isDeviceSyncing = false }
 
         do {
             guard let snapshot = try await deviceScheduleCloudKitService.fetchDeviceSchedule(
                 gemsID: verifiedIdentity.gemsID
-            ) else { return }
+            ) else { return true }
 
             // Gate 1: skip if we already accepted this exact snapshot.
-            if let lastFetch = lastDeviceScheduleFetchAt, snapshot.updatedAt <= lastFetch { return }
+            if let lastFetch = lastDeviceScheduleFetchAt, snapshot.updatedAt <= lastFetch { return true }
 
             // Gate 2: skip snapshots uploaded by this device — they mirror local state.
             let myDeviceID = getOrCreateDeviceID()
-            if snapshot.deviceID == myDeviceID { return }
+            if snapshot.deviceID == myDeviceID { return true }
 
             // Gate 3 (local-wins): reject remote if any local schedule is newer than the snapshot.
             // This prevents a stale remote from rolling back a local import that failed to upload.
             let localMaxUpdatedAt = crewAccessSchedules.map(\.updatedAt).max()
-            if let localMax = localMaxUpdatedAt, snapshot.updatedAt <= localMax { return }
+            if let localMax = localMaxUpdatedAt, snapshot.updatedAt <= localMax { return true }
 
             // LogTen backlog protection: preserve import reference times across schedule replacement.
             // Intentionally not pruned so past-leg entries survive for any future LogTen export.
@@ -1323,8 +1337,10 @@ final class AppViewModel: ObservableObject {
             await rescheduleNotificationsIfAuthorized()
             deviceSyncStatusMessage = "Schedule updated from device sync."
             logNonFatal("Device schedule fetched: \(reason) source=\(snapshot.source.rawValue) tripCount=\(remoteSchedules.count)")
+            return true
         } catch {
             logNonFatal("Device schedule fetch failed: \(error.localizedDescription) reason=\(reason)")
+            return false
         }
     }
 
@@ -1443,14 +1459,43 @@ final class AppViewModel: ObservableObject {
 
     // MARK: - CrewAccess Import CloudKit Sync
 
-    func fetchCrewAccessImportFilesIfNeeded(reason: String) async {
-        guard isIdentityVerified, let verifiedIdentity else { return }
-        guard !isFetchingCrewAccessImports else { return }
+    @discardableResult
+    func fetchCrewAccessImportFilesIfNeeded(reason: String) async -> Bool {
+        guard isIdentityVerified else { return false }
+        if isFetchingCrewAccessImports {
+            needsCrewAccessImportFetch = true
+            pendingCrewAccessImportFetchReason = reason
+            logNonFatal("CrewAccess import file fetch coalesced: \(reason)")
+            return false
+        }
+
         isFetchingCrewAccessImports = true
-        defer { isFetchingCrewAccessImports = false }
+        var nextReason: String? = reason
+        var allSucceeded = true
+        defer {
+            isFetchingCrewAccessImports = false
+            needsCrewAccessImportFetch = false
+            pendingCrewAccessImportFetchReason = nil
+        }
+
+        while let currentReason = nextReason {
+            nextReason = nil
+            needsCrewAccessImportFetch = false
+            pendingCrewAccessImportFetchReason = nil
+            let succeeded = await performCrewAccessImportFileFetch(reason: currentReason)
+            allSucceeded = allSucceeded && succeeded
+            if needsCrewAccessImportFetch {
+                nextReason = pendingCrewAccessImportFetchReason ?? "coalesced"
+            }
+        }
+        return allSucceeded
+    }
+
+    private func performCrewAccessImportFileFetch(reason: String) async -> Bool {
+        guard isIdentityVerified, let verifiedIdentity else { return false }
 
         let fm = FileManager.default
-        guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return false }
         let dir = documents.appendingPathComponent("CrewAccessImports", isDirectory: true)
 
         do {
@@ -1462,6 +1507,7 @@ final class AppViewModel: ObservableObject {
                 }
             )
             var writtenCount = 0
+            var recoveryUploadsSucceeded = true
             for record in records {
                 let url = dir.appendingPathComponent(record.fileName)
                 let localModifiedAt = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
@@ -1477,7 +1523,8 @@ final class AppViewModel: ObservableObject {
                 }
                 if Self.crewAccessTripKey(fromCloudKitRecord: record).map({ deletedCrewAccessTripKeys.contains($0) }) == true {
                     if fm.fileExists(atPath: url.path) { try? fm.removeItem(at: url) }
-                    await tombstoneCrewAccessImportFiles(fileNames: [record.fileName])
+                    let tombstoned = await tombstoneCrewAccessImportFiles(fileNames: [record.fileName])
+                    recoveryUploadsSucceeded = recoveryUploadsSucceeded && tombstoned
                     continue
                 }
                 try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -1503,26 +1550,30 @@ final class AppViewModel: ObservableObject {
                     if remote?.deletedAt == nil, remote?.jsonData == data {
                         continue
                     }
-                    await uploadCrewAccessImportFile(at: url, json: json)
+                    let uploaded = await uploadCrewAccessImportFile(at: url, json: json)
+                    recoveryUploadsSucceeded = recoveryUploadsSucceeded && uploaded
                 }
             }
             lastCrewAccessImportFetchAt = Date()
             UserDefaults.standard.set(lastCrewAccessImportFetchAt, forKey: crewAccessImportFetchAtKey)
             logNonFatal("CrewAccess import files fetched: \(reason) total=\(records.count) written=\(writtenCount)")
+            return recoveryUploadsSucceeded
         } catch {
             logNonFatal("CrewAccess import file fetch failed: \(error.localizedDescription) reason=\(reason)")
+            return false
         }
     }
 
-    private func uploadCrewAccessImportFile(at url: URL, json: CrewAccessTripJSON) async {
+    @discardableResult
+    private func uploadCrewAccessImportFile(at url: URL, json: CrewAccessTripJSON) async -> Bool {
         let fileName = url.lastPathComponent
         guard isIdentityVerified, let verifiedIdentity else {
             logger.info("[CrewAccessImportUpload] skipped (identity not verified) file=\(fileName, privacy: .private)")
-            return
+            return false
         }
         guard let jsonData = try? Data(contentsOf: url) else {
             logger.info("[CrewAccessImportUpload] skipped (cannot read file) path=\(url.path, privacy: .private)")
-            return
+            return false
         }
         let firstDep = json.items.first?.startUtc
         logger.info("[CrewAccessImportUpload] start file=\(fileName, privacy: .private) bytes=\(jsonData.count, privacy: .public) gems=\(verifiedIdentity.gemsID, privacy: .private)")
@@ -1536,14 +1587,18 @@ final class AppViewModel: ObservableObject {
             )
             logger.info("[CrewAccessImportUpload] success file=\(fileName, privacy: .private)")
             logNonFatal("CrewAccess import file uploaded: \(fileName)")
+            return true
         } catch {
             logger.error("[CrewAccessImportUpload] FAILED file=\(fileName, privacy: .private) error=\(error.localizedDescription, privacy: .public)")
             logNonFatal("CrewAccess import file upload failed: \(error.localizedDescription) file=\(fileName)")
+            return false
         }
     }
 
-    private func tombstoneCrewAccessImportFiles(fileNames: [String]) async {
-        guard isIdentityVerified, let verifiedIdentity else { return }
+    @discardableResult
+    private func tombstoneCrewAccessImportFiles(fileNames: [String]) async -> Bool {
+        guard isIdentityVerified, let verifiedIdentity else { return false }
+        var allSucceeded = true
         for fileName in fileNames {
             do {
                 try await crewAccessImportCloudKitService.tombstoneImportFile(
@@ -1551,9 +1606,11 @@ final class AppViewModel: ObservableObject {
                     fileName: fileName
                 )
             } catch {
+                allSucceeded = false
                 logNonFatal("CrewAccess tombstone failed: \(error.localizedDescription) file=\(fileName)")
             }
         }
+        return allSucceeded
     }
 
     private func getOrCreateDeviceID() -> String {
@@ -1691,14 +1748,61 @@ final class AppViewModel: ObservableObject {
     private func recoverCloudSyncAfterIdentityAvailable(reason: String) async {
         guard isIdentityVerified else { return }
 
-        // Download first, reconcile the local timeline, then retry uploads that may
-        // have been skipped during a prior restricted/offline session.
-        await fetchCrewAccessImportFilesIfNeeded(reason: reason)
-        await applyCrewAccessRetentionPolicy()
-        await fetchDeviceScheduleIfNeeded(reason: reason)
-        await uploadDeviceScheduleIfNeeded(reason: "\(reason) recovery")
+        await syncCrewAccessDeviceData(reason: reason)
         await fetchManualEventsIfNeeded(reason: reason)
         await uploadManualEventsIfNeeded(reason: "\(reason) recovery")
+    }
+
+    func syncCrewAccessDeviceData(reason: String) async {
+        guard isIdentityVerified else { return }
+        if isSyncingCrewAccessDeviceData {
+            needsCrewAccessDeviceDataSync = true
+            pendingCrewAccessDeviceDataSyncReason = reason
+            logNonFatal("CrewAccess device sync coalesced: \(reason)")
+            return
+        }
+
+        isSyncingCrewAccessDeviceData = true
+        isDeviceSyncing = true
+        isTripSyncing = true
+        var nextReason: String? = reason
+        defer {
+            isSyncingCrewAccessDeviceData = false
+            needsCrewAccessDeviceDataSync = false
+            pendingCrewAccessDeviceDataSyncReason = nil
+            isDeviceSyncing = false
+            isTripSyncing = false
+        }
+
+        while let currentReason = nextReason {
+            nextReason = nil
+            needsCrewAccessDeviceDataSync = false
+            pendingCrewAccessDeviceDataSyncReason = nil
+
+            let succeeded = await performCrewAccessDeviceSync(reason: currentReason)
+            if succeeded {
+                markTripSyncCompleted()
+            }
+
+            if needsCrewAccessDeviceDataSync {
+                nextReason = pendingCrewAccessDeviceDataSyncReason ?? "coalesced"
+            }
+        }
+    }
+
+    private func performCrewAccessDeviceSync(reason: String) async -> Bool {
+        // Download files first, rebuild local Timeline from the file source of truth,
+        // then read/write the compact snapshot so older installs and fast UI paths converge.
+        let filesFetched = await fetchCrewAccessImportFilesIfNeeded(reason: reason)
+        await applyCrewAccessRetentionPolicy()
+        let snapshotFetched = await fetchDeviceScheduleIfNeeded(reason: reason)
+        let snapshotUploaded = await uploadDeviceScheduleIfNeeded(reason: "\(reason) recovery")
+        return filesFetched && snapshotFetched && snapshotUploaded
+    }
+
+    private func markTripSyncCompleted() {
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.lastTripSyncCompletedAtKey)
+        deviceSyncStatusMessage = "Trip sync completed."
     }
 
     private func logCloudKitIdentityDiagnostic(_ message: String) {
@@ -2012,10 +2116,15 @@ final class AppViewModel: ObservableObject {
             let uploadURL = jsonWriteContext.finalURL
             let staleFileNames = jsonWriteContext.staleSameBidPeriodTripURLs.map(\.lastPathComponent)
             Task { [weak self] in
-                await self?.uploadDeviceScheduleIfNeeded(reason: "import confirmed")
-                await self?.uploadCrewAccessImportFile(at: uploadURL, json: json)
+                guard let self else { return }
+                let scheduleUploaded = await self.uploadDeviceScheduleIfNeeded(reason: "import confirmed")
+                let importUploaded = await self.uploadCrewAccessImportFile(at: uploadURL, json: json)
+                var staleTombstoned = true
                 if !staleFileNames.isEmpty {
-                    await self?.tombstoneCrewAccessImportFiles(fileNames: staleFileNames)
+                    staleTombstoned = await self.tombstoneCrewAccessImportFiles(fileNames: staleFileNames)
+                }
+                if scheduleUploaded && importUploaded && staleTombstoned {
+                    self.markTripSyncCompleted()
                 }
             }
         } catch {
@@ -2442,7 +2551,12 @@ final class AppViewModel: ObservableObject {
             .map { $0.0.lastPathComponent }
         if !deletedFileNames.isEmpty {
             Task { [weak self] in
-                await self?.tombstoneCrewAccessImportFiles(fileNames: deletedFileNames)
+                guard let self else { return }
+                let tombstoned = await self.tombstoneCrewAccessImportFiles(fileNames: deletedFileNames)
+                let uploaded = await self.uploadDeviceScheduleIfNeeded(reason: "import file deleted")
+                if tombstoned && uploaded {
+                    self.markTripSyncCompleted()
+                }
             }
         }
     }
@@ -2520,11 +2634,18 @@ final class AppViewModel: ObservableObject {
         let deletionTime = Date()
         lastDeviceScheduleFetchAt = deletionTime
         UserDefaults.standard.set(deletionTime, forKey: deviceScheduleFetchAtKey)
+        var tombstoned = true
         if !fileDeleteResult.deletedFileNames.isEmpty {
-            await tombstoneCrewAccessImportFiles(fileNames: fileDeleteResult.deletedFileNames)
+            tombstoned = await tombstoneCrewAccessImportFiles(fileNames: fileDeleteResult.deletedFileNames)
         }
         await rescheduleNotificationsIfAuthorized()
-        Task { [weak self] in await self?.uploadDeviceScheduleIfNeeded(reason: "trip deleted") }
+        Task { [weak self] in
+            guard let self else { return }
+            let uploaded = await self.uploadDeviceScheduleIfNeeded(reason: "trip deleted")
+            if tombstoned && uploaded {
+                self.markTripSyncCompleted()
+            }
+        }
     }
 
     func displaySchedules(filter: TimelineSourceFilter) -> [PayPeriodSchedule] {

@@ -102,8 +102,7 @@ struct IPadOperationalWorkspaceView: View {
         .preferredColorScheme(selectedAppearanceMode.colorScheme)
         .task {
             viewModel.consumePendingAppGroupImportIfAvailable()
-            await viewModel.fetchCrewAccessImportFilesIfNeeded(reason: "ipad workspace")
-            await viewModel.fetchDeviceScheduleIfNeeded(reason: "ipad workspace")
+            await viewModel.syncCrewAccessDeviceData(reason: "ipad workspace")
             if AppEnvironment.isFriendSharingVisible {
                 await viewModel.syncFriendCloudKit(reason: "ipad workspace opened")
             }
@@ -112,6 +111,7 @@ struct IPadOperationalWorkspaceView: View {
             if newPhase == .active {
                 viewModel.consumePendingAppGroupImportIfAvailable()
                 Task {
+                    await viewModel.syncCrewAccessDeviceData(reason: "ipad workspace active")
                     if AppEnvironment.isFriendSharingVisible {
                         await viewModel.syncFriendCloudKit(reason: "ipad workspace active")
                     }

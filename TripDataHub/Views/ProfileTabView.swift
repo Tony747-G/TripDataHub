@@ -13,6 +13,7 @@ struct ProfileTabView: View {
     @AppStorage(OperationalSettings.crewBaseKey) private var baseRawValue = OperationalSettings.defaultCrewBase.rawValue
     @AppStorage("pilot_qualification") private var qualificationRawValue = PilotQualification.captain.rawValue
     @AppStorage(ProfileStorageKeys.lastSeenAt) private var lastSeenAt = 0.0
+    @AppStorage(AppViewModel.lastTripSyncCompletedAtKey) private var lastTripSyncCompletedAt = 0.0
     @State private var isShowingAvatarEditor = false
     @State private var verifyDOBDate = Date()
     @State private var isShowingDeleteAccountConfirmation = false
@@ -86,13 +87,12 @@ struct ProfileTabView: View {
                 }
 
                 Section {
-                    HStack {
-                        Text("Last Seen")
-                        Spacer()
-                        Text(lastSeenText)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
+                    profileTimestampRow(title: "Last Seen", value: lastSeenText)
+                    profileTimestampRow(
+                        title: "Last Trip Sync",
+                        value: lastTripSyncText,
+                        isInProgress: viewModel.isTripSyncing
+                    )
                 }
 
                 Section {
@@ -210,6 +210,29 @@ struct ProfileTabView: View {
     private var lastSeenText: String {
         guard lastSeenAt > 0 else { return "Never" }
         return Self.lastSeenFormatter.string(from: Date(timeIntervalSince1970: lastSeenAt))
+    }
+
+    private var lastTripSyncText: String {
+        guard lastTripSyncCompletedAt > 0 else { return "Never" }
+        return Self.lastSeenFormatter.string(from: Date(timeIntervalSince1970: lastTripSyncCompletedAt))
+    }
+
+    private func profileTimestampRow(title: String, value: String, isInProgress: Bool = false) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+            Spacer()
+            if isInProgress {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            Text(value)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+        }
     }
 
     private var profileIdentityRows: some View {

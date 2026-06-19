@@ -338,17 +338,17 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
 
         let existingJSON = makeCrewAccessJSON(
             tripId: "B00001",
-            tripInformationDate: "01Jun2026",
-            startUtc: "2026-06-01T08:00:00Z",
-            endUtc: "2026-06-01T10:00:00Z"
+            tripInformationDate: "16Jun2026",
+            startUtc: "2026-06-16T23:00:00Z",
+            endUtc: "2026-06-17T01:00:00Z"
         )
         try writeCrewAccessJSON(existingJSON)
         vm.crewAccessSchedules = [
             makeSchedule(
                 id: "CA26-06-B00001",
                 pairing: "B00001",
-                depUTC: "2026-06-01T08:00:00Z",
-                arrUTC: "2026-06-01T10:00:00Z"
+                depUTC: "2026-06-16T23:00:00Z",
+                arrUTC: "2026-06-17T01:00:00Z"
             )
         ]
 
