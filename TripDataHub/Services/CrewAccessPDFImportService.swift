@@ -512,7 +512,7 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
                 arrLocal: arrLocalDisplay,
                 depUTC: Self.isoUTCFormatter.string(from: depUTC),
                 arrUTC: Self.isoUTCFormatter.string(from: arrUTC),
-                status: row.deadhead ? "DH" : "-",
+                status: legStatus(for: row),
                 block: effectiveBlock,
                 layoverStation: layover?.station,
                 layoverHotelName: layover?.hotelName,
@@ -608,6 +608,13 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         // CrewAccess sometimes omits the 5X prefix for company flights. Preserve
         // explicit airline codes and add 5X only when the source is digits alone.
         FlightNumberNormalizer.displayValue(raw)
+    }
+
+    private func legStatus(for row: ParsedLegRow) -> String {
+        if row.flight.caseInsensitiveCompare("GND") == .orderedSame {
+            return "GND"
+        }
+        return row.deadhead ? "DH" : "-"
     }
 
     private func layoverMetadataByArrivingSequence(extractedText: String, legRows: [ParsedLegRow]) -> [Int: LayoverLeg] {

@@ -1,5 +1,23 @@
 import Foundation
 
+enum HotelNameNormalizer {
+    static func displayName(station: String, parsedName: String) -> String {
+        let normalizedStation = station
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        let normalizedName = parsedName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        if normalizedStation == "SYD",
+           normalizedName.hasPrefix("crowne plaza sydney darling ha")
+            || normalizedName.hasPrefix("crown plaza sydney darling ha") {
+            return "Crowne Plaza Sydney Darling Harbour"
+        }
+        return parsedName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 enum FlightNumberNormalizer {
     static func displayValue(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()

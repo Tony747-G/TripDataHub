@@ -222,7 +222,7 @@ struct PDFTripParser {
                     .filter { !$0.isEmpty }
                     .joined(separator: " ")
 
-                let hotelName = (
+                let parsedHotelName = (
                     extractGroups(from: cleanedLine,
                         pattern: #"Hotel:\s+(.+?)(?:\s+Hotel Transport:|\s+\+\d|\s+\d{3,}|$)"#)?[0]
                         ?? ""
@@ -251,6 +251,10 @@ struct PDFTripParser {
                     if case .flight(let f) = l { return f.arrivalStation }
                     return nil
                 }.last ?? ""
+                let hotelName = HotelNameNormalizer.displayName(
+                    station: station,
+                    parsedName: parsedHotelName
+                )
 
                 if !hotelName.isEmpty {
                     legs.append(.layover(LayoverLeg(

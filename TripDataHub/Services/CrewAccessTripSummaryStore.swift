@@ -102,7 +102,13 @@ enum CrewAccessTripSummaryStore {
             byTripID[tripId] = summary
 
             for item in decoded.items {
-                let key = legUTCKey(tripID: tripId, sequence: item.sequence)
+                let key = legUTCKey(
+                    tripID: tripId,
+                    sequence: item.sequence,
+                    flight: item.flight,
+                    depAirport: item.depAirport,
+                    arrAirport: item.arrAirport
+                )
                 legUTCTimesByKey[key] = CrewAccessLegUTCTimes(startUtc: item.startUtc, endUtc: item.endUtc)
             }
         }
@@ -133,7 +139,12 @@ enum CrewAccessTripSummaryStore {
         for detail in decoded.hotelDetails {
             let (station, name) = parseHotelDetail(detail)
             let key = normalizedStation(station)
-            if !key.isEmpty && !name.isEmpty { hotelByStation[key] = name }
+            if !key.isEmpty && !name.isEmpty {
+                hotelByStation[key] = HotelNameNormalizer.displayName(
+                    station: key,
+                    parsedName: name
+                )
+            }
         }
 
         // Legacy "Hotel details …" fallback: assign hotels to layover stations by position.
@@ -154,7 +165,12 @@ enum CrewAccessTripSummaryStore {
                     idx += 1; continue
                 }
                 let (_, name) = parseHotelDetail(legacyDetails[idx])
-                if !name.isEmpty { hotelByStation[stationKey] = name }
+                if !name.isEmpty {
+                    hotelByStation[stationKey] = HotelNameNormalizer.displayName(
+                        station: stationKey,
+                        parsedName: name
+                    )
+                }
                 idx += 1
             }
         }
@@ -179,8 +195,20 @@ enum CrewAccessTripSummaryStore {
         stationKey(raw)
     }
 
-    static func legUTCKey(tripID: String, sequence: Int) -> String {
-        "\(tripID)|\(sequence)"
+    static func legUTCKey(
+        tripID: String,
+        sequence: Int,
+        flight: String,
+        depAirport: String,
+        arrAirport: String
+    ) -> String {
+        [
+            tripID, String(sequence), flight, depAirport, arrAirport
+        ]
+        .map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        }
+        .joined(separator: "|")
     }
 
     /// Parses "SGN: Caravelle Hotel +84-28-3823-4999 (15:30)" → ("SGN", "Caravelle Hotel").
@@ -261,6 +289,8 @@ enum CrewAccessTripSummaryStore {
 
     private struct TripSummaryItemJSON: Decodable {
         let sequence: Int
+        let flight: String
+        let depAirport: String
         let arrAirport: String
         let startUtc: String
         let endUtc: String

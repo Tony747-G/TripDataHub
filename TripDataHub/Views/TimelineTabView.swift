@@ -957,7 +957,13 @@ struct TimelineTabView: View {
     }
 
     private func utcDepartureDate(for leg: TripLeg) -> Date? {
-        let key = CrewAccessTripSummaryStore.legUTCKey(tripID: leg.pairing, sequence: leg.leg)
+        let key = CrewAccessTripSummaryStore.legUTCKey(
+            tripID: leg.pairing,
+            sequence: leg.leg,
+            flight: leg.flight,
+            depAirport: leg.depAirport,
+            arrAirport: leg.arrAirport
+        )
         if let fromImport = importedUTCTimesByTripAndSequence[key]?.startUtc,
            let parsedImport = LegConnectionTextBuilder.parseUTC(fromImport) {
             return parsedImport
@@ -969,7 +975,13 @@ struct TimelineTabView: View {
     }
 
     private func utcArrivalDate(for leg: TripLeg) -> Date? {
-        let key = CrewAccessTripSummaryStore.legUTCKey(tripID: leg.pairing, sequence: leg.leg)
+        let key = CrewAccessTripSummaryStore.legUTCKey(
+            tripID: leg.pairing,
+            sequence: leg.leg,
+            flight: leg.flight,
+            depAirport: leg.depAirport,
+            arrAirport: leg.arrAirport
+        )
         if let fromImport = importedUTCTimesByTripAndSequence[key]?.endUtc,
            let parsedImport = LegConnectionTextBuilder.parseUTC(fromImport) {
             return parsedImport

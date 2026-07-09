@@ -276,12 +276,14 @@ enum TimelinePastStateSupport {
 enum TimelineLegIconSupport {
     static func codePoint(for status: String) -> Int {
         let normalized = status.uppercased()
+        if normalized == "GND" { return 58673 }
         if normalized == "DH" || normalized == "CML" { return 58729 }
         return 58681
     }
 
     static func fallbackSystemName(for status: String) -> String {
         let normalized = status.uppercased()
+        if normalized == "GND" { return "car.fill" }
         if normalized == "DH" || normalized == "CML" { return "paperplane.fill" }
         return "airplane"
     }

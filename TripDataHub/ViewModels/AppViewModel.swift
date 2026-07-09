@@ -4020,7 +4020,9 @@ final class AppViewModel: ObservableObject {
                 arrLocal: item.endLocalDisplay,
                 depUTC: item.startUtc,
                 arrUTC: item.endUtc,
-                status: item.deadhead ? "DH" : "-",
+                status: item.flight.caseInsensitiveCompare("GND") == .orderedSame
+                    ? "GND"
+                    : (item.deadhead ? "DH" : "-"),
                 block: item.block,
                 stdUTC: item.stdUtc ?? item.startUtc,
                 staUTC: item.staUtc ?? item.endUtc,

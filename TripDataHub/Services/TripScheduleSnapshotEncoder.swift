@@ -262,7 +262,9 @@ enum TripScheduleSnapshotEncoder {
             timeRange: localTimeRange(start: item.startLocalDisplay, end: item.endLocalDisplay),
             detail: blockText,
             trailing: nil,
-            icon: item.deadhead ? "paperplane" : "airplane",
+            icon: item.flight.caseInsensitiveCompare("GND") == .orderedSame
+                ? "directions_car"
+                : (item.deadhead ? "paperplane" : "airplane"),
             iconTone: "normal",
             startUTC: item.startUTC,
             endUTC: item.endUTC,
@@ -311,7 +313,10 @@ enum TripScheduleSnapshotEncoder {
             let parsed = parseHotelDetail(detail)
             let station = normalizedAirport(parsed.station)
             if !station.isEmpty, !parsed.hotelName.isEmpty {
-                result[station] = parsed.hotelName
+                result[station] = HotelNameNormalizer.displayName(
+                    station: station,
+                    parsedName: parsed.hotelName
+                )
             }
         }
 
@@ -332,7 +337,10 @@ enum TripScheduleSnapshotEncoder {
             if result[station] == nil {
                 let parsed = parseHotelDetail(legacyDetails[legacyIndex])
                 if !parsed.hotelName.isEmpty {
-                    result[station] = parsed.hotelName
+                    result[station] = HotelNameNormalizer.displayName(
+                        station: station,
+                        parsedName: parsed.hotelName
+                    )
                 }
             }
             legacyIndex += 1

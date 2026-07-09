@@ -77,11 +77,14 @@ struct TimelineFlightRow: View {
     private var rowContent: some View {
         HStack(alignment: .center, spacing: 12) {
             let resolvedIconColor: Color = isPast ? .gray : iconColor
+            let iconStatus = leg.flight.caseInsensitiveCompare("GND") == .orderedSame
+                ? "GND"
+                : leg.status
             MaterialIconView(
-                codePoint: TimelineLegIconSupport.codePoint(for: leg.status),
+                codePoint: TimelineLegIconSupport.codePoint(for: iconStatus),
                 size: 20 * fontScale,
                 color: resolvedIconColor,
-                fallbackSystemName: TimelineLegIconSupport.fallbackSystemName(for: leg.status)
+                fallbackSystemName: TimelineLegIconSupport.fallbackSystemName(for: iconStatus)
             )
             .frame(width: 28 * fontScale, alignment: .center)
 

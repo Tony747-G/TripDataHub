@@ -73,6 +73,54 @@ final class CrewAccessParserRegressionTests: XCTestCase {
         XCTAssertTrue(payload.hotelDetails.contains { $0.contains("Tokyu Haneda") })
     }
 
+    func test_trip12194_preservesGroundTransportTimesAndSydneyHotelName() throws {
+        let service = CrewAccessPDFImportService()
+        let draft = try parseDraft(pdfName: "2026-08-16_12194.pdf", service: service)
+
+        XCTAssertTrue(draft.errors.isEmpty, draft.errors.map(\.message).joined(separator: "; "))
+        let payload = try XCTUnwrap(draft.jsonPayload)
+        let schedule = try XCTUnwrap(draft.parsedSchedule)
+        let groundItem = try XCTUnwrap(payload.items.first {
+            $0.flight == "GND" && $0.depAirport == "CGN" && $0.arrAirport == "FRA"
+        })
+        XCTAssertEqual(groundItem.startUtc, "2026-08-24T11:40:00Z")
+        XCTAssertEqual(groundItem.endUtc, "2026-08-24T13:40:00Z")
+        XCTAssertEqual(groundItem.startLocalDisplay, "2026-08-24 13:40")
+        XCTAssertEqual(groundItem.endLocalDisplay, "2026-08-24 15:40")
+
+        let groundLeg = try XCTUnwrap(schedule.legs.first {
+            $0.flight == "GND" && $0.depAirport == "CGN" && $0.arrAirport == "FRA"
+        })
+        XCTAssertEqual(groundLeg.status, "GND")
+        XCTAssertEqual(TimelineLegIconSupport.fallbackSystemName(for: groundLeg.status), "car.fill")
+        let groundKey = CrewAccessTripSummaryStore.legUTCKey(
+            tripID: "12194",
+            sequence: 9,
+            flight: "GND",
+            depAirport: "CGN",
+            arrAirport: "FRA"
+        )
+        let deadheadKey = CrewAccessTripSummaryStore.legUTCKey(
+            tripID: "12194",
+            sequence: 9,
+            flight: "LH1040",
+            depAirport: "FRA",
+            arrAirport: "CDG"
+        )
+        XCTAssertNotEqual(groundKey, deadheadKey)
+
+        let sydneyLeg = try XCTUnwrap(schedule.legs.first { $0.arrAirport == "SYD" })
+        XCTAssertEqual(sydneyLeg.layoverHotelName, "Crowne Plaza Sydney Darling Harbour")
+
+        let nextLegData = TimelineLegData(schedules: [schedule])
+        let connection = LegConnectionTextBuilder.connectionInfo(
+            after: groundLeg,
+            nextLegByID: nextLegData.nextLegByID
+        )
+        XCTAssertEqual(connection?.minutes, 60)
+        XCTAssertEqual(connection?.airport, "FRA")
+    }
+
     private func parseDraft(pdfName: String, service: CrewAccessPDFImportService) throws -> CrewAccessImportDraft {
         let pdfURL = sampleTripURL(pdfName)
         let data = try Data(contentsOf: pdfURL)
