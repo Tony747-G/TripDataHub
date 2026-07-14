@@ -2067,6 +2067,7 @@ final class AppViewModel: ObservableObject {
                 }
                 throw error
             }
+            finalizeCrewAccessJSONWriteBestEffort(with: jsonWriteContext)
 
             // New import committed successfully — safe to tombstone overlapping trips.
             if !overlapIDs.isEmpty || !overlapPairings.isEmpty {
@@ -2182,7 +2183,10 @@ final class AppViewModel: ObservableObject {
             .compactMap { LegConnectionTextBuilder.parseUTC($0.startUtc) }.min()
         let newEnd = incomingJSON.items
             .compactMap { LegConnectionTextBuilder.parseUTC($0.endUtc) }.max()
-        let reportWindowStart = newStart.map { $0.addingTimeInterval(-90 * 60) }
+        let incomingOperationalInterval = Self.crewAccessOperationalInterval(
+            startUTC: newStart,
+            endUTC: newEnd
+        )
         var incomingDayKeys = Self.baseLocalDayKeys(startUTC: newStart, endUTC: newEnd, domicile: domicile)
         incomingDayKeys.formUnion(Self.tripInformationDayKeys(incomingJSON.tripInformationDate))
 
@@ -2216,22 +2220,33 @@ final class AppViewModel: ObservableObject {
                 ))
                 continue
             }
-            if let ws = reportWindowStart, let we = newEnd {
-                let exStart = existing.legs.compactMap { LegConnectionTextBuilder.parseUTC($0.depUTC) }.min()
-                let exEnd   = existing.legs.compactMap { LegConnectionTextBuilder.parseUTC($0.arrUTC) }.max()
-                if let s = exStart, let e = exEnd, ws < e && we > s {
+            let existingStart = existing.legs
+                .compactMap { LegConnectionTextBuilder.parseUTC($0.depUTC) }.min()
+            let existingEnd = existing.legs
+                .compactMap { LegConnectionTextBuilder.parseUTC($0.arrUTC) }.max()
+            let existingOperationalInterval = Self.crewAccessOperationalInterval(
+                startUTC: existingStart,
+                endUTC: existingEnd
+            )
+            if let incomingInterval = incomingOperationalInterval,
+               let existingInterval = existingOperationalInterval {
+                if incomingInterval.start < existingInterval.end,
+                   incomingInterval.end > existingInterval.start {
                     candidates.append(TripImportReplacementCandidate(
                         id: existing.id,
                         tripId: existingPairings.sorted().joined(separator: ", "),
                         pairings: existingPairings,
                         reason: .timeOverlap
                     ))
-                    continue
                 }
+                // UTC is authoritative. A shared domicile-local calendar day is not an
+                // overlap when both operational intervals are known (for example, an
+                // international trip arriving in the morning and another reporting later).
+                continue
             }
             let existingDayKeys = Self.baseLocalDayKeys(
-                startUTC: existing.legs.compactMap { LegConnectionTextBuilder.parseUTC($0.depUTC) }.min(),
-                endUTC: existing.legs.compactMap { LegConnectionTextBuilder.parseUTC($0.arrUTC) }.max(),
+                startUTC: existingStart,
+                endUTC: existingEnd,
                 domicile: domicile
             )
             if !incomingDayKeys.isEmpty,
@@ -2246,6 +2261,20 @@ final class AppViewModel: ObservableObject {
             }
         }
         return candidates
+    }
+
+    /// Approximate the duty footprint until exact duty-start/duty-end fields are persisted.
+    /// The parser already treats UTC as authoritative; these buffers cover normal report and
+    /// post-flight duties while keeping independent same-local-day trips separate.
+    private nonisolated static func crewAccessOperationalInterval(
+        startUTC: Date?,
+        endUTC: Date?
+    ) -> (start: Date, end: Date)? {
+        guard let startUTC, let endUTC, startUTC <= endUTC else { return nil }
+        return (
+            start: startUTC.addingTimeInterval(-90 * 60),
+            end: endUTC.addingTimeInterval(30 * 60)
+        )
     }
 
     private nonisolated static func baseLocalDayKeys(startUTC: Date?, endUTC: Date?, domicile: String) -> Set<String> {
@@ -4410,6 +4439,16 @@ final class AppViewModel: ObservableObject {
 
         if context.createdNewFile, fm.fileExists(atPath: context.finalURL.path) {
             try fm.removeItem(at: context.finalURL)
+        }
+    }
+
+    private func finalizeCrewAccessJSONWriteBestEffort(with context: CrewAccessJSONWriteContext) {
+        guard let backupURL = context.backupURL,
+              FileManager.default.fileExists(atPath: backupURL.path) else { return }
+        do {
+            try FileManager.default.removeItem(at: backupURL)
+        } catch {
+            logger.error("[Import] Failed to remove committed JSON backup \(backupURL.lastPathComponent, privacy: .private): \(error.localizedDescription, privacy: .public)")
         }
     }
 

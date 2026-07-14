@@ -170,16 +170,18 @@ struct RootTabView: View {
             ) {
                 primaryScreen = .timeline
                 timelineScrollTrigger += 1
-            },
-            ExpandableFloatingMenuItem(
+            }
+        ]
+        if AppEnvironment.isIPhoneCalendarVisible {
+            items.append(ExpandableFloatingMenuItem(
                 id: "calendar",
                 icon: "calendar",
                 label: "Calendar",
                 isActive: primaryScreen == .calendar
             ) {
                 primaryScreen = .calendar
-            }
-        ]
+            })
+        }
         if AppEnvironment.isFriendSharingVisible {
             items.append(ExpandableFloatingMenuItem(id: "friends", icon: "person.2", label: "Friends") {
                 showingFriends = true

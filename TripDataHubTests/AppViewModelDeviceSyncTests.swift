@@ -317,57 +317,246 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         })
     }
 
-    func test_confirmImport_removesExistingTripWhenBaseLocalDatesOverlapWithoutUTCIntersection() async throws {
+    func test_confirmImport_preserves40303AndA70606WhenOnlyBaseLocalDatesOverlap() async throws {
         try removeCrewAccessImportDirectory()
         defer { try? removeCrewAccessImportDirectory() }
 
-        let deviceService = FakeDeviceScheduleCloudKitService()
-        let vm = AppViewModel(
-            syncService: NoopSyncService(),
-            authService: NoopAuthService(),
-            cacheService: InMemoryCacheService(),
-            notificationService: NoopNotificationService(),
-            crewAccessImportService: CrewAccessPDFImportService(),
-            friendScheduleCloudKitService: NoopFriendCloudKitService(),
-            gemsVerificationCloudKitService: NoopGEMSVerificationService(),
-            deviceScheduleCloudKitService: deviceService,
-            crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService(),
-            keychainService: EmptyKeychainService()
+        let existingJSON = makeCrewAccessJSON(
+            tripId: "40303",
+            tripInformationDate: "12Jul2026",
+            startUtc: "2026-07-12T21:55:00Z",
+            endUtc: "2026-07-14T13:56:00Z"
+        )
+        let incomingJSON = makeCrewAccessJSON(
+            tripId: "A70606",
+            tripInformationDate: "15Jul2026",
+            startUtc: "2026-07-15T07:13:00Z",
+            endUtc: "2026-07-18T19:32:00Z"
+        )
+        try writeCrewAccessJSON(existingJSON, fileName: "2026-07-12_40303.json")
+
+        let incomingSchedule = makeSchedule(
+            id: "CA26-05-A70606",
+            pairing: "A70606",
+            depUTC: "2026-07-15T07:13:00Z",
+            arrUTC: "2026-07-18T19:32:00Z"
+        )
+        let vm = makeImportViewModel(
+            schedule: incomingSchedule,
+            json: incomingJSON,
+            sourceFileName: "Trip_Id_A70606.pdf"
         )
         setVerifiedIdentity(on: vm)
-
-        let existingJSON = makeCrewAccessJSON(
-            tripId: "B00001",
-            tripInformationDate: "16Jun2026",
-            startUtc: "2026-06-16T23:00:00Z",
-            endUtc: "2026-06-17T01:00:00Z"
-        )
-        try writeCrewAccessJSON(existingJSON)
         vm.crewAccessSchedules = [
             makeSchedule(
-                id: "CA26-06-B00001",
-                pairing: "B00001",
-                depUTC: "2026-06-16T23:00:00Z",
-                arrUTC: "2026-06-17T01:00:00Z"
+                id: "CA26-05-40303",
+                pairing: "40303",
+                depUTC: "2026-07-12T21:55:00Z",
+                arrUTC: "2026-07-14T13:56:00Z"
             )
         ]
 
-        let sampleURL = repositoryRootURL()
-            .appendingPathComponent("web")
-            .appendingPathComponent("sample")
-            .appendingPathComponent("TripDataHub_App_Review_Sample_A00001.pdf")
-        let data = try Data(contentsOf: sampleURL)
-
-        let importAccepted = await vm.importCrewAccessPDFData(data, sourceFileName: sampleURL.lastPathComponent)
+        let importAccepted = await vm.importCrewAccessPDFData(
+            Data([0x25, 0x50, 0x44, 0x46]),
+            sourceFileName: "Trip_Id_A70606.pdf"
+        )
         XCTAssertTrue(importAccepted)
-        XCTAssertTrue(vm.pendingImportReplacementCandidates.contains { candidate in
-            candidate.tripId == "B00001" && candidate.reason == .timeOverlap
+        XCTAssertFalse(vm.pendingImportReplacementCandidates.contains { candidate in
+            candidate.tripId == "40303" && candidate.reason == .timeOverlap
         })
 
         await vm.confirmPendingImport()
 
-        XCTAssertEqual(Set(vm.crewAccessSchedules.flatMap { $0.legs.map(\.pairing) }), ["A00001"])
-        XCTAssertTrue(crewAccessImportJSONFiles().allSatisfy { !$0.lastPathComponent.contains("B00001") })
+        XCTAssertEqual(
+            Set(vm.crewAccessSchedules.flatMap { $0.legs.map(\.pairing) }),
+            ["40303", "A70606"]
+        )
+        XCTAssertTrue(crewAccessImportJSONFilesContainTripID("40303"))
+        XCTAssertTrue(crewAccessImportJSONFilesContainTripID("A70606"))
+    }
+
+    func test_pendingImport_preservesMorningArrivalAndNoonDepartureOnSameLocalDay() async throws {
+        let sourceFileName = "NOON02-\(UUID().uuidString).pdf"
+        let pdfData = Data("%PDF-NOON02-\(UUID().uuidString)".utf8)
+        let incomingJSON = makeCrewAccessJSON(
+            tripId: "NOON02",
+            tripInformationDate: "20Jul2026",
+            // 12:00 in Anchorage (AKDT). Report begins at 10:30 local.
+            startUtc: "2026-07-20T20:00:00Z",
+            endUtc: "2026-07-20T22:00:00Z"
+        )
+        let incomingSchedule = makeSchedule(
+            id: "CA26-05-NOON02",
+            pairing: "NOON02",
+            depUTC: "2026-07-20T20:00:00Z",
+            arrUTC: "2026-07-20T22:00:00Z"
+        )
+        let vm = makeImportViewModel(
+            schedule: incomingSchedule,
+            json: incomingJSON,
+            sourceFileName: sourceFileName
+        )
+        setVerifiedIdentity(on: vm)
+        vm.crewAccessSchedules = [
+            makeSchedule(
+                id: "CA26-05-MORN01",
+                pairing: "MORN01",
+                depUTC: "2026-07-20T12:00:00Z",
+                // 10:00 in Anchorage; post-flight duty ends at 10:30 local.
+                arrUTC: "2026-07-20T18:00:00Z"
+            )
+        ]
+
+        let importAccepted = await vm.importCrewAccessPDFData(
+            pdfData,
+            sourceFileName: sourceFileName
+        )
+
+        XCTAssertTrue(importAccepted)
+        XCTAssertFalse(vm.pendingImportReplacementCandidates.contains { candidate in
+            candidate.tripId == "MORN01" && candidate.reason == .timeOverlap
+        })
+        await vm.discardPendingImport()
+    }
+
+    func test_pendingImport_detectsOverlapWhenOperationalDutyBuffersIntersect() async throws {
+        let sourceFileName = "NEXT02-\(UUID().uuidString).pdf"
+        let pdfData = Data("%PDF-NEXT02-\(UUID().uuidString)".utf8)
+        let incomingJSON = makeCrewAccessJSON(
+            tripId: "NEXT02",
+            tripInformationDate: "20Jul2026",
+            // Flight times do not overlap, but the 17:30Z report is before the
+            // existing trip's 18:30Z post-flight release.
+            startUtc: "2026-07-20T19:00:00Z",
+            endUtc: "2026-07-20T21:00:00Z"
+        )
+        let incomingSchedule = makeSchedule(
+            id: "CA26-05-NEXT02",
+            pairing: "NEXT02",
+            depUTC: "2026-07-20T19:00:00Z",
+            arrUTC: "2026-07-20T21:00:00Z"
+        )
+        let vm = makeImportViewModel(
+            schedule: incomingSchedule,
+            json: incomingJSON,
+            sourceFileName: sourceFileName
+        )
+        setVerifiedIdentity(on: vm)
+        vm.crewAccessSchedules = [
+            makeSchedule(
+                id: "CA26-05-FIRST01",
+                pairing: "FIRST01",
+                depUTC: "2026-07-20T12:00:00Z",
+                arrUTC: "2026-07-20T18:00:00Z"
+            )
+        ]
+
+        let importAccepted = await vm.importCrewAccessPDFData(
+            pdfData,
+            sourceFileName: sourceFileName
+        )
+
+        XCTAssertTrue(importAccepted)
+        XCTAssertTrue(vm.pendingImportReplacementCandidates.contains { candidate in
+            candidate.tripId == "FIRST01" && candidate.reason == .timeOverlap
+        })
+        await vm.discardPendingImport()
+    }
+
+    func test_pendingImport_usesBaseLocalDayFallbackWhenIncomingUTCMissing() async throws {
+        let sourceFileName = "NO-UTC-\(UUID().uuidString).pdf"
+        let pdfData = Data("%PDF-NO-UTC-\(UUID().uuidString)".utf8)
+        let incomingJSON = makeCrewAccessJSON(
+            tripId: "NO-UTC",
+            tripInformationDate: "20Jul2026",
+            startUtc: "",
+            endUtc: ""
+        )
+        let incomingSchedule = makeSchedule(
+            id: "CA26-05-NO-UTC",
+            pairing: "NO-UTC",
+            depUTC: "",
+            arrUTC: ""
+        )
+        let vm = makeImportViewModel(
+            schedule: incomingSchedule,
+            json: incomingJSON,
+            sourceFileName: sourceFileName
+        )
+        setVerifiedIdentity(on: vm)
+        vm.crewAccessSchedules = [
+            makeSchedule(
+                id: "CA26-05-EXISTING",
+                pairing: "EXISTING",
+                depUTC: "2026-07-20T12:00:00Z",
+                arrUTC: "2026-07-20T18:00:00Z"
+            )
+        ]
+
+        let importAccepted = await vm.importCrewAccessPDFData(
+            pdfData,
+            sourceFileName: sourceFileName
+        )
+
+        XCTAssertTrue(importAccepted)
+        XCTAssertTrue(vm.pendingImportReplacementCandidates.contains { candidate in
+            candidate.tripId == "EXISTING" && candidate.reason == .timeOverlap
+        })
+        await vm.discardPendingImport()
+    }
+
+    func test_confirmImport_removesCommittedJSONBackup() async throws {
+        try removeCrewAccessImportDirectory()
+        defer { try? removeCrewAccessImportDirectory() }
+
+        let existingJSON = makeCrewAccessJSON(
+            tripId: "BACKUP1",
+            tripInformationDate: "20Jul2026",
+            startUtc: "2026-07-20T12:00:00Z",
+            endUtc: "2026-07-20T18:00:00Z"
+        )
+        let incomingJSON = makeCrewAccessJSON(
+            tripId: "BACKUP1",
+            tripInformationDate: "20Jul2026",
+            startUtc: "2026-07-20T13:00:00Z",
+            endUtc: "2026-07-20T19:00:00Z"
+        )
+        try writeCrewAccessJSON(existingJSON, fileName: "2026-07-20_BACKUP1.json")
+
+        let incomingSchedule = makeSchedule(
+            id: "CA26-05-BACKUP1",
+            pairing: "BACKUP1",
+            depUTC: "2026-07-20T13:00:00Z",
+            arrUTC: "2026-07-20T19:00:00Z"
+        )
+        let vm = makeImportViewModel(
+            schedule: incomingSchedule,
+            json: incomingJSON,
+            sourceFileName: "BACKUP1.pdf"
+        )
+        setVerifiedIdentity(on: vm)
+        vm.crewAccessSchedules = [
+            makeSchedule(
+                id: "CA26-05-BACKUP1",
+                pairing: "BACKUP1",
+                depUTC: "2026-07-20T12:00:00Z",
+                arrUTC: "2026-07-20T18:00:00Z"
+            )
+        ]
+
+        let importAccepted = await vm.importCrewAccessPDFData(
+            Data([0x25, 0x50, 0x44, 0x46]),
+            sourceFileName: "BACKUP1.pdf"
+        )
+        XCTAssertTrue(importAccepted)
+        await vm.confirmPendingImport()
+
+        let allFiles = try FileManager.default.contentsOfDirectory(
+            at: crewAccessImportDirectory(),
+            includingPropertiesForKeys: nil,
+            options: []
+        )
+        XCTAssertFalse(allFiles.contains { $0.lastPathComponent.contains(".bak-") })
     }
 
     func test_confirmImport_replacesSameTripIDWithinBidPeriodButPreservesDifferentBidPeriod() async throws {
@@ -466,6 +655,35 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             gemsVerificationCloudKitService: NoopGEMSVerificationService(),
             deviceScheduleCloudKitService: deviceService,
             crewAccessImportCloudKitService: importCloudKitService,
+            keychainService: EmptyKeychainService()
+        )
+    }
+
+    private func makeImportViewModel(
+        schedule: PayPeriodSchedule,
+        json: CrewAccessTripJSON,
+        sourceFileName: String
+    ) -> AppViewModel {
+        let importService = FixedImportService(draft: CrewAccessImportDraft(
+            sourceFileName: sourceFileName,
+            tripId: json.tripId,
+            tripDate: json.tripInformationDate,
+            parsedSchedule: schedule,
+            jsonPayload: json,
+            warnings: [],
+            errors: [],
+            rawExtractStats: RawExtractStats(pageCount: 1, characterCount: 1, lineCount: 1)
+        ))
+        return AppViewModel(
+            syncService: NoopSyncService(),
+            authService: NoopAuthService(),
+            cacheService: InMemoryCacheService(),
+            notificationService: NoopNotificationService(),
+            crewAccessImportService: importService,
+            friendScheduleCloudKitService: NoopFriendCloudKitService(),
+            gemsVerificationCloudKitService: NoopGEMSVerificationService(),
+            deviceScheduleCloudKitService: FakeDeviceScheduleCloudKitService(),
+            crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService(),
             keychainService: EmptyKeychainService()
         )
     }
