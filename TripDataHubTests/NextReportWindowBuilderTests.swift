@@ -158,6 +158,44 @@ final class NextReportWindowBuilderTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(windows.first).tripStartDomicile, iso("2026-06-10T08:00:00Z"))
     }
 
+    func test_nextReportCountdown_startsWhen40303ReturnsBeforeA70606() throws {
+        let schedules = [
+            makeSchedule(legs: [
+                makeLeg(pairing: "40303", leg: 1, dep: "ANC", arr: "SDF",
+                        depUTC: "2026-07-13T08:06:00Z", arrUTC: "2026-07-13T14:32:00Z"),
+                makeLeg(pairing: "40303", leg: 2, dep: "SDF", arr: "ANC",
+                        depUTC: "2026-07-14T07:15:00Z", arrUTC: "2026-07-14T13:56:00Z")
+            ]),
+            makeSchedule(legs: [
+                makeLeg(pairing: "A70606", leg: 1, dep: "ANC", arr: "SDF",
+                        depUTC: "2026-07-15T07:13:00Z", arrUTC: "2026-07-15T13:26:00Z"),
+                makeLeg(pairing: "A70606", leg: 2, dep: "SDF", arr: "ANC",
+                        depUTC: "2026-07-18T08:00:00Z", arrUTC: "2026-07-18T14:00:00Z")
+            ])
+        ]
+        let windows = NextReportWindowBuilder.build(
+            schedules: schedules,
+            domicileAirportCode: "ANC",
+            domicileTimeZone: Self.anchorageTimeZone
+        )
+
+        XCTAssertNil(
+            NextReportWindowBuilder.nextReportWindow(
+                from: windows,
+                now: iso("2026-07-14T13:55:59Z")
+            ),
+            "A70606 countdown must stay hidden while DH 5X064 is still en route"
+        )
+        let next = try XCTUnwrap(
+            NextReportWindowBuilder.nextReportWindow(
+                from: windows,
+                now: iso("2026-07-14T13:56:00Z")
+            )
+        )
+        XCTAssertEqual(next.pairing, "A70606")
+        XCTAssertEqual(next.reportTime, iso("2026-07-15T05:43:00Z"))
+    }
+
     // MARK: - Helpers
 
     private func iso(_ value: String) -> Date {

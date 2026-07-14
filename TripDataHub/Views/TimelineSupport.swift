@@ -84,7 +84,13 @@ struct TimelineLegData {
                 return seenKeys.insert(key).inserted
             }
             .sorted { lhs, rhs in
+                let lhsUTC = LegConnectionTextBuilder.parseUTC(lhs.depUTC)
+                let rhsUTC = LegConnectionTextBuilder.parseUTC(rhs.depUTC)
+                if let lhsUTC, let rhsUTC, lhsUTC != rhsUTC {
+                    return lhsUTC < rhsUTC
+                }
                 if lhs.depLocal == rhs.depLocal {
+                    if lhs.leg != rhs.leg { return lhs.leg < rhs.leg }
                     return lhs.flight < rhs.flight
                 }
                 return lhs.depLocal < rhs.depLocal
@@ -251,6 +257,22 @@ struct TimelineLegData {
             return 0
         }
         return year * 100 + period
+    }
+}
+
+enum TimelineTripStartSupport {
+    /// Returns the first chronological leg of each distinct pay-period/trip pair.
+    /// `legs` is expected to be in Timeline order (UTC first, local time fallback).
+    static func startLegIDs(in legs: [TripLeg]) -> Set<UUID> {
+        var seenTrips = Set<String>()
+        var result = Set<UUID>()
+        for leg in legs {
+            let tripKey = "\(leg.payPeriod)|\(leg.pairing)"
+            if seenTrips.insert(tripKey).inserted {
+                result.insert(leg.id)
+            }
+        }
+        return result
     }
 }
 

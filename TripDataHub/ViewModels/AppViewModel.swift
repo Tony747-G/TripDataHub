@@ -291,7 +291,7 @@ final class AppViewModel: ObservableObject {
     private var crewAccessLegImportReferenceTimes: [String: Date] = [:]
     private var logTenExportBacklog: [LogTenExportBacklogRecord] = []
     private var logTenExportedFingerprints: [String: String] = [:]
-    private var deletedCrewAccessTripKeys: Set<String> = []
+    private var deletedCrewAccessTripIntents: [String: Date] = [:]
     private var isUploadingSharedSchedule = false
     private var needsSharedScheduleUpload = false
     private var pendingSharedScheduleUploadReason: String?
@@ -330,6 +330,7 @@ final class AppViewModel: ObservableObject {
     private let verifiedIdentityKey = "verified_identity_profile_v1"
     private let crewAccessLegImportReferenceTimesKey = "crewaccess_leg_import_reference_times_v1"
     private let deletedCrewAccessTripKeysKey = "deleted_crewaccess_trip_keys_v1"
+    private let deletedCrewAccessTripIntentsKey = "deleted_crewaccess_trip_intents_v2"
     private let logTenExportBacklogKey = "logten_export_backlog_v1"
     private let logTenExportedFingerprintsKey = "logten_exported_fingerprints_v1"
     private let seniorityFileName = "pilot_seniority_records_v1.json"
@@ -417,7 +418,17 @@ final class AppViewModel: ObservableObject {
             from: UserDefaults.standard,
             key: crewAccessLegImportReferenceTimesKey
         )
-        self.deletedCrewAccessTripKeys = Set(UserDefaults.standard.stringArray(forKey: deletedCrewAccessTripKeysKey) ?? [])
+        self.deletedCrewAccessTripIntents = Self.loadDeletedCrewAccessTripIntents(
+            from: UserDefaults.standard,
+            key: deletedCrewAccessTripIntentsKey,
+            legacyKey: deletedCrewAccessTripKeysKey
+        )
+        Self.saveDeletedCrewAccessTripIntents(
+            self.deletedCrewAccessTripIntents,
+            to: UserDefaults.standard,
+            key: deletedCrewAccessTripIntentsKey,
+            legacyKey: deletedCrewAccessTripKeysKey
+        )
         self.logTenExportBacklog = Self.loadLogTenExportBacklog(
             from: UserDefaults.standard,
             key: logTenExportBacklogKey
@@ -1317,6 +1328,7 @@ final class AppViewModel: ObservableObject {
             // Intentionally not pruned so past-leg entries survive for any future LogTen export.
             let preservedReferenceTimes = crewAccessLegImportReferenceTimes
 
+            let deletedCrewAccessTripKeys = Set(deletedCrewAccessTripIntents.keys)
             let remoteSchedules = snapshot.schedules.filter { schedule in
                 Self.crewAccessTripKeys(for: schedule, domicile: verifiedIdentity.domicile)
                     .isDisjoint(with: deletedCrewAccessTripKeys)
@@ -1344,8 +1356,13 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    private func saveDeletedCrewAccessTripKeys() {
-        UserDefaults.standard.set(Array(deletedCrewAccessTripKeys).sorted(), forKey: deletedCrewAccessTripKeysKey)
+    private func saveDeletedCrewAccessTripIntents() {
+        Self.saveDeletedCrewAccessTripIntents(
+            deletedCrewAccessTripIntents,
+            to: UserDefaults.standard,
+            key: deletedCrewAccessTripIntentsKey,
+            legacyKey: deletedCrewAccessTripKeysKey
+        )
     }
 
     // MARK: - Manual Event Device Sync
@@ -1511,21 +1528,40 @@ final class AppViewModel: ObservableObject {
             for record in records {
                 let url = dir.appendingPathComponent(record.fileName)
                 let localModifiedAt = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                let tripKey = Self.crewAccessTripKey(
+                    fromCloudKitRecord: record,
+                    domicile: verifiedIdentity.domicile
+                )
                 if let deletedAt = record.deletedAt {
                     // Tombstoned remotely: remove local file only when the tombstone is
                     // newer than the local JSON. A re-import can recreate the same file
                     // name after an older tombstone; in that case local import wins.
-                    if fm.fileExists(atPath: url.path),
-                       localModifiedAt.map({ deletedAt >= $0 }) ?? true {
+                    if fm.fileExists(atPath: url.path), let localModifiedAt, localModifiedAt > deletedAt {
+                        if let tripKey, deletedCrewAccessTripIntents.removeValue(forKey: tripKey) != nil {
+                            saveDeletedCrewAccessTripIntents()
+                        }
+                    } else {
+                        if let tripKey,
+                           deletedAt > (deletedCrewAccessTripIntents[tripKey] ?? .distantPast) {
+                            deletedCrewAccessTripIntents[tripKey] = deletedAt
+                            saveDeletedCrewAccessTripIntents()
+                        }
                         try? fm.removeItem(at: url)
                     }
                     continue
                 }
-                if Self.crewAccessTripKey(fromCloudKitRecord: record).map({ deletedCrewAccessTripKeys.contains($0) }) == true {
-                    if fm.fileExists(atPath: url.path) { try? fm.removeItem(at: url) }
-                    let tombstoned = await tombstoneCrewAccessImportFiles(fileNames: [record.fileName])
-                    recoveryUploadsSucceeded = recoveryUploadsSucceeded && tombstoned
-                    continue
+                if let tripKey, let locallyDeletedAt = deletedCrewAccessTripIntents[tripKey] {
+                    if record.updatedAt > locallyDeletedAt {
+                        // A later re-import on another device wins over this device's stale
+                        // deletion intent. Clear it before rebuilding Timeline/Calendar.
+                        deletedCrewAccessTripIntents.removeValue(forKey: tripKey)
+                        saveDeletedCrewAccessTripIntents()
+                    } else {
+                        if fm.fileExists(atPath: url.path) { try? fm.removeItem(at: url) }
+                        let tombstoned = await tombstoneCrewAccessImportFiles(fileNames: [record.fileName])
+                        recoveryUploadsSucceeded = recoveryUploadsSucceeded && tombstoned
+                        continue
+                    }
                 }
                 try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
                 let fileURL = url
@@ -2412,7 +2448,7 @@ final class AppViewModel: ObservableObject {
     }
 
     func reconcileCrewAccessSchedulesWithImportFiles() async {
-        let deletedKeys = deletedCrewAccessTripKeys
+        let deletedKeys = Set(deletedCrewAccessTripIntents.keys)
         let domicile = verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
         var rebuiltSchedules = await Task.detached(priority: .utility) {
             Self.loadCrewAccessSchedulesFromImportFiles().filter { schedule in
@@ -2643,9 +2679,12 @@ final class AppViewModel: ObservableObject {
         let scheduleIDsToDelete = toDelete.map(\.id)
         let domicile = verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
         let tripKeysToDelete = Array(Set(toDelete.flatMap { Self.crewAccessTripKeys(for: $0, domicile: domicile) }))
+        let deletionTime = Date()
         if !tripKeysToDelete.isEmpty {
-            deletedCrewAccessTripKeys.formUnion(tripKeysToDelete)
-            saveDeletedCrewAccessTripKeys()
+            for tripKey in tripKeysToDelete {
+                deletedCrewAccessTripIntents[tripKey] = deletionTime
+            }
+            saveDeletedCrewAccessTripIntents()
         }
         let fileDeleteResult = await Task.detached(priority: .utility) {
             Self.deleteCrewAccessImportFilesBestEffort(
@@ -2660,7 +2699,6 @@ final class AppViewModel: ObservableObject {
         } else {
             crewAccessDeleteMessage = "Deleted \(toDelete.count) trip(s). Some JSON files could not be removed."
         }
-        let deletionTime = Date()
         lastDeviceScheduleFetchAt = deletionTime
         UserDefaults.standard.set(deletionTime, forKey: deviceScheduleFetchAtKey)
         var tombstoned = true
@@ -2872,8 +2910,10 @@ final class AppViewModel: ObservableObject {
         let domicile = verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
         let importedTripKeys = Self.crewAccessTripKeys(for: imported, domicile: domicile)
         if !importedTripKeys.isEmpty {
-            deletedCrewAccessTripKeys.subtract(importedTripKeys)
-            saveDeletedCrewAccessTripKeys()
+            for tripKey in importedTripKeys {
+                deletedCrewAccessTripIntents.removeValue(forKey: tripKey)
+            }
+            saveDeletedCrewAccessTripIntents()
         }
         updatedCrewAccess = updatedCrewAccess.compactMap { schedule in
             let remainingLegs = schedule.legs.filter { leg in
@@ -3757,9 +3797,27 @@ final class AppViewModel: ObservableObject {
         return "\(order):\(normalizedTripID)"
     }
 
-    private nonisolated static func crewAccessTripKey(fromCloudKitRecord record: CrewAccessImportCloudKitRecord) -> String? {
+    private nonisolated static func crewAccessTripKey(
+        fromCloudKitRecord record: CrewAccessImportCloudKitRecord,
+        domicile: String
+    ) -> String? {
         guard let payload = try? JSONDecoder().decode(CrewAccessTripJSON.self, from: record.jsonData) else {
             return nil
+        }
+        let startUTC = payload.items
+            .compactMap { LegConnectionTextBuilder.parseUTC($0.startUtc) }
+            .min()
+            ?? record.firstDepartureUTC.flatMap { LegConnectionTextBuilder.parseUTC($0) }
+        let endUTC = payload.items
+            .compactMap { LegConnectionTextBuilder.parseUTC($0.endUtc) }
+            .max()
+        if let operationalKey = crewAccessTripKey(
+            tripID: payload.tripId,
+            startUTC: startUTC,
+            endUTC: endUTC,
+            domicile: domicile
+        ) {
+            return operationalKey
         }
         let payloadTripInformationDate = payload.tripInformationDate.trimmingCharacters(in: .whitespacesAndNewlines)
         return crewAccessTripKey(
@@ -3767,6 +3825,48 @@ final class AppViewModel: ObservableObject {
             tripInformationDate: payloadTripInformationDate.isEmpty ? record.tripInformationDate : payloadTripInformationDate,
             fallbackDate: record.firstDepartureUTC.flatMap { LegConnectionTextBuilder.parseUTC($0) }
         )
+    }
+
+    private nonisolated static func loadDeletedCrewAccessTripIntents(
+        from defaults: UserDefaults,
+        key: String,
+        legacyKey: String
+    ) -> [String: Date] {
+        var intents: [String: Date] = [:]
+        if let stored = defaults.dictionary(forKey: key) {
+            for (tripKey, rawValue) in stored {
+                let timestamp: TimeInterval?
+                if let value = rawValue as? TimeInterval {
+                    timestamp = value
+                } else if let value = rawValue as? NSNumber {
+                    timestamp = value.doubleValue
+                } else {
+                    timestamp = nil
+                }
+                if let timestamp {
+                    intents[tripKey] = Date(timeIntervalSince1970: timestamp)
+                }
+            }
+        }
+
+        // v1 stored only permanent keys without timestamps. Treat them as legacy
+        // deletion intents so any subsequently active CloudKit record (a re-import)
+        // can win and heal older devices instead of being tombstoned again.
+        for tripKey in defaults.stringArray(forKey: legacyKey) ?? [] where intents[tripKey] == nil {
+            intents[tripKey] = .distantPast
+        }
+        return intents
+    }
+
+    private nonisolated static func saveDeletedCrewAccessTripIntents(
+        _ intents: [String: Date],
+        to defaults: UserDefaults,
+        key: String,
+        legacyKey: String
+    ) {
+        let stored = intents.mapValues(\.timeIntervalSince1970)
+        defaults.set(stored, forKey: key)
+        defaults.removeObject(forKey: legacyKey)
     }
 
     private nonisolated static func crewAccessTripKey(for leg: TripLeg, domicile: String) -> String? {

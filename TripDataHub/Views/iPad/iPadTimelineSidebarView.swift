@@ -84,16 +84,11 @@ struct IPadTimelineSidebarView: View {
     /// Computed so that as time advances the displayed report updates without
     /// re-running the expensive NextReportWindowBuilder.build().
     private var nextReportInfo: (reportTime: Date, tripLabel: String)? {
-        let now = Date()
-        for window in cachedReportWindows {
-            if now < window.reportTime {
-                return (window.reportTime, window.pairing)
-            }
-            if now >= window.reportTime && now < window.tripEndDomicile {
-                return nil
-            }
-        }
-        return nil
+        guard let window = NextReportWindowBuilder.nextReportWindow(
+            from: cachedReportWindows,
+            now: Date()
+        ) else { return nil }
+        return (window.reportTime, window.pairing)
     }
 
     /// Section (day) IDs that contain at least one leg of the selected trip.
@@ -120,31 +115,6 @@ struct IPadTimelineSidebarView: View {
                 ScrollView {
                     LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                         ForEach(legData.daySections) { section in
-                            // Trip summary cards for trips whose first leg is in
-                            // this day section. Rendered OUTSIDE the Section so
-                            // they appear above the pinned date header, not below.
-                            let startLegs = section.legs.filter { cachedTripStartLegIDs.contains($0.id) }
-                            if !startLegs.isEmpty {
-                                ForEach(startLegs, id: \.id) { startLeg in
-                                    let isTripSelected = focusedTripID == nil
-                                        && selectedTripID == "\(startLeg.payPeriod)|\(startLeg.pairing)"
-                                    let isTripHighlighted = deleteTripConfirmPairing == startLeg.pairing
-                                    tripSummaryCard(for: startLeg, isPast: section.isPast, isHighlighted: isTripHighlighted)
-                                        .background(isTripSelected ? Color.accentColor.opacity(0.12) : Color.clear)
-                                        .overlay(alignment: .leading) {
-                                            if isTripSelected {
-                                                Rectangle().fill(Color.accentColor).frame(width: 3)
-                                            }
-                                        }
-                                        .id("ipad.tripdata.\(startLeg.id.uuidString)")
-                                        .simultaneousGesture(
-                                            LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                                                guard focusedTripID == nil else { return }
-                                                deleteTripConfirmPairing = startLeg.pairing
-                                            }
-                                        )
-                                }
-                            }
                             Section {
                                 ForEach(section.entries) { entry in
                                     switch entry {
@@ -156,6 +126,22 @@ struct IPadTimelineSidebarView: View {
                                         let isHighlighted = deleteTripConfirmPairing == leg.pairing
                                         let flightMatches = friendScheduleMatches.flightMatchesByLegID[leg.id] ?? []
                                         let hasFlightMatch = !flightMatches.isEmpty
+                                        if cachedTripStartLegIDs.contains(leg.id) {
+                                            tripSummaryCard(for: leg, isPast: section.isPast, isHighlighted: isHighlighted)
+                                                .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+                                                .overlay(alignment: .leading) {
+                                                    if isSelected {
+                                                        Rectangle().fill(Color.accentColor).frame(width: 3)
+                                                    }
+                                                }
+                                                .id("ipad.tripdata.\(leg.id.uuidString)")
+                                                .simultaneousGesture(
+                                                    LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                                        guard focusedTripID == nil else { return }
+                                                        deleteTripConfirmPairing = leg.pairing
+                                                    }
+                                                )
+                                        }
                                         Group {
                                             Button {
                                                 guard focusedTripID == nil else { return }
@@ -819,13 +805,10 @@ struct IPadTimelineSidebarView: View {
                 ?? Self.fileKey(for: leg)
         }
 
-        // Pre-compute trip-start leg IDs (first leg per unique trip, in depLocal order).
-        var seenTrips = Set<String>()
-        var startIDs = Set<UUID>()
-        for leg in data.allLegs {
-            let key = "\(leg.payPeriod)|\(leg.pairing)"
-            if seenTrips.insert(key).inserted { startIDs.insert(leg.id) }
-        }
+        // Trip summary must be attached to the actual first chronological leg.
+        // Rendering it at the section level moves a late-starting trip above
+        // earlier flights that happen to share the same local calendar day.
+        let startIDs = TimelineTripStartSupport.startLegIDs(in: data.allLegs)
         cachedTripStartLegIDs = startIDs
 
         // Pre-compute first row ID per trip (used for scroll + portrait sheet focus).

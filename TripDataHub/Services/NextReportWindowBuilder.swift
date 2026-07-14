@@ -89,6 +89,31 @@ enum NextReportWindowBuilder {
         return results
     }
 
+    /// Selects the next report countdown while suppressing it until the current
+    /// trip has returned to domicile. At the exact arrival time, the following
+    /// trip becomes eligible.
+    static func nextReportWindow(
+        from windows: [NextReportTripWindow],
+        now: Date
+    ) -> NextReportTripWindow? {
+        for window in windows.sorted(by: { $0.reportTime < $1.reportTime }) {
+            if now < window.reportTime {
+                return window
+            }
+            if now < window.tripEndDomicile {
+                return nil
+            }
+        }
+        return nil
+    }
+
+    static func hasActiveTrip(
+        in windows: [NextReportTripWindow],
+        now: Date
+    ) -> Bool {
+        windows.contains { now >= $0.reportTime && now < $0.tripEndDomicile }
+    }
+
     private static func parseUTC(_ raw: String?) -> Date? {
         guard let raw else { return nil }
         return LegConnectionTextBuilder.parseUTC(raw)

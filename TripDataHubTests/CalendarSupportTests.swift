@@ -1364,6 +1364,49 @@ final class TimelineChronologySupportTests: XCTestCase {
         }
     }
 
+    func test_tripSummaryForA70606_isAttachedAfter40303FinalDeadhead() {
+        let first40303 = leg(
+            payPeriod: "PP26-08",
+            pairing: "40303",
+            flight: "5X083",
+            depAirport: "ORD",
+            arrAirport: "SDF",
+            depUTC: "2026-07-13T04:06:00Z",
+            arrUTC: "2026-07-13T06:32:00Z",
+            legNumber: 1
+        )
+        let final40303 = leg(
+            payPeriod: "PP26-08",
+            pairing: "40303",
+            flight: "5X064",
+            depAirport: "SDF",
+            arrAirport: "ANC",
+            depUTC: "2026-07-14T07:15:00Z",
+            arrUTC: "2026-07-14T13:56:00Z",
+            legNumber: 3
+        )
+        let firstA70606 = leg(
+            payPeriod: "PP26-08",
+            pairing: "A70606",
+            flight: "5X197",
+            depAirport: "ANC",
+            arrAirport: "SDF",
+            depUTC: "2026-07-15T07:13:00Z",
+            arrUTC: "2026-07-15T13:26:00Z",
+            legNumber: 1
+        )
+        let schedule40303 = schedule(id: "40303", label: "PP26-08", legs: [final40303, first40303])
+        let scheduleA70606 = schedule(id: "A70606", label: "PP26-08", legs: [firstA70606])
+
+        let data = TimelineLegData(schedules: [scheduleA70606, schedule40303])
+        let startIDs = TimelineTripStartSupport.startLegIDs(in: data.allLegs)
+
+        XCTAssertEqual(data.allLegs.map(\.flight), ["5X083", "5X064", "5X197"])
+        XCTAssertFalse(startIDs.contains(final40303.id))
+        XCTAssertTrue(startIDs.contains(firstA70606.id))
+        XCTAssertEqual(data.allLegs.firstIndex(where: { $0.id == firstA70606.id }), 2)
+    }
+
     /// Bid-period definitions are a hardcoded table that must be extended by hand.
     /// When the table runs out, the calendar silently returns nil for every lookup
     /// and the BP/PP UI stops working. This test fails ~90 days before the horizon

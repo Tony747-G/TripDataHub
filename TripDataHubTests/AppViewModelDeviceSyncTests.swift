@@ -198,6 +198,171 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         XCTAssertEqual(uploadedFileNames, [fileName])
     }
 
+    func test_fetchCrewAccessImports_newerRemoteReimportClearsLegacyDeletionIntentOnOtherDevice() async throws {
+        try removeCrewAccessImportDirectory()
+        defer { try? removeCrewAccessImportDirectory() }
+
+        let legacyDeletionKey = "deleted_crewaccess_trip_keys_v1"
+        let deletionIntentsKey = "deleted_crewaccess_trip_intents_v2"
+        UserDefaults.standard.removeObject(forKey: deletionIntentsKey)
+        UserDefaults.standard.set(["2605:40303"], forKey: legacyDeletionKey)
+        defer {
+            UserDefaults.standard.removeObject(forKey: legacyDeletionKey)
+            UserDefaults.standard.removeObject(forKey: deletionIntentsKey)
+        }
+
+        let trip40303 = makeCrewAccessJSON(
+            tripId: "40303",
+            tripInformationDate: "12Jul2026",
+            startUtc: "2026-07-12T21:55:00Z",
+            endUtc: "2026-07-14T13:56:00Z"
+        )
+        let tripA70606 = makeCrewAccessJSON(
+            tripId: "A70606",
+            tripInformationDate: "15Jul2026",
+            startUtc: "2026-07-15T07:13:00Z",
+            endUtc: "2026-07-18T19:32:00Z"
+        )
+        let encoder = JSONEncoder()
+        let reimportedAt = Date()
+        let importCloudKitService = StatefulCrewAccessImportCloudKitService(records: [
+            CrewAccessImportCloudKitRecord(
+                fileName: "2026-07-12_40303.json",
+                jsonData: try encoder.encode(trip40303),
+                tripInformationDate: trip40303.tripInformationDate,
+                firstDepartureUTC: trip40303.items.first?.startUtc,
+                updatedAt: reimportedAt,
+                deletedAt: nil
+            ),
+            CrewAccessImportCloudKitRecord(
+                fileName: "2026-07-15_A70606.json",
+                jsonData: try encoder.encode(tripA70606),
+                tripInformationDate: tripA70606.tripInformationDate,
+                firstDepartureUTC: tripA70606.items.first?.startUtc,
+                updatedAt: reimportedAt,
+                deletedAt: nil
+            )
+        ])
+        let vm = makeViewModel(
+            deviceService: FakeDeviceScheduleCloudKitService(),
+            importCloudKitService: importCloudKitService
+        )
+        setVerifiedIdentity(on: vm)
+
+        let fetched = await vm.fetchCrewAccessImportFilesIfNeeded(reason: "iPad cold sync")
+        await vm.reconcileCrewAccessSchedulesWithImportFiles()
+
+        XCTAssertTrue(fetched)
+        XCTAssertEqual(
+            Set(vm.crewAccessSchedules.flatMap { $0.legs.map(\.pairing) }),
+            ["40303", "A70606"]
+        )
+        let tombstonedAfterReimport = await importCloudKitService.tombstonedFileNames
+        XCTAssertEqual(tombstonedAfterReimport, [])
+        let storedIntents = UserDefaults.standard.dictionary(forKey: deletionIntentsKey) ?? [:]
+        XCTAssertNil(storedIntents["2605:40303"])
+        XCTAssertNil(UserDefaults.standard.object(forKey: legacyDeletionKey))
+    }
+
+    func test_fetchCrewAccessImports_newerLocalDeletionIntentStillTombstonesOlderRemote() async throws {
+        try removeCrewAccessImportDirectory()
+        defer { try? removeCrewAccessImportDirectory() }
+
+        let legacyDeletionKey = "deleted_crewaccess_trip_keys_v1"
+        let deletionIntentsKey = "deleted_crewaccess_trip_intents_v2"
+        UserDefaults.standard.removeObject(forKey: legacyDeletionKey)
+        UserDefaults.standard.set(
+            ["2605:40303": Date(timeIntervalSinceNow: 60).timeIntervalSince1970],
+            forKey: deletionIntentsKey
+        )
+        defer {
+            UserDefaults.standard.removeObject(forKey: legacyDeletionKey)
+            UserDefaults.standard.removeObject(forKey: deletionIntentsKey)
+        }
+
+        let trip40303 = makeCrewAccessJSON(
+            tripId: "40303",
+            tripInformationDate: "12Jul2026",
+            startUtc: "2026-07-12T21:55:00Z",
+            endUtc: "2026-07-14T13:56:00Z"
+        )
+        let importCloudKitService = StatefulCrewAccessImportCloudKitService(records: [
+            CrewAccessImportCloudKitRecord(
+                fileName: "2026-07-12_40303.json",
+                jsonData: try JSONEncoder().encode(trip40303),
+                tripInformationDate: trip40303.tripInformationDate,
+                firstDepartureUTC: trip40303.items.first?.startUtc,
+                updatedAt: Date(),
+                deletedAt: nil
+            )
+        ])
+        let vm = makeViewModel(
+            deviceService: FakeDeviceScheduleCloudKitService(),
+            importCloudKitService: importCloudKitService
+        )
+        setVerifiedIdentity(on: vm)
+
+        let fetched = await vm.fetchCrewAccessImportFilesIfNeeded(reason: "newer delete")
+        await vm.reconcileCrewAccessSchedulesWithImportFiles()
+
+        XCTAssertTrue(fetched)
+        XCTAssertTrue(vm.crewAccessSchedules.isEmpty)
+        let tombstonedAfterDelete = await importCloudKitService.tombstonedFileNames
+        XCTAssertEqual(tombstonedAfterDelete, ["2026-07-12_40303.json"])
+    }
+
+    func test_fetchCrewAccessImports_localReimportNewerThanRemoteTombstoneRestoresCloudRecord() async throws {
+        try removeCrewAccessImportDirectory()
+        defer { try? removeCrewAccessImportDirectory() }
+
+        let legacyDeletionKey = "deleted_crewaccess_trip_keys_v1"
+        let deletionIntentsKey = "deleted_crewaccess_trip_intents_v2"
+        UserDefaults.standard.removeObject(forKey: legacyDeletionKey)
+        UserDefaults.standard.set(
+            ["2605:40303": Date(timeIntervalSinceNow: -120).timeIntervalSince1970],
+            forKey: deletionIntentsKey
+        )
+        defer {
+            UserDefaults.standard.removeObject(forKey: legacyDeletionKey)
+            UserDefaults.standard.removeObject(forKey: deletionIntentsKey)
+        }
+
+        let fileName = "2026-07-12_40303.json"
+        let trip40303 = makeCrewAccessJSON(
+            tripId: "40303",
+            tripInformationDate: "12Jul2026",
+            startUtc: "2026-07-12T21:55:00Z",
+            endUtc: "2026-07-14T13:56:00Z"
+        )
+        try writeCrewAccessJSON(trip40303, fileName: fileName)
+        let encodedTrip = try JSONEncoder().encode(trip40303)
+        let importCloudKitService = StatefulCrewAccessImportCloudKitService(records: [
+            CrewAccessImportCloudKitRecord(
+                fileName: fileName,
+                jsonData: encodedTrip,
+                tripInformationDate: trip40303.tripInformationDate,
+                firstDepartureUTC: trip40303.items.first?.startUtc,
+                updatedAt: Date(timeIntervalSinceNow: -120),
+                deletedAt: Date(timeIntervalSinceNow: -120)
+            )
+        ])
+        let vm = makeViewModel(
+            deviceService: FakeDeviceScheduleCloudKitService(),
+            importCloudKitService: importCloudKitService
+        )
+        setVerifiedIdentity(on: vm)
+
+        let fetched = await vm.fetchCrewAccessImportFilesIfNeeded(reason: "local reimport recovery")
+        await vm.reconcileCrewAccessSchedulesWithImportFiles()
+
+        XCTAssertTrue(fetched)
+        XCTAssertEqual(Set(vm.crewAccessSchedules.flatMap { $0.legs.map(\.pairing) }), ["40303"])
+        let uploadedAfterRecovery = await importCloudKitService.uploadedFileNames
+        XCTAssertEqual(uploadedAfterRecovery, [fileName])
+        let storedIntents = UserDefaults.standard.dictionary(forKey: deletionIntentsKey) ?? [:]
+        XCTAssertNil(storedIntents["2605:40303"])
+    }
+
     // MARK: - LogTen backlog survival
 
     func test_fetchDeviceSchedule_logTenBacklogSurvivesRemoteReplacement() async throws {
@@ -994,4 +1159,32 @@ private actor CapturingCrewAccessImportCloudKitService: CrewAccessImportCloudKit
     }
 
     func tombstoneImportFile(gemsID: String, fileName: String) async throws {}
+}
+
+private actor StatefulCrewAccessImportCloudKitService: CrewAccessImportCloudKitServicing {
+    private var records: [CrewAccessImportCloudKitRecord]
+    private(set) var uploadedFileNames: [String] = []
+    private(set) var tombstonedFileNames: [String] = []
+
+    init(records: [CrewAccessImportCloudKitRecord]) {
+        self.records = records
+    }
+
+    func uploadImportFile(
+        gemsID: String,
+        fileName: String,
+        jsonData: Data,
+        tripInformationDate: String?,
+        firstDepartureUTC: String?
+    ) async throws {
+        uploadedFileNames.append(fileName)
+    }
+
+    func fetchImportFiles(gemsID: String) async throws -> [CrewAccessImportCloudKitRecord] {
+        records
+    }
+
+    func tombstoneImportFile(gemsID: String, fileName: String) async throws {
+        tombstonedFileNames.append(fileName)
+    }
 }

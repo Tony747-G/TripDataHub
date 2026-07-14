@@ -614,22 +614,15 @@ struct TimelineTabView: View {
     /// Lightweight: selects from pre-built cachedReportWindows using current time.
     private var nextReportInfo: NextReportInfo? {
         let now = Date()
-        for window in cachedReportWindows {
-            if now < window.reportTime {
-                return NextReportInfo(pairing: window.pairing, reportTime: window.reportTime)
-            }
-            if now >= window.reportTime && now < window.tripEndDomicile {
-                return nil
-            }
-        }
-        return nil
+        guard let window = NextReportWindowBuilder.nextReportWindow(
+            from: cachedReportWindows,
+            now: now
+        ) else { return nil }
+        return NextReportInfo(pairing: window.pairing, reportTime: window.reportTime)
     }
 
     private var hasActiveTripWindow: Bool {
-        let now = Date()
-        return cachedReportWindows.contains { window in
-            now >= window.reportTime && now < window.tripEndDomicile
-        }
+        NextReportWindowBuilder.hasActiveTrip(in: cachedReportWindows, now: Date())
     }
 
     private var shouldShowNextReportCardOnTop: Bool {
