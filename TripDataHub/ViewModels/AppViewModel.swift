@@ -6574,12 +6574,335 @@ private struct AdminPolicyRaw: Decodable {
 }
 
 #if DEBUG
+// MARK: - Raw trip debug snapshot (development-only diagnostic aggregate)
+//
+// This is NOT the CloudKit sync payload and NOT the future public Export JSON schema.
+// It is a broader, unstable dump of everything the app currently has in memory/on-disk
+// for one trip, meant to be inspected once to help design that future public schema.
+// See docs/INTERNAL_JSON_EXPORT_INVESTIGATION.md for the full data-source investigation.
+
+struct TripRawDebugSnapshot: Encodable {
+    struct Generator: Encodable {
+        let appVersion: String
+        let buildNumber: String
+        let snapshotSource: String
+    }
+
+    struct RawExtractStatsSnapshot: Encodable {
+        let pageCount: Int
+        let characterCount: Int
+        let lineCount: Int
+    }
+
+    struct ImportIssueSnapshot: Encodable {
+        let code: String
+        let message: String
+        let remediation: String?
+    }
+
+    struct TripSection: Encodable {
+        let tripId: String
+        let tripDate: String
+        let importSource: String
+        let sourceFileName: String?
+        let importCreatedAt: Date
+        /// The domain model that CloudKit's `schedulesData` field encodes — stored source data.
+        let parsedSchedule: PayPeriodSchedule?
+        /// The richer parser-time DTO written to `Documents/CrewAccessImports/*.json` — stored source data.
+        let crewAccessTripJSON: CrewAccessTripJSON?
+        let rawExtractStats: RawExtractStatsSnapshot
+        let warnings: [ImportIssueSnapshot]
+        let errors: [ImportIssueSnapshot]
+    }
+
+    /// A representation of the CloudKit `TDHSharedSchedule.schedulesData` shape for this trip —
+    /// re-encoded here alongside the rest of the snapshot, not a byte-exact copy of the upload.
+    struct CloudKitScheduleRepresentation: Encodable {
+        let recordType: String
+        let field: String
+        let note: String
+        let payload: [PayPeriodSchedule]
+    }
+
+    /// Resolved at export time from IATATimeZoneResolver's static table — derived, not stored per-trip.
+    struct AirportInfoSnapshot: Encodable {
+        let timeZoneIdentifier: String?
+        let airportName: String?
+        let cityName: String?
+    }
+
+    /// Mirrors `CrewAccessTripSummary` (Services/CrewAccessTripSummaryStore.swift), which is not Codable.
+    struct HotelSummarySnapshot: Encodable {
+        let tripId: String
+        let fileKey: String
+        let creditTime: String?
+        let tripDays: String?
+        let tafb: String?
+        let hotelByStation: [String: String]
+    }
+
+    /// Manual events (crew-base + UTC time range, not trip-scoped in production) whose window
+    /// overlaps this trip's leg span. The overlap filter below is diagnostic-only, computed here,
+    /// and is not the app's real rest/timeline overlap logic (Views/TimelineSupport.swift).
+    struct ManualEventsSnapshot: Encodable {
+        /// Production manual events carry no trip ID; this grouping is inferred at export time.
+        let associationMethod: String
+        let overlapWindowStartUTC: Date?
+        let overlapWindowEndUTC: Date?
+        let operational: [ManualOperationalEvent]
+        let personal: [ManualPersonalEvent]
+    }
+
+    struct RelatedData: Encodable {
+        let manualEvents: ManualEventsSnapshot
+        let tripSummaryStoreEntry: HotelSummarySnapshot?
+    }
+
+    struct DerivedData: Encodable {
+        let legCount: Int
+        let openTimeTripCount: Int
+        let uniqueAirports: [String]
+        let hasDeadheadLegs: Bool?
+        /// Static-table lookups (IATATimeZoneResolver) performed at export time, not stored on any trip model.
+        let airports: [String: AirportInfoSnapshot]
+    }
+
+    /// One data group confirmed to exist in the source PDF but not reachable at export time.
+    struct UnavailableDataItem: Encodable {
+        let dataGroup: String
+        let status: String
+        let reason: String
+        let sourceStage: String
+        let availableWithParserChanges: Bool
+    }
+
+    struct Diagnostics: Encodable {
+        /// Data confirmed to exist in the source PDF but not reachable from this snapshot without
+        /// invasive parser/model changes — see docs/INTERNAL_JSON_EXPORT_INVESTIGATION.md.
+        let unavailableData: [UnavailableDataItem]
+        let mappingVersion: String?
+    }
+
+    let snapshotVersion: String
+    let generatedAt: Date
+    let generator: Generator
+    /// Machine-readable stability disclaimer, emitted into every snapshot file.
+    let warning: String
+    let trip: TripSection
+    let cloudKitScheduleRepresentation: CloudKitScheduleRepresentation?
+    let relatedData: RelatedData
+    let derivedData: DerivedData
+    let diagnostics: Diagnostics
+}
+#endif
+
+#if DEBUG
 extension AppViewModel {
     static func previewMock() -> AppViewModel {
         let vm = AppViewModel()
         vm.schedules = Self.previewSchedules
         vm.authStatus = .loggedIn
         return vm
+    }
+
+    private static let rawSnapshotUnavailableData: [TripRawDebugSnapshot.UnavailableDataItem] = [
+        TripRawDebugSnapshot.UnavailableDataItem(
+            dataGroup: "dutyPeriods.reportReleaseTimes",
+            status: "unavailable",
+            reason: "Duty start/end and report/release times are parsed by PDFTripParser into Trip/FlightLeg, but that intermediate object is discarded; only layover station/hotelName/duration survive into TripLeg.",
+            sourceStage: "CrewAccessPDFImportService.analyzeTrip -> PDFTripParser output discarded",
+            availableWithParserChanges: true
+        ),
+        TripRawDebugSnapshot.UnavailableDataItem(
+            dataGroup: "groundTransportation",
+            status: "unavailable",
+            reason: "All three parsers treat the \"Hotel Transport:\" token purely as a text delimiter; the transport details following it are never captured into any field.",
+            sourceStage: "PDFTripParser / TripScheduleSnapshotEncoder / CrewAccessTripSummaryStore hotel-line parsing",
+            availableWithParserChanges: true
+        ),
+        TripRawDebugSnapshot.UnavailableDataItem(
+            dataGroup: "hotel.phoneAndCheckInOut",
+            status: "unavailable",
+            reason: "Hotel phone and check-in/check-out times are parsed into LayoverLeg but discarded before reaching TripLeg or CrewAccessTripJSON.",
+            sourceStage: "CrewAccessPDFImportService.layoverMetadataByArrivingSequence drops LayoverLeg fields",
+            availableWithParserChanges: true
+        ),
+        TripRawDebugSnapshot.UnavailableDataItem(
+            dataGroup: "rawExtractedPDFText",
+            status: "unavailable",
+            reason: "The full extracted text exists only in a local variable inside analyzeTrip and is not retained on CrewAccessImportDraft, PendingImport, or disk.",
+            sourceStage: "CrewAccessPDFImportService.analyzeTrip local variable",
+            availableWithParserChanges: true
+        )
+    ]
+
+    private func buildRawSnapshotAirports(for pending: PendingImport) -> [String: TripRawDebugSnapshot.AirportInfoSnapshot] {
+        var codes = Set<String>()
+        func collect(_ legs: [TripLeg]) {
+            for leg in legs {
+                codes.insert(leg.depAirport)
+                codes.insert(leg.arrAirport)
+            }
+        }
+        if let schedule = pending.parsedSchedule {
+            collect(schedule.legs)
+            for openTimeTrip in schedule.openTimeTrips {
+                collect(openTimeTrip.legs)
+            }
+        }
+        if let items = pending.jsonPayload?.items {
+            for item in items {
+                codes.insert(item.depAirport)
+                codes.insert(item.arrAirport)
+            }
+        }
+        var result: [String: TripRawDebugSnapshot.AirportInfoSnapshot] = [:]
+        for code in codes where !code.isEmpty {
+            result[code] = TripRawDebugSnapshot.AirportInfoSnapshot(
+                timeZoneIdentifier: IATATimeZoneResolver.shared.resolve(code),
+                airportName: IATATimeZoneResolver.shared.airportName(code),
+                cityName: IATATimeZoneResolver.shared.cityName(code)
+            )
+        }
+        return result
+    }
+
+    private func buildRawSnapshotManualEvents(for pending: PendingImport) -> TripRawDebugSnapshot.ManualEventsSnapshot {
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoFormatterNoFraction = ISO8601DateFormatter()
+        func parseUTC(_ string: String?) -> Date? {
+            guard let string else { return nil }
+            return isoFormatter.date(from: string) ?? isoFormatterNoFraction.date(from: string)
+        }
+        let legs = (pending.parsedSchedule?.legs ?? []) + (pending.parsedSchedule?.openTimeTrips.flatMap(\.legs) ?? [])
+        let starts = legs.compactMap { parseUTC($0.depUTC) }
+        let ends = legs.compactMap { parseUTC($0.arrUTC) }
+        let associationMethod = "inferred-by-utc-overlap: manual events carry no trip ID in production; selected here only because their UTC window overlaps this trip's leg span"
+        guard let windowStart = starts.min(), let windowEnd = ends.max() else {
+            return TripRawDebugSnapshot.ManualEventsSnapshot(
+                associationMethod: associationMethod,
+                overlapWindowStartUTC: nil,
+                overlapWindowEndUTC: nil,
+                operational: [],
+                personal: []
+            )
+        }
+        func overlaps(_ start: Date, _ end: Date) -> Bool {
+            start <= windowEnd && end >= windowStart
+        }
+        return TripRawDebugSnapshot.ManualEventsSnapshot(
+            associationMethod: associationMethod,
+            overlapWindowStartUTC: windowStart,
+            overlapWindowEndUTC: windowEnd,
+            operational: manualOperationalEvents.filter { overlaps($0.startUTC, $0.endUTC) },
+            personal: manualPersonalEvents.filter { overlaps($0.startUTC, $0.endUTC) }
+        )
+    }
+
+    /// Writes a raw, unstable diagnostic snapshot of everything currently reachable for one pending
+    /// trip import — for investigation only. This is not the CloudKit payload and not the future
+    /// public Export JSON schema; see docs/INTERNAL_JSON_EXPORT_INVESTIGATION.md.
+    @discardableResult
+    func debugExportRawTripSnapshot(pending: PendingImport) -> URL? {
+        let tripSection = TripRawDebugSnapshot.TripSection(
+            tripId: pending.tripId,
+            tripDate: pending.tripDate,
+            importSource: pending.source.rawValue,
+            sourceFileName: pending.sourceFileName,
+            importCreatedAt: pending.createdAt,
+            parsedSchedule: pending.parsedSchedule,
+            crewAccessTripJSON: pending.jsonPayload,
+            rawExtractStats: TripRawDebugSnapshot.RawExtractStatsSnapshot(
+                pageCount: pending.rawExtractStats.pageCount,
+                characterCount: pending.rawExtractStats.characterCount,
+                lineCount: pending.rawExtractStats.lineCount
+            ),
+            warnings: pending.warnings.map {
+                TripRawDebugSnapshot.ImportIssueSnapshot(code: $0.code.rawValue, message: $0.message, remediation: nil)
+            },
+            errors: pending.errors.map {
+                TripRawDebugSnapshot.ImportIssueSnapshot(code: $0.code.rawValue, message: $0.message, remediation: $0.remediation)
+            }
+        )
+
+        let cloudKitRepresentation = pending.parsedSchedule.map {
+            TripRawDebugSnapshot.CloudKitScheduleRepresentation(
+                recordType: "TDHSharedSchedule",
+                field: "schedulesData",
+                note: "Re-encoded here for readability alongside the rest of this snapshot; not a byte-exact copy of the CloudKit upload. See FriendScheduleCloudKitService.uploadSchedule.",
+                payload: [$0]
+            )
+        }
+
+        let tripSummaryEntry = CrewAccessTripSummaryStore.load().byTripID[pending.tripId].map {
+            TripRawDebugSnapshot.HotelSummarySnapshot(
+                tripId: $0.tripId,
+                fileKey: $0.fileKey,
+                creditTime: $0.creditTime,
+                tripDays: $0.tripDays,
+                tafb: $0.tafb,
+                hotelByStation: $0.hotelByStation
+            )
+        }
+
+        let relatedData = TripRawDebugSnapshot.RelatedData(
+            manualEvents: buildRawSnapshotManualEvents(for: pending),
+            tripSummaryStoreEntry: tripSummaryEntry
+        )
+
+        let allLegs = (pending.parsedSchedule?.legs ?? []) + (pending.parsedSchedule?.openTimeTrips.flatMap(\.legs) ?? [])
+        let uniqueAirports = Set(allLegs.flatMap { [$0.depAirport, $0.arrAirport] }).sorted()
+        let derivedData = TripRawDebugSnapshot.DerivedData(
+            legCount: pending.parsedSchedule?.legs.count ?? 0,
+            openTimeTripCount: pending.parsedSchedule?.openTimeTrips.count ?? 0,
+            uniqueAirports: uniqueAirports,
+            hasDeadheadLegs: pending.jsonPayload?.items.contains { $0.deadhead },
+            airports: buildRawSnapshotAirports(for: pending)
+        )
+
+        let diagnostics = TripRawDebugSnapshot.Diagnostics(
+            unavailableData: Self.rawSnapshotUnavailableData,
+            mappingVersion: pending.jsonPayload?.mappingVersion
+        )
+
+        let bundleInfo = Bundle.main.infoDictionary
+        let snapshot = TripRawDebugSnapshot(
+            snapshotVersion: "1",
+            generatedAt: Date(),
+            generator: TripRawDebugSnapshot.Generator(
+                appVersion: (bundleInfo?["CFBundleShortVersionString"] as? String) ?? "unknown",
+                buildNumber: (bundleInfo?["CFBundleVersion"] as? String) ?? "unknown",
+                snapshotSource: "TripRawDebugSnapshot"
+            ),
+            warning: "UNSTABLE DEBUG DIAGNOSTIC FORMAT. Field names, structure, and contents may change at any time. This is not the CloudKit sync payload and not the public Export JSON schema. Do not parse programmatically.",
+            trip: tripSection,
+            cloudKitScheduleRepresentation: cloudKitRepresentation,
+            relatedData: relatedData,
+            derivedData: derivedData,
+            diagnostics: diagnostics
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(snapshot) else {
+            logNonFatal("Debug raw snapshot export failed: could not encode trip \(pending.tripId)")
+            return nil
+        }
+        guard let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let sanitizedTripId = pending.tripId.replacingOccurrences(of: "/", with: "-")
+        let fileURL = documentsURL.appendingPathComponent("tripdatahub-raw-trip-\(sanitizedTripId).json")
+        do {
+            try data.write(to: fileURL, options: .atomic)
+            logNonFatal("Debug raw trip snapshot written to \(fileURL.path)")
+            return fileURL
+        } catch {
+            logNonFatal("Debug raw snapshot export failed: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     /// Clears persisted session cookies for UI tests that need a deterministic logged-out state.

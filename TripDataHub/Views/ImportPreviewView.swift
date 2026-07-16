@@ -80,6 +80,11 @@ struct ImportPreviewView: View {
                                     .padding(.vertical, 2)
                                 }
                             }
+
+                            Button("Export Raw Trip Snapshot (Debug)") {
+                                viewModel.debugExportRawTripSnapshot(pending: pending)
+                            }
+                            .font(.caption)
                         }
                     }
 #endif
