@@ -1,6 +1,6 @@
 import Foundation
 
-struct PayPeriodSchedule: Identifiable, Codable, Hashable {
+struct PayPeriodSchedule: Identifiable, Codable, Hashable, Sendable {
     let id: String
     let label: String
     let tripCount: Int
@@ -11,7 +11,7 @@ struct PayPeriodSchedule: Identifiable, Codable, Hashable {
     let openTimeTrips: [OpenTimeTrip]
 }
 
-struct TripLeg: Identifiable, Codable, Hashable {
+struct TripLeg: Identifiable, Codable, Hashable, Sendable {
     let id: UUID
     let payPeriod: String
     let pairing: String
@@ -95,7 +95,7 @@ struct TripLeg: Identifiable, Codable, Hashable {
     }
 }
 
-struct OpenTimeTrip: Identifiable, Codable, Hashable {
+struct OpenTimeTrip: Identifiable, Codable, Hashable, Sendable {
     let id: UUID
     let payPeriod: String
     let pairing: String

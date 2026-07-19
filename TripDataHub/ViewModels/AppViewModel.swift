@@ -2715,6 +2715,47 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func prepareCrewAccessTripJSONExport(for schedule: PayPeriodSchedule) async throws -> TripJSONExportOutput {
+        let profile = ProfileSnapshot.loadFromLocalStorage()
+        let identity = verifiedIdentity
+        let ownerSource = TripJSONExportOwnerSource(
+            profileName: profile.displayName,
+            profileGivenName: UserDefaults.standard.string(forKey: ProfileStorageKeys.givenName) ?? "",
+            profileFamilyName: UserDefaults.standard.string(forKey: ProfileStorageKeys.familyName) ?? "",
+            profileGEMS: profile.gemsID,
+            profileBase: profile.base,
+            profileFleet: profile.fleet,
+            profilePosition: profile.position,
+            verifiedName: identity?.name ?? "",
+            verifiedGEMS: identity?.gemsID ?? "",
+            verifiedBase: identity?.domicile ?? "",
+            verifiedFleet: identity?.equipment ?? "",
+            verifiedPosition: identity?.seat ?? ""
+        )
+        let generator = TripJSONExportService.generator()
+        do {
+            let result = try await Task.detached(priority: .userInitiated) {
+                let candidates = Self.loadCrewAccessTripJSONPayloadsFromImportFilesSync().map(\.payload)
+                guard let payload = TripJSONExportService.payload(for: schedule, candidates: candidates) else {
+                    throw TripJSONExportError.tripDataUnavailable
+                }
+                let output = try TripJSONExportService.makeTemporaryFile(
+                    for: schedule,
+                    payload: payload,
+                    ownerSource: ownerSource,
+                    generator: generator
+                )
+                return (output, payload.tripId)
+            }.value
+            let (output, tripID) = result
+            logger.info("[TripJSONExport] ready trip=\(tripID, privacy: .private) file=\(output.url.lastPathComponent, privacy: .public)")
+            return output
+        } catch {
+            logger.error("[TripJSONExport] failed schedule=\(schedule.id, privacy: .private) error=\(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+    }
+
     func displaySchedules(filter: TimelineSourceFilter) -> [PayPeriodSchedule] {
         switch filter {
         case .crewAccess:

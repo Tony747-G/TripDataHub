@@ -18,6 +18,8 @@
 		1212BF43E98EB31FB58E9A8F /* AppViewModelDeviceSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F704B25EFA9967FD3C609BE4 /* AppViewModelDeviceSyncTests.swift */; };
 		1322F51E683F63D579467CC2 /* BrowserTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEA20E261C3699D0271304A1 /* BrowserTabView.swift */; };
 		1413F694AAE3B23F47C3C436 /* FlightCountdownSharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58C18FF3A67E7E968B09F58E /* FlightCountdownSharedModels.swift */; };
+		1F77FF7A3E779E0AB3300001 /* TripJSONExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F77FF7A3E779E0AB3300002 /* TripJSONExportService.swift */; };
+		1F77FF7A3E779E0AB3300003 /* TripJSONExportServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F77FF7A3E779E0AB3300004 /* TripJSONExportServiceTests.swift */; };
 		235EF66A04B56236E1DFB575 /* FriendScheduleCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA4B8F120FCBF73865EE520 /* FriendScheduleCloudKitService.swift */; };
 		27B924E6CA6484B9156032EC /* FlightCountdownCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F6C86491D2E927C2CEC60D5 /* FlightCountdownCoordinator.swift */; };
 		32AB31ECA2C3DA85192193E3 /* TripLegDisplaySupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AA31B4F87A8944508CA4749 /* TripLegDisplaySupport.swift */; };
@@ -134,6 +136,8 @@
 		0280B0ED64CBF38F6C06B873 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		0AF942899EBB7E90814E4995 /* CrewAccessPDFImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessPDFImportService.swift; sourceTree = "<group>"; };
 		13F6EFC17A823450FE7E3210 /* TripDataHubTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TripDataHubTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		1F77FF7A3E779E0AB3300002 /* TripJSONExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripJSONExportService.swift; sourceTree = "<group>"; };
+		1F77FF7A3E779E0AB3300004 /* TripJSONExportServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripJSONExportServiceTests.swift; sourceTree = "<group>"; };
 		1FDA7EA4639BB0121DD6B803 /* ViewShared.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewShared.swift; sourceTree = "<group>"; };
 		24F3AE1A0D7CD7D7B5816484 /* AdminSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminSections.swift; sourceTree = "<group>"; };
 		26F1CF972BCCEF2CFFA1D9B1 /* NextReportNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextReportNotificationService.swift; sourceTree = "<group>"; };
@@ -348,6 +352,7 @@
 				42BF7C6110CAC60779B38CC7 /* TripBoardAuthService.swift */,
 				3A4FD2E096CBF54B7899BF9A /* TripBoardSyncService.swift */,
 				A29DAE34FE231561964648C1 /* TripScheduleSnapshotEncoder.swift */,
+				1F77FF7A3E779E0AB3300002 /* TripJSONExportService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -390,6 +395,7 @@
 				9A0B1C2D3E4F506172839405 /* AppGroupImportHandoffTests.swift */,
 				2DC289F484BCC26A5FB3F491 /* ProfileSyncTests.swift */,
 				A1682DE701661661F9C87C7D /* TripScheduleSnapshotEncoderTests.swift */,
+				1F77FF7A3E779E0AB3300004 /* TripJSONExportServiceTests.swift */,
 			);
 			path = TripDataHubTests;
 			sourceTree = "<group>";
@@ -632,6 +638,7 @@
 				0B1C2D3E4F50617283940516 /* AppGroupImportHandoffTests.swift in Sources */,
 				E523CAFDE61554494FEF76A0 /* ProfileSyncTests.swift in Sources */,
 				560C6AC50CBE2C357746B607 /* TripScheduleSnapshotEncoderTests.swift in Sources */,
+				1F77FF7A3E779E0AB3300003 /* TripJSONExportServiceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -718,6 +725,7 @@
 				E72B7C0A1DA5134DAF4551D7 /* TripModels.swift in Sources */,
 				657CE0BD8328A988EB6D9DAF /* TripScheduleSnapshotEncoder.swift in Sources */,
 				060126BA99293293402CEC00 /* ViewShared.swift in Sources */,
+				1F77FF7A3E779E0AB3300001 /* TripJSONExportService.swift in Sources */,
 				BDB5E75E3F22104CE4F4E4BA /* iPadBidPeriodCalendarView.swift in Sources */,
 				EBF81EC14EC47BBD406A4912 /* iPadOperationalWorkspaceView.swift in Sources */,
 				CE14183F65070B2295103E1C /* iPadTimelineSidebarView.swift in Sources */,

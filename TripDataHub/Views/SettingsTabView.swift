@@ -208,7 +208,7 @@ struct SettingsTabView: View {
 }
 
 #if canImport(UIKit)
-private struct ActivityView: UIViewControllerRepresentable {
+struct ActivityView: UIViewControllerRepresentable {
     let activityItems: [Any]
     var completion: ((Bool) -> Void)?
 

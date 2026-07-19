@@ -104,7 +104,7 @@ struct ImportWarning: Identifiable {
     let message: String
 }
 
-struct CrewAccessTripJSON: Codable {
+struct CrewAccessTripJSON: Codable, Equatable, Sendable {
     let schemaVersion: Int
     let source: String
     let sourceVersion: String
@@ -121,7 +121,7 @@ struct CrewAccessTripJSON: Codable {
     let items: [CrewAccessTripItemJSON]
 }
 
-struct CrewAccessTripItemJSON: Codable {
+struct CrewAccessTripItemJSON: Codable, Equatable, Sendable {
     let sequence: Int
     let depAirport: String
     let arrAirport: String
@@ -211,7 +211,7 @@ struct CrewAccessTripItemJSON: Codable {
     }
 }
 
-struct CrewAccessCrewJSON: Codable {
+struct CrewAccessCrewJSON: Codable, Equatable, Sendable {
     let position: String
     let seniority: String
     let crewID: String

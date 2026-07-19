@@ -14,6 +14,9 @@ struct TimelineTabView: View {
     @State private var friendMatchAlert: FriendMatchPresentation?
     @State private var friendScheduleMatches: FriendScheduleMatches = .empty
     @State private var deleteTripConfirmPairing: String? = nil
+    @State private var selectedTripActionScheduleID: String?
+    @State private var tripJSONExportOutput: TripJSONExportOutput?
+    @State private var tripJSONExportErrorMessage: String?
     @State private var showingAddEvent = false
     @State private var selectedManualOperationalEvent: ManualOperationalEvent?
     // Caches updated in refreshLegData() — avoids recomputing expensive values on every body eval.
@@ -156,10 +159,15 @@ struct TimelineTabView: View {
                 deleteTripConfirmPairing.map { "Delete Trip \($0)?" } ?? "Delete Trip?",
                 isPresented: Binding(
                     get: { deleteTripConfirmPairing != nil },
-                    set: { if !$0 { deleteTripConfirmPairing = nil } }
+                    set: { if !$0 { dismissTripActions() } }
                 ),
                 titleVisibility: .visible
             ) {
+                Button {
+                    exportSelectedTripJSON()
+                } label: {
+                    Label("Export JSON", systemImage: "square.and.arrow.up")
+                }
                 Button("Delete Trip", role: .destructive) {
                     if let pairing = deleteTripConfirmPairing {
                         let ids = Set(
@@ -169,13 +177,32 @@ struct TimelineTabView: View {
                         )
                         Task { await viewModel.deleteCrewAccessTrips(ids: ids) }
                     }
-                    deleteTripConfirmPairing = nil
+                    dismissTripActions()
                 }
                 Button("Cancel", role: .cancel) {
-                    deleteTripConfirmPairing = nil
+                    dismissTripActions()
                 }
             } message: {
                 Text("This will remove the trip from Timeline and synced devices.")
+            }
+#if canImport(UIKit)
+            .sheet(item: $tripJSONExportOutput, onDismiss: removeTripJSONExportFile) { output in
+                ActivityView(activityItems: [output.url]) { _ in
+                    TripJSONExportService.removeTemporaryFiles(for: output)
+                    tripJSONExportOutput = nil
+                }
+            }
+#endif
+            .alert(
+                "Unable to Export JSON",
+                isPresented: Binding(
+                    get: { tripJSONExportErrorMessage != nil },
+                    set: { if !$0 { tripJSONExportErrorMessage = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { tripJSONExportErrorMessage = nil }
+            } message: {
+                Text(tripJSONExportErrorMessage ?? "The trip could not be exported.")
             }
             .sheet(isPresented: $showingAddEvent) {
                 ManualEventAddSheet()
@@ -203,6 +230,45 @@ struct TimelineTabView: View {
         .accessibilityLabel("Add Event")
         .padding(.trailing, 18)
         .padding(.bottom, 18)
+    }
+
+    private func presentTripActions(for leg: TripLeg) {
+        selectedTripActionScheduleID = currentTimelineSchedules.first(where: { schedule in
+            schedule.legs.contains { $0.id == leg.id }
+        })?.id
+        deleteTripConfirmPairing = leg.pairing
+    }
+
+    private func dismissTripActions() {
+        deleteTripConfirmPairing = nil
+        selectedTripActionScheduleID = nil
+    }
+
+    private func exportSelectedTripJSON() {
+        let schedule = selectedTripActionScheduleID.flatMap { scheduleID in
+            currentTimelineSchedules.first { $0.id == scheduleID }
+        }
+        dismissTripActions()
+        removeTripJSONExportFile()
+
+        guard let schedule else {
+            tripJSONExportErrorMessage = TripJSONExportError.tripDataUnavailable.localizedDescription
+            return
+        }
+
+        Task {
+            do {
+                tripJSONExportOutput = try await viewModel.prepareCrewAccessTripJSONExport(for: schedule)
+            } catch {
+                tripJSONExportErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func removeTripJSONExportFile() {
+        guard let output = tripJSONExportOutput else { return }
+        TripJSONExportService.removeTemporaryFiles(for: output)
+        tripJSONExportOutput = nil
     }
 
     @ViewBuilder
@@ -252,7 +318,7 @@ struct TimelineTabView: View {
                                         .background(isHighlighted ? Color.red.opacity(0.10) : Color.clear)
                                         .simultaneousGesture(
                                             LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                                                deleteTripConfirmPairing = leg.pairing
+                                                presentTripActions(for: leg)
                                             }
                                         )
                                     // レイオーバーカード（接続時間 > 3h かつ同一ステーション）
@@ -264,7 +330,7 @@ struct TimelineTabView: View {
                                         .background(isHighlighted ? Color.red.opacity(0.10) : Color.clear)
                                         .simultaneousGesture(
                                             LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                                                deleteTripConfirmPairing = leg.pairing
+                                                presentTripActions(for: leg)
                                             }
                                         )
                                     }
@@ -279,7 +345,7 @@ struct TimelineTabView: View {
                                             .id(tripDataScrollID(leg.id))
                                             .simultaneousGesture(
                                                 LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                                                    deleteTripConfirmPairing = nextTripStartLeg.pairing
+                                                    presentTripActions(for: nextTripStartLeg)
                                                 }
                                             )
                                         } else {

@@ -3,6 +3,8 @@ import Foundation
 enum ProfileStorageKeys {
     static let avatarImageData = "profile_avatar_image_data_v1"
     static let displayName = "profile_display_name_v1"
+    static let givenName = "profile_given_name_v1"
+    static let familyName = "profile_family_name_v1"
     static let gemsID = "profile_gems_id_v1"
     static let fleet = "profile_fleet_v1"
     static let base = "profile_base_v1"
