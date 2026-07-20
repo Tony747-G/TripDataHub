@@ -1,6 +1,111 @@
 import Foundation
 
+struct HotelNameNormalizationResult: Equatable, Sendable {
+    let name: String
+    let sourceName: String?
+    let matchedBy: String?
+}
+
 enum HotelNameNormalizer {
+    struct KnownHotel: Equatable, Sendable {
+        let station: String
+        let normalizedPhone: String
+        let rawName: String
+        let canonicalName: String
+    }
+
+    static let knownHotels = [
+        KnownHotel(
+            station: "SDF",
+            normalizedPhone: "+15023672251",
+            rawName: "Crowne Plaza Louisville Airpor",
+            canonicalName: "Crowne Plaza Louisville Airport Expo Center"
+        )
+    ]
+
+    static func publicName(
+        station: String,
+        rawName: String,
+        phone: String?,
+        directory: [KnownHotel] = knownHotels
+    ) -> HotelNameNormalizationResult {
+        let sourceName = collapsedWhitespace(rawName)
+        let stationKey = station.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let phoneKey = phone.flatMap(normalizedPhone)
+
+        if let phoneKey {
+            let stationAndPhoneMatches = directory.filter {
+                $0.station == stationKey && $0.normalizedPhone == phoneKey
+            }
+            if stationAndPhoneMatches.count == 1, let match = stationAndPhoneMatches.first {
+                return normalizedResult(match, sourceName: sourceName, matchedBy: "stationAndPhone")
+            }
+
+            let phoneMatches = directory.filter { $0.normalizedPhone == phoneKey }
+            if phoneMatches.count == 1, let match = phoneMatches.first {
+                return normalizedResult(match, sourceName: sourceName, matchedBy: "phone")
+            }
+        }
+
+        let stationAndRawNameMatches = directory.filter {
+            $0.station == stationKey && exactRawNameMatch($0.rawName, sourceName)
+        }
+        if stationAndRawNameMatches.count == 1, let match = stationAndRawNameMatches.first {
+            return normalizedResult(match, sourceName: sourceName, matchedBy: "stationAndRawName")
+        }
+
+        let rawNameMatches = directory.filter { exactRawNameMatch($0.rawName, sourceName) }
+        if rawNameMatches.count == 1, let match = rawNameMatches.first {
+            return normalizedResult(match, sourceName: sourceName, matchedBy: "rawName")
+        }
+
+        return HotelNameNormalizationResult(
+            name: sourceName,
+            sourceName: nil,
+            matchedBy: nil
+        )
+    }
+
+    static func normalizedPhone(_ rawPhone: String) -> String? {
+        let digits = rawPhone.compactMap { character -> String? in
+            guard let value = character.wholeNumberValue else { return nil }
+            return String(value)
+        }.joined()
+        guard !digits.isEmpty else { return nil }
+
+        if digits.hasPrefix("011"), digits.count > 3 {
+            return "+" + String(digits.dropFirst(3))
+        }
+        if digits.count == 10 {
+            return "+1" + digits
+        }
+        if digits.count == 11, digits.hasPrefix("1") {
+            return "+" + digits
+        }
+        return "+" + digits
+    }
+
+    private static func normalizedResult(
+        _ hotel: KnownHotel,
+        sourceName: String,
+        matchedBy: String
+    ) -> HotelNameNormalizationResult {
+        let differs = hotel.canonicalName != sourceName
+        return HotelNameNormalizationResult(
+            name: hotel.canonicalName,
+            sourceName: differs && !sourceName.isEmpty ? sourceName : nil,
+            matchedBy: differs ? matchedBy : nil
+        )
+    }
+
+    private static func collapsedWhitespace(_ value: String) -> String {
+        value.split(whereSeparator: \Character.isWhitespace).joined(separator: " ")
+    }
+
+    private static func exactRawNameMatch(_ lhs: String, _ rhs: String) -> Bool {
+        collapsedWhitespace(lhs).caseInsensitiveCompare(collapsedWhitespace(rhs)) == .orderedSame
+    }
+
     static func displayName(station: String, parsedName: String) -> String {
         let normalizedStation = station
             .trimmingCharacters(in: .whitespacesAndNewlines)

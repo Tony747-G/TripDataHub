@@ -43,10 +43,66 @@ struct ExportTimestamp: Codable, Equatable, Sendable {
 enum ExportEventType: String, Codable, Equatable, Sendable {
     case flight
     case deadhead
+    case layover
     case hotel
     case groundTransport
     case report
     case release
+}
+
+struct ExportDerivedInterval: Codable, Equatable, Sendable {
+    let start: ExportTimestamp
+    let end: ExportTimestamp
+    let durationMinutes: Int
+    let derived: Bool
+    let derivation: String
+}
+
+struct ExportScheduledRest: Codable, Equatable, Sendable {
+    let dutyEnd: ExportTimestamp
+    let nextDutyStart: ExportTimestamp
+    let durationMinutes: Int
+    let derived: Bool
+    let calculationRule: ExportScheduledRestCalculationRule
+}
+
+struct ExportScheduledRestCalculationRule: Codable, Equatable, Sendable {
+    let dutyEndMinutesAfterBlockIn: Int
+    let dutyStartMinutesBeforeBlockOut: Int
+}
+
+struct ExportHotelStay: Codable, Equatable, Sendable {
+    let checkIn: ExportTimestamp
+    let checkOut: ExportTimestamp
+    let durationMinutes: Int
+}
+
+struct ExportHotel: Codable, Equatable, Sendable {
+    let name: String?
+    let address: String?
+    let phone: String?
+    let sourceName: String?
+    let nameNormalization: ExportHotelNameNormalization?
+
+    init(
+        name: String?,
+        address: String?,
+        phone: String?,
+        sourceName: String? = nil,
+        nameNormalization: ExportHotelNameNormalization? = nil
+    ) {
+        self.name = name
+        self.address = address
+        self.phone = phone
+        self.sourceName = sourceName
+        self.nameNormalization = nameNormalization
+    }
+}
+
+struct ExportHotelNameNormalization: Codable, Equatable, Sendable {
+    let derived: Bool
+    let method: String
+    let matchedBy: String
 }
 
 struct ExportEvent: Codable, Equatable, Sendable {
@@ -62,6 +118,52 @@ struct ExportEvent: Codable, Equatable, Sendable {
     let blockTime: String?
     let station: String?
     let hotelName: String?
+    let previousSegmentID: String?
+    let nextSegmentID: String?
+    let blockGap: ExportDerivedInterval?
+    let scheduledRest: ExportScheduledRest?
+    let hotelStay: ExportHotelStay?
+    let hotel: ExportHotel?
+
+    init(
+        id: String,
+        type: ExportEventType,
+        sequence: Int,
+        start: ExportTimestamp,
+        end: ExportTimestamp,
+        flightNumber: String? = nil,
+        origin: String? = nil,
+        destination: String? = nil,
+        aircraft: String? = nil,
+        blockTime: String? = nil,
+        station: String? = nil,
+        hotelName: String? = nil,
+        previousSegmentID: String? = nil,
+        nextSegmentID: String? = nil,
+        blockGap: ExportDerivedInterval? = nil,
+        scheduledRest: ExportScheduledRest? = nil,
+        hotelStay: ExportHotelStay? = nil,
+        hotel: ExportHotel? = nil
+    ) {
+        self.id = id
+        self.type = type
+        self.sequence = sequence
+        self.start = start
+        self.end = end
+        self.flightNumber = flightNumber
+        self.origin = origin
+        self.destination = destination
+        self.aircraft = aircraft
+        self.blockTime = blockTime
+        self.station = station
+        self.hotelName = hotelName
+        self.previousSegmentID = previousSegmentID
+        self.nextSegmentID = nextSegmentID
+        self.blockGap = blockGap
+        self.scheduledRest = scheduledRest
+        self.hotelStay = hotelStay
+        self.hotel = hotel
+    }
 }
 
 struct TripJSONExportOwnerSource: Equatable, Sendable {
@@ -109,7 +211,7 @@ enum TripJSONExportError: LocalizedError, Equatable {
 }
 
 enum TripJSONExportService {
-    static let schemaVersion = "1.0"
+    static let schemaVersion = "1.2"
 
     static func payload(
         for schedule: PayPeriodSchedule,
@@ -156,11 +258,11 @@ enum TripJSONExportService {
             ?? "unknown-date"
         let tripID = "trip-\(stableIDComponent(tripNumber))-\(tripDate.lowercased())"
 
-        var events = try payload.items.map { item in
-            try flightEvent(item, tripID: tripID)
-        }
-        events.append(contentsOf: try hotelEvents(for: schedule, tripID: tripID))
-        events.sort(by: eventSort)
+        let events = try publicEvents(
+            payload: payload,
+            schedule: schedule,
+            tripID: tripID
+        )
 
         guard let firstEvent = events.first,
               let lastEvent = events.max(by: { $0.end.instant < $1.end.instant })
@@ -297,61 +399,252 @@ enum TripJSONExportService {
         return ExportOwner(name: name, gems: gems, base: base, fleet: fleet, position: position)
     }
 
-    private static func flightEvent(_ item: CrewAccessTripItemJSON, tripID: String) throws -> ExportEvent {
+    private static func flightEvent(
+        _ item: CrewAccessTripItemJSON,
+        tripID: String,
+        sequence: Int
+    ) throws -> ExportEvent {
         let type: ExportEventType = item.deadhead ? .deadhead : .flight
         let origin = normalizedIdentifier(item.depAirport)
         let destination = normalizedIdentifier(item.arrAirport)
         let start = try exportTimestamp(item.startUtc, timeZoneID: item.originTz)
         let end = try exportTimestamp(item.endUtc, timeZoneID: item.destinationTz)
         return ExportEvent(
-            id: "event-\(tripID)-\(type.rawValue)-\(item.sequence)",
+            id: "event-\(tripID)-\(type.rawValue)-\(sequence)",
             type: type,
-            sequence: item.sequence,
+            sequence: sequence,
             start: start,
             end: end,
             flightNumber: nilIfEmpty(item.flight),
             origin: nilIfEmpty(origin),
             destination: nilIfEmpty(destination),
             aircraft: nilIfEmpty(item.aircraft),
-            blockTime: nilIfEmpty(item.block),
-            station: nil,
-            hotelName: nil
+            blockTime: nilIfEmpty(item.block)
         )
     }
 
-    private static func hotelEvents(
-        for schedule: PayPeriodSchedule,
+    private static func publicEvents(
+        payload: CrewAccessTripJSON,
+        schedule: PayPeriodSchedule,
         tripID: String
     ) throws -> [ExportEvent] {
-        let orderedLegs = schedule.legs.sorted { lhs, rhs in
-            (lhs.depUTC ?? "", lhs.leg, lhs.id.uuidString) < (rhs.depUTC ?? "", rhs.leg, rhs.id.uuidString)
+        let items = payload.items.sorted { lhs, rhs in
+            (lhs.startUtc, lhs.sequence, lhs.flight) < (rhs.startUtc, rhs.sequence, rhs.flight)
         }
+        let payloadTripID = normalizedIdentifier(payload.tripId)
+        let scheduleTripLegs = schedule.legs.filter {
+            normalizedIdentifier($0.pairing) == payloadTripID
+        }
+        let rawHotels = parsedHotels(from: payload.hotelDetails)
         var events: [ExportEvent] = []
-        for (index, leg) in orderedLegs.enumerated() {
-            guard let hotelName = nilIfEmpty(leg.layoverHotelName ?? ""),
-                  let startUTC = leg.arrUTC,
-                  orderedLegs.indices.contains(index + 1),
-                  let endUTC = orderedLegs[index + 1].depUTC
+        var nextSequence = 1
+        var legacyHotelIndex = 0
+
+        for index in items.indices {
+            let item = items[index]
+            let flight = try flightEvent(item, tripID: tripID, sequence: nextSequence)
+            events.append(flight)
+            nextSequence += 1
+
+            guard items.indices.contains(index + 1) else { continue }
+            let nextItem = items[index + 1]
+            guard normalizedIdentifier(item.arrAirport) == normalizedIdentifier(nextItem.depAirport),
+                  let blockIn = parseInstant(item.endUtc),
+                  let nextBlockOut = parseInstant(nextItem.startUtc),
+                  nextBlockOut > blockIn
             else { continue }
-            let station = normalizedIdentifier(leg.layoverStation ?? leg.arrAirport)
-            let timeZoneID = IATATimeZoneResolver.shared.resolve(station)
-            let sequence = leg.leg
+
+            let nextType: ExportEventType = nextItem.deadhead ? .deadhead : .flight
+            let nextSegmentID = "event-\(tripID)-\(nextType.rawValue)-\(nextSequence + 1)"
+            let station = normalizedIdentifier(item.arrAirport)
+            let start = try exportTimestamp(item.endUtc, timeZoneID: item.destinationTz)
+            let end = try exportTimestamp(nextItem.startUtc, timeZoneID: nextItem.originTz)
+            let durationMinutes = Int(nextBlockOut.timeIntervalSince(blockIn) / 60)
+            let scheduleLeg = scheduleTripLegs.first {
+                $0.leg == item.sequence && $0.depUTC == item.startUtc
+            } ?? scheduleTripLegs.first {
+                $0.leg == item.sequence
+            }
+            let hasStructuredLayover = [
+                scheduleLeg?.layoverStation,
+                scheduleLeg?.layoverHotelName,
+                scheduleLeg?.layoverDuration
+            ].contains { nilIfEmpty($0 ?? "") != nil }
+            let crossesTripDay = nextItem.sequence > item.sequence
+            let crossesTripDayWithLayoverInterval = crossesTripDay && durationMinutes > 10 * 60
+            guard crossesTripDayWithLayoverInterval || hasStructuredLayover else { continue }
+
+            let hotel = resolvedHotel(
+                station: station,
+                scheduleName: scheduleLeg?.layoverHotelName,
+                rawHotels: rawHotels,
+                legacyIndex: &legacyHotelIndex
+            )
             events.append(ExportEvent(
-                id: "event-\(tripID)-hotel-\(sequence)",
-                type: .hotel,
-                sequence: sequence,
-                start: try exportTimestamp(startUTC, timeZoneID: timeZoneID),
-                end: try exportTimestamp(endUTC, timeZoneID: timeZoneID),
-                flightNumber: nil,
-                origin: nil,
-                destination: nil,
-                aircraft: nil,
-                blockTime: nil,
+                id: "event-\(tripID)-layover-\(nextSequence)",
+                type: .layover,
+                sequence: nextSequence,
+                start: start,
+                end: end,
                 station: nilIfEmpty(station),
-                hotelName: hotelName
+                previousSegmentID: flight.id,
+                nextSegmentID: nextSegmentID,
+                blockGap: ExportDerivedInterval(
+                    start: start,
+                    end: end,
+                    durationMinutes: durationMinutes,
+                    derived: true,
+                    derivation: "previousSegment.end_to_nextSegment.start"
+                ),
+                scheduledRest: try scheduledRest(
+                    blockIn: blockIn,
+                    nextBlockOut: nextBlockOut,
+                    dutyEndTimeZoneID: item.destinationTz,
+                    nextDutyStartTimeZoneID: nextItem.originTz
+                ),
+                hotel: hotel
             ))
+            nextSequence += 1
         }
         return events
+    }
+
+    private static func scheduledRest(
+        blockIn: Date,
+        nextBlockOut: Date,
+        dutyEndTimeZoneID: String?,
+        nextDutyStartTimeZoneID: String?
+    ) throws -> ExportScheduledRest? {
+        let rule = ExportScheduledRestCalculationRule(
+            dutyEndMinutesAfterBlockIn: 30,
+            dutyStartMinutesBeforeBlockOut: 90
+        )
+        let dutyEndDate = blockIn.addingTimeInterval(
+            TimeInterval(rule.dutyEndMinutesAfterBlockIn * 60)
+        )
+        let nextDutyStartDate = nextBlockOut.addingTimeInterval(
+            TimeInterval(-rule.dutyStartMinutesBeforeBlockOut * 60)
+        )
+        guard nextDutyStartDate > dutyEndDate else { return nil }
+
+        return ExportScheduledRest(
+            dutyEnd: try exportTimestamp(
+                utcString(dutyEndDate),
+                timeZoneID: dutyEndTimeZoneID
+            ),
+            nextDutyStart: try exportTimestamp(
+                utcString(nextDutyStartDate),
+                timeZoneID: nextDutyStartTimeZoneID
+            ),
+            durationMinutes: Int(nextDutyStartDate.timeIntervalSince(dutyEndDate) / 60),
+            derived: true,
+            calculationRule: rule
+        )
+    }
+
+    private struct ParsedHotel {
+        let station: String?
+        let name: String?
+        let phone: String?
+    }
+
+    private static func parsedHotels(from details: [String]) -> [ParsedHotel] {
+        details.compactMap { detail in
+            let normalized = detail
+                .split(whereSeparator: \Character.isWhitespace)
+                .joined(separator: " ")
+            guard !normalized.isEmpty else { return nil }
+
+            if normalized.hasPrefix("Hotel details ") {
+                guard let hotelRange = normalized.range(of: "Hotel: ") else { return nil }
+                var hotelPart = String(normalized[hotelRange.upperBound...])
+                if let transportRange = hotelPart.range(of: " Hotel Transport:") {
+                    hotelPart = String(hotelPart[..<transportRange.lowerBound])
+                }
+                let phone = firstPhone(in: hotelPart)
+                let name = hotelName(before: phone, in: hotelPart)
+                    .replacingOccurrences(of: " UPS Only", with: "")
+                    .replacingOccurrences(of: "UPS Only ", with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                return ParsedHotel(station: nil, name: nilIfEmpty(name), phone: phone)
+            }
+
+            guard let colon = normalized.range(of: ":") else { return nil }
+            let station = normalizedIdentifier(String(normalized[..<colon.lowerBound]))
+            let hotelPart = String(normalized[colon.upperBound...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let phone = firstPhone(in: hotelPart)
+            let name = hotelName(before: phone, in: hotelPart)
+            return ParsedHotel(
+                station: nilIfEmpty(station),
+                name: nilIfEmpty(name),
+                phone: phone
+            )
+        }
+    }
+
+    private static func resolvedHotel(
+        station: String,
+        scheduleName: String?,
+        rawHotels: [ParsedHotel],
+        legacyIndex: inout Int
+    ) -> ExportHotel? {
+        let stationMatch = rawHotels.first { $0.station == station }
+        let legacyHotels = rawHotels.filter { $0.station == nil }
+        let source: ParsedHotel?
+        if let stationMatch {
+            source = stationMatch
+        } else if legacyHotels.indices.contains(legacyIndex) {
+            source = legacyHotels[legacyIndex]
+            legacyIndex += 1
+        } else {
+            source = nil
+        }
+        // Prefer the retained PDF value so public export does not inherit older
+        // display-only prefix normalization from TripLeg enrichment.
+        let sourceName = source?.name ?? nilIfEmpty(scheduleName ?? "") ?? ""
+        let normalizedName = HotelNameNormalizer.publicName(
+            station: station,
+            rawName: sourceName,
+            phone: source?.phone
+        )
+        let name = nilIfEmpty(normalizedName.name)
+        guard name != nil || source?.phone != nil else { return nil }
+        let normalization = normalizedName.matchedBy.map {
+            ExportHotelNameNormalization(
+                derived: true,
+                method: "knownHotelDirectory",
+                matchedBy: $0
+            )
+        }
+        return ExportHotel(
+            name: name,
+            address: nil,
+            phone: source?.phone,
+            sourceName: normalizedName.sourceName,
+            nameNormalization: normalization
+        )
+    }
+
+    private static func firstPhone(in value: String) -> String? {
+        let patterns = [
+            #"\+\d[\d\s-]{5,}\d"#,
+            #"\b011[-\s]?\d[\d\s-]{5,}\d"#,
+            #"\b[2-9]\d{2}-\d{3}-\d{4}\b"#
+        ]
+        for pattern in patterns {
+            if let range = value.range(of: pattern, options: .regularExpression) {
+                return String(value[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        return nil
+    }
+
+    private static func hotelName(before phone: String?, in value: String) -> String {
+        guard let phone, let range = value.range(of: phone) else {
+            return value.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return String(value[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func exportTimestamp(

@@ -11,7 +11,7 @@ The UTF-8 JSON root contains exactly these fields:
 
 ```json
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.2",
   "exportedAt": "2026-07-19T01:30:00Z",
   "generator": {},
   "owner": {},
@@ -20,7 +20,9 @@ The UTF-8 JSON root contains exactly these fields:
 }
 ```
 
-`schemaVersion` is always the JSON string `"1.0"`. `exportedAt` and operational
+`schemaVersion` is the JSON string `"1.2"`. Version `1.0` was the original
+flight-only contract and `1.1` introduced layover/rest fields.
+`exportedAt` and operational
 `instant` values use ISO 8601 UTC. Generator version and build are informational and
 do not determine schema compatibility.
 
@@ -91,10 +93,96 @@ timezone, the implementation retains the correct instant and represents it in UT
 
 - `flight`: operating CrewAccess legs.
 - `deadhead`: positioning/deadhead CrewAccess legs.
-- `hotel`: only when the normalized schedule has a structured hotel name plus reliable
-  arrival and following-departure UTC bounds.
+- `layover`: the interval between an arriving Flight Block-in and the next Flight
+  Block-out at the same station. It is interleaved with flights using a continuous
+  public `sequence` and links to the adjacent flight/deadhead segments with
+  `previousSegmentID` and `nextSegmentID`.
 
 Events are sorted by `start.instant`, then `sequence`, then `id`.
+
+The layover event keeps the derived block gap separate from rest and hotel occupancy:
+
+```json
+{
+  "id": "event-trip-a70610-2026-07-21-layover-2",
+  "type": "layover",
+  "sequence": 2,
+  "start": {},
+  "end": {},
+  "station": "SDF",
+  "previousSegmentID": "event-trip-a70610-2026-07-21-flight-1",
+  "nextSegmentID": "event-trip-a70610-2026-07-21-flight-3",
+  "blockGap": {
+    "start": {},
+    "end": {},
+    "durationMinutes": 1692,
+    "derived": true,
+    "derivation": "previousSegment.end_to_nextSegment.start"
+  },
+  "scheduledRest": {
+    "dutyEnd": {},
+    "nextDutyStart": {},
+    "durationMinutes": 1572,
+    "derived": true,
+    "calculationRule": {
+      "dutyEndMinutesAfterBlockIn": 30,
+      "dutyStartMinutesBeforeBlockOut": 90
+    }
+  },
+  "hotel": {
+    "name": "Crowne Plaza Louisville Airport Expo Center",
+    "phone": "502-367-2251",
+    "sourceName": "Crowne Plaza Louisville Airpor",
+    "nameNormalization": {
+      "derived": true,
+      "method": "knownHotelDirectory",
+      "matchedBy": "stationAndPhone"
+    }
+  }
+}
+```
+
+`start` and `end` remain on every event for compatibility; on a layover they equal
+the `blockGap` bounds. `blockGap` is explicitly marked derived and is not Scheduled
+Rest or hotel occupancy. Missing hotel fields are omitted.
+
+TDH's authoritative scheduled hotel-rest calculation is:
+
+- `dutyEnd = arrivingFlight.blockIn + 30 minutes`
+- `nextDutyStart = nextFlight.blockOut - 90 minutes`
+- `scheduledRest = dutyEnd ... nextDutyStart`
+
+This rule is applied only across a verified duty boundary. Structured layover metadata
+establishes that boundary directly. Otherwise, the CrewAccess Trip day/source sequence
+must increase and the Block-in-to-next-Block-out interval must satisfy TDH's documented
+Layover classification of more than ten hours. Adjacent legs in the same Trip day
+without layover metadata remain in the same duty and do not produce a layover or
+`scheduledRest`. The result is marked `derived` and the two offsets are included in
+`calculationRule`.
+
+`hotelStay` remains separate and is emitted only when persisted Check-in and Check-out
+instants are both available. The current importer does not persist those timestamp
+pairs, so `hotelStay` is omitted rather than inferred from `blockGap` or
+`scheduledRest`.
+
+Schema `1.1` was a minor, additive version: existing Flight/deadhead fields were
+unchanged, optional layover fields can be ignored, and consumers must skip event
+objects whose `type` they do not recognize instead of failing the entire document.
+
+Schema `1.2` directly renames the Draft-only layover references from
+`previousFlightID` / `nextFlightID` to `previousSegmentID` / `nextSegmentID` because
+the referenced segment may be a `deadhead`. This is structurally breaking, but the
+Draft has no production Viewer or external consumer in this repository, so the
+misleading legacy fields are not emitted in parallel.
+
+Hotel names may be replaced only by the bundled known-hotel directory. Matching order
+is exact station-plus-normalized-phone (`stationAndPhone`), directory-unique normalized
+phone (`phone`), exact station-plus-raw-name (`stationAndRawName`), then
+directory-unique exact raw name (`rawName`). Duplicate phone or raw-name entries are
+never resolved without station. When the public name differs, `sourceName` and
+`nameNormalization` record the source and the branch that actually matched.
+Unknown or ambiguous names are preserved verbatim; no prefix/fuzzy matching, online
+lookup, or runtime external API is used by public JSON export.
 
 ## Deferred event types
 
