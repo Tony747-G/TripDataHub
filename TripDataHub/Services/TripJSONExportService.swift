@@ -402,9 +402,15 @@ enum TripJSONExportService {
     private static func flightEvent(
         _ item: CrewAccessTripItemJSON,
         tripID: String,
-        sequence: Int
+        sequence: Int,
+        includeGroundTransport: Bool = false
     ) throws -> ExportEvent {
-        let type: ExportEventType = item.deadhead ? .deadhead : .flight
+        let type: ExportEventType
+        if includeGroundTransport, item.flight.caseInsensitiveCompare("GND") == .orderedSame {
+            type = .groundTransport
+        } else {
+            type = item.deadhead ? .deadhead : .flight
+        }
         let origin = normalizedIdentifier(item.depAirport)
         let destination = normalizedIdentifier(item.arrAirport)
         let start = try exportTimestamp(item.startUtc, timeZoneID: item.originTz)
@@ -423,10 +429,11 @@ enum TripJSONExportService {
         )
     }
 
-    private static func publicEvents(
+    static func publicEvents(
         payload: CrewAccessTripJSON,
         schedule: PayPeriodSchedule,
-        tripID: String
+        tripID: String,
+        includeGroundTransport: Bool = false
     ) throws -> [ExportEvent] {
         let items = payload.items.sorted { lhs, rhs in
             (lhs.startUtc, lhs.sequence, lhs.flight) < (rhs.startUtc, rhs.sequence, rhs.flight)
@@ -442,7 +449,12 @@ enum TripJSONExportService {
 
         for index in items.indices {
             let item = items[index]
-            let flight = try flightEvent(item, tripID: tripID, sequence: nextSequence)
+            let flight = try flightEvent(
+                item,
+                tripID: tripID,
+                sequence: nextSequence,
+                includeGroundTransport: includeGroundTransport
+            )
             events.append(flight)
             nextSequence += 1
 
@@ -454,7 +466,13 @@ enum TripJSONExportService {
                   nextBlockOut > blockIn
             else { continue }
 
-            let nextType: ExportEventType = nextItem.deadhead ? .deadhead : .flight
+            let nextType: ExportEventType
+            if includeGroundTransport,
+               nextItem.flight.caseInsensitiveCompare("GND") == .orderedSame {
+                nextType = .groundTransport
+            } else {
+                nextType = nextItem.deadhead ? .deadhead : .flight
+            }
             let nextSegmentID = "event-\(tripID)-\(nextType.rawValue)-\(nextSequence + 1)"
             let station = normalizedIdentifier(item.arrAirport)
             let start = try exportTimestamp(item.endUtc, timeZoneID: item.destinationTz)
@@ -509,7 +527,7 @@ enum TripJSONExportService {
         return events
     }
 
-    private static func scheduledRest(
+    static func scheduledRest(
         blockIn: Date,
         nextBlockOut: Date,
         dutyEndTimeZoneID: String?,
@@ -647,7 +665,7 @@ enum TripJSONExportService {
         return String(value[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func exportTimestamp(
+    static func exportTimestamp(
         _ instantValue: String,
         timeZoneID: String?
     ) throws -> ExportTimestamp {
@@ -672,7 +690,7 @@ enum TripJSONExportService {
         )
     }
 
-    private static func parseInstant(_ value: String) -> Date? {
+    static func parseInstant(_ value: String) -> Date? {
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let date = fractional.date(from: value) { return date }
@@ -681,7 +699,7 @@ enum TripJSONExportService {
         return standard.date(from: value)
     }
 
-    private static func utcString(_ date: Date) -> String {
+    static func utcString(_ date: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.string(from: date)

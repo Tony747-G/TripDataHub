@@ -28,20 +28,10 @@ private let bidPeriodDefinitions: [BidPeriodDefinition] = [
 /// by looking up the BP and using payPeriodIndex (0 = first PP, 1 = second PP).
 /// Falls back to nil if the date is outside all defined BPs.
 func resolvePayPeriodLabel(for dateUTC: Date, domicile: String = DomicileSupport.defaultDomicile) -> String? {
-    guard let bp = bidPeriod(for: dateUTC, domicile: domicile),
-          let matchingDef = bidPeriodDefinitions.first(where: { $0.id == bp.id })
-    else { return nil }
-
-    let calendar = bidPeriodDomicileCalendar(for: domicile)
-    let startBoundaryUTC = bidPeriodStartBoundaryUTC(for: matchingDef, domicile: domicile)
-    let ppIndex = (0..<matchingDef.ppLabels.count).last { index in
-        guard let boundary = calendar.date(byAdding: .day, value: index * 28, to: startBoundaryUTC) else {
-            return false
-        }
-        return boundary <= dateUTC
-    } ?? 0
-    guard ppIndex < matchingDef.ppLabels.count else { return nil }
-    return matchingDef.ppLabels[ppIndex]
+    guard let bp = bidPeriod(for: dateUTC, domicile: domicile) else { return nil }
+    return payPeriods(in: bp, domicile: domicile)
+        .last { $0.startDateUTC <= dateUTC && dateUTC < $0.endDateUTC }?
+        .identifier
 }
 
 private let bidPeriodUTCCalendar: Calendar = {
@@ -180,6 +170,41 @@ func bidPeriod(identifier: String, domicile: String = DomicileSupport.defaultDom
     }
 
     return cachedBidPeriod(for: definition, domicile: domicile)
+}
+
+/// Returns the authoritative Pay Periods owned by the Bid Period definition.
+/// Boundaries preserve the same 03:00 domicile-local half-open semantics as the
+/// parent Bid Period. The ordinal is stable even if a future definition has no
+/// public Pay Period label.
+func payPeriods(
+    in bidPeriod: CalendarBidPeriod,
+    domicile: String = DomicileSupport.defaultDomicile
+) -> [CalendarPayPeriod] {
+    guard let definition = bidPeriodDefinitions.first(where: { $0.id == bidPeriod.id }) else {
+        return []
+    }
+
+    let calendar = bidPeriodDomicileCalendar(for: domicile)
+    let authoritativeStart = bidPeriodStartBoundaryUTC(for: definition, domicile: domicile)
+
+    return (0..<definition.payPeriodCount).compactMap { index in
+        guard let rawStart = calendar.date(byAdding: .day, value: index * 28, to: authoritativeStart),
+              let rawEnd = calendar.date(byAdding: .day, value: (index + 1) * 28, to: authoritativeStart)
+        else {
+            return nil
+        }
+
+        let start = max(rawStart, bidPeriod.startDateUTC)
+        let end = min(rawEnd, bidPeriod.endDateUTC)
+        guard start < end else { return nil }
+
+        return CalendarPayPeriod(
+            identifier: definition.ppLabels.indices.contains(index) ? definition.ppLabels[index] : nil,
+            ordinal: index + 1,
+            startDateUTC: start,
+            endDateUTC: end
+        )
+    }
 }
 
 func bidPeriodWindow(

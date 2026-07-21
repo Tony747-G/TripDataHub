@@ -2756,6 +2756,89 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func prepareBidPeriodScheduleJSONExport(
+        scheduleID: String,
+        pairing: String
+    ) async throws -> TripJSONExportOutput {
+        guard let selectedSchedule = crewAccessSchedules.first(where: { $0.id == scheduleID }) else {
+            throw BidPeriodScheduleExportError.selectedTripUnavailable
+        }
+        let normalizedPairing = pairing.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let selectedTripLegs = selectedSchedule.legs.filter {
+            $0.pairing.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == normalizedPairing
+        }
+        guard !selectedTripLegs.isEmpty else {
+            throw BidPeriodScheduleExportError.selectedTripUnavailable
+        }
+        guard let firstDeparture = selectedTripLegs
+            .compactMap({ LegConnectionTextBuilder.parseUTC($0.depUTC) })
+            .min() else {
+            throw BidPeriodScheduleExportError.selectedTripDepartureUnavailable
+        }
+
+        let selectedCrewBase = OperationalSettings.selectedCrewBase()
+        let domicile = selectedCrewBase.rawValue
+        guard let resolvedBidPeriod = bidPeriod(for: firstDeparture, domicile: domicile) else {
+            throw BidPeriodScheduleExportError.assignedBidPeriodUnavailable
+        }
+
+        let profile = ProfileSnapshot.loadFromLocalStorage()
+        let identity = verifiedIdentity
+        let canonicalGEMS = GEMSIDNormalizer.normalize(
+            profile.gemsID.isEmpty ? (identity?.gemsID ?? "") : profile.gemsID
+        )
+        let ownSeniorityRecord = seniorityRecords.first {
+            GEMSIDNormalizer.normalize($0.gemsID) == canonicalGEMS && !canonicalGEMS.isEmpty
+        }
+        let owner = BidPeriodExportOwnerInput(
+            profileName: profile.displayName,
+            profileGEMS: profile.gemsID,
+            profileFleet: profile.fleet,
+            profilePosition: profile.position,
+            verifiedName: identity?.name ?? "",
+            verifiedGEMS: identity?.gemsID ?? "",
+            verifiedEquipment: identity?.equipment ?? "",
+            verifiedSeat: identity?.seat ?? "",
+            verifiedDateOfHire: identity?.dateOfHire ?? ownSeniorityRecord?.dateOfHire ?? "",
+            seniorityNumber: ownSeniorityRecord?.seniorityNumber ?? ""
+        )
+        let qualification = PilotQualification(
+            rawValue: UserDefaults.standard.string(forKey: "pilot_qualification") ?? ""
+        ) ?? .captain
+        let schedules = crewAccessSchedules
+        let operationalEvents = manualOperationalEvents
+        let personalEvents = manualPersonalEvents
+        let generator = TripJSONExportService.generator()
+        let payloads = await Task.detached(priority: .userInitiated) {
+            Self.loadCrewAccessTripJSONPayloadsFromImportFilesSync().map(\.payload)
+        }.value
+
+        let input = BidPeriodScheduleExportInput(
+            bidPeriod: resolvedBidPeriod,
+            domicile: domicile,
+            owner: owner,
+            schedules: schedules,
+            crewAccessPayloads: payloads,
+            manualOperationalEvents: operationalEvents,
+            manualPersonalEvents: personalEvents,
+            pilotQualification: qualification,
+            faaMedicalExpiryDate: profile.faaMedicalExpiryDate,
+            passportExpiryDate: profile.passportExpiryDate,
+            chinaVisaExpiryDate: profile.chinaVisaExpiryDate,
+            generator: generator,
+            exportedAt: Date()
+        )
+
+        do {
+            let output = try BidPeriodScheduleExportService.makeTemporaryFile(input: input)
+            logger.info("[BidPeriodJSONExport] ready file=\(output.url.lastPathComponent, privacy: .public)")
+            return output
+        } catch {
+            logger.error("[BidPeriodJSONExport] failed")
+            throw error
+        }
+    }
+
     func displaySchedules(filter: TimelineSourceFilter) -> [PayPeriodSchedule] {
         switch filter {
         case .crewAccess:

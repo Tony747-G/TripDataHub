@@ -1,5 +1,11 @@
 import SwiftUI
 
+private struct TimelineTripActionSelection {
+    let scheduleID: String
+    let pairing: String
+    let anchorLegID: UUID
+}
+
 struct TimelineTabView: View {
     let scrollTrigger: Int
     let showsAddEventButton: Bool
@@ -13,8 +19,7 @@ struct TimelineTabView: View {
     @State private var importedUTCTimesByTripAndSequence: [String: CrewAccessLegUTCTimes] = [:]
     @State private var friendMatchAlert: FriendMatchPresentation?
     @State private var friendScheduleMatches: FriendScheduleMatches = .empty
-    @State private var deleteTripConfirmPairing: String? = nil
-    @State private var selectedTripActionScheduleID: String?
+    @State private var tripActionSelection: TimelineTripActionSelection?
     @State private var tripJSONExportOutput: TripJSONExportOutput?
     @State private var tripJSONExportErrorMessage: String?
     @State private var showingAddEvent = false
@@ -156,9 +161,9 @@ struct TimelineTabView: View {
                 FriendMatchPresentationView(presentation: presentation)
             }
             .confirmationDialog(
-                deleteTripConfirmPairing.map { "Delete Trip \($0)?" } ?? "Delete Trip?",
+                tripActionSelection.map { "Trip \($0.pairing)" } ?? "Trip Actions",
                 isPresented: Binding(
-                    get: { deleteTripConfirmPairing != nil },
+                    get: { tripActionSelection != nil },
                     set: { if !$0 { dismissTripActions() } }
                 ),
                 titleVisibility: .visible
@@ -166,10 +171,15 @@ struct TimelineTabView: View {
                 Button {
                     exportSelectedTripJSON()
                 } label: {
-                    Label("Export JSON", systemImage: "square.and.arrow.up")
+                    Label("Export Trip JSON", systemImage: "square.and.arrow.up")
+                }
+                Button {
+                    exportSelectedBidPeriodJSON()
+                } label: {
+                    Label("Export Bid Period JSON", systemImage: "calendar.badge.clock")
                 }
                 Button("Delete Trip", role: .destructive) {
-                    if let pairing = deleteTripConfirmPairing {
+                    if let pairing = tripActionSelection?.pairing {
                         let ids = Set(
                             viewModel.crewAccessSchedules
                                 .filter { $0.legs.contains { $0.pairing == pairing } }
@@ -183,7 +193,7 @@ struct TimelineTabView: View {
                     dismissTripActions()
                 }
             } message: {
-                Text("This will remove the trip from Timeline and synced devices.")
+                Text("Choose an action for this trip.")
             }
 #if canImport(UIKit)
             .sheet(item: $tripJSONExportOutput, onDismiss: removeTripJSONExportFile) { output in
@@ -233,21 +243,26 @@ struct TimelineTabView: View {
     }
 
     private func presentTripActions(for leg: TripLeg) {
-        selectedTripActionScheduleID = currentTimelineSchedules.first(where: { schedule in
+        guard let scheduleID = currentTimelineSchedules.first(where: { schedule in
             schedule.legs.contains { $0.id == leg.id }
-        })?.id
-        deleteTripConfirmPairing = leg.pairing
+        })?.id else {
+            tripJSONExportErrorMessage = BidPeriodScheduleExportError.selectedTripUnavailable.localizedDescription
+            return
+        }
+        tripActionSelection = TimelineTripActionSelection(
+            scheduleID: scheduleID,
+            pairing: leg.pairing,
+            anchorLegID: leg.id
+        )
     }
 
     private func dismissTripActions() {
-        deleteTripConfirmPairing = nil
-        selectedTripActionScheduleID = nil
+        tripActionSelection = nil
     }
 
     private func exportSelectedTripJSON() {
-        let schedule = selectedTripActionScheduleID.flatMap { scheduleID in
-            currentTimelineSchedules.first { $0.id == scheduleID }
-        }
+        let selection = tripActionSelection
+        let schedule = selection.flatMap(selectedTripSchedule)
         dismissTripActions()
         removeTripJSONExportFile()
 
@@ -263,6 +278,49 @@ struct TimelineTabView: View {
                 tripJSONExportErrorMessage = error.localizedDescription
             }
         }
+    }
+
+    private func exportSelectedBidPeriodJSON() {
+        guard let selection = tripActionSelection else {
+            tripJSONExportErrorMessage = BidPeriodScheduleExportError.selectedTripUnavailable.localizedDescription
+            return
+        }
+        dismissTripActions()
+        removeTripJSONExportFile()
+
+        Task {
+            do {
+                tripJSONExportOutput = try await viewModel.prepareBidPeriodScheduleJSONExport(
+                    scheduleID: selection.scheduleID,
+                    pairing: selection.pairing
+                )
+            } catch {
+                tripJSONExportErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func selectedTripSchedule(
+        for selection: TimelineTripActionSelection
+    ) -> PayPeriodSchedule? {
+        guard let schedule = currentTimelineSchedules.first(where: { candidate in
+            candidate.id == selection.scheduleID
+                && candidate.legs.contains { $0.id == selection.anchorLegID }
+        }) else {
+            return nil
+        }
+        let legs = schedule.legs.filter { $0.pairing == selection.pairing }
+        guard !legs.isEmpty else { return nil }
+        return PayPeriodSchedule(
+            id: schedule.id,
+            label: schedule.label,
+            tripCount: 1,
+            legCount: legs.count,
+            openTimeCount: 0,
+            updatedAt: schedule.updatedAt,
+            legs: legs,
+            openTimeTrips: []
+        )
     }
 
     private func removeTripJSONExportFile() {
@@ -312,7 +370,7 @@ struct TimelineTabView: View {
                             ForEach(section.entries) { entry in
                                 switch entry {
                                 case .leg(let leg):
-                                    let isHighlighted = deleteTripConfirmPairing == leg.pairing
+                                    let isHighlighted = tripActionSelection?.pairing == leg.pairing
                                     timelineRow(leg: leg, nextLegByID: connectionMap)
                                         .id("\(leg.id.uuidString)|\(selectedClockDisplay.rawValue)")
                                         .background(isHighlighted ? Color.red.opacity(0.10) : Color.clear)
@@ -336,7 +394,7 @@ struct TimelineTabView: View {
                                     }
                                     if tripBoundaryAfterLegs.contains(leg.id) {
                                         if let nextTripStartLeg = tripStartLegAfterBoundary[leg.id] {
-                                            let nextHighlighted = deleteTripConfirmPairing == nextTripStartLeg.pairing
+                                            let nextHighlighted = tripActionSelection?.pairing == nextTripStartLeg.pairing
                                             tripDataCard(
                                                 forTripID: nextTripStartLeg.pairing,
                                                 isPast: isPastTrip(nextTripStartLeg.pairing),

@@ -7,6 +7,13 @@ struct CalendarBidPeriod: Equatable {
     let days: [CalendarDay]
 }
 
+struct CalendarPayPeriod: Equatable, Sendable {
+    let identifier: String?
+    let ordinal: Int
+    let startDateUTC: Date
+    let endDateUTC: Date
+}
+
 struct CalendarDay: Equatable {
     let index: Int
     let weekIndex: Int

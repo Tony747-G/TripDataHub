@@ -33,8 +33,8 @@ and display whose trip it is:
 
 ```json
 {
-  "name": "SATOSHI FUNENO",
-  "gems": "7793942",
+  "name": "AVERY EXAMPLE",
+  "gems": "0000001",
   "base": "ANC",
   "fleet": "747",
   "position": "FO"
@@ -57,6 +57,124 @@ The public export does not contain the raw `crew` array, other crew members, sen
 CloudKit/database identifiers, parser/source versions, mapping versions, raw duty or
 hotel strings, file paths, diagnostics, sync/authentication state, or deletion metadata.
 The export is therefore privacy-minimized, not anonymous.
+
+## Bid Period schedule export
+
+The Timeline action `Export Bid Period JSON` creates `<bidPeriod.identifier>.json`
+(for example, `BP26-06.json`) with schema version `1.0` and export type
+`bidPeriodSchedule`. Bid Period bounds come from `BidPeriodService`, including the
+03:00 domicile-local boundary and variable-duration periods. Schedule inclusion uses
+half-open interval overlap, not assigned-BP equality. Each trip separately records the
+BP assigned from its earliest valid UTC departure.
+
+```json
+{
+  "schemaVersion": "1.0",
+  "exportType": "bidPeriodSchedule",
+  "exportedAt": "2026-09-10T18:00:00Z",
+  "generator": {
+    "name": "TripDataHub",
+    "version": "1.0",
+    "build": "1"
+  },
+  "owner": {
+    "name": "AVERY EXAMPLE",
+    "gems": "0000001",
+    "domicile": "ANC",
+    "timeZone": "America/Anchorage",
+    "fleet": "747",
+    "position": "FO",
+    "line": {
+      "equipment": "747",
+      "seat": "FO",
+      "seniorityNumber": "99999",
+      "dateOfHire": "2020-01-01"
+    }
+  },
+  "bidPeriod": {
+    "identifier": "BP26-06",
+    "start": "2026-09-06T11:00:00Z",
+    "end": "2026-11-01T12:00:00Z",
+    "domicile": "ANC",
+    "timeZone": "America/Anchorage",
+    "boundaryLocalTime": "03:00",
+    "payPeriods": [
+      {
+        "identifier": "PP26-10",
+        "ordinal": 1,
+        "start": "2026-09-06T11:00:00Z",
+        "end": "2026-10-04T11:00:00Z"
+      },
+      {
+        "identifier": "PP26-11",
+        "ordinal": 2,
+        "start": "2026-10-04T11:00:00Z",
+        "end": "2026-11-01T12:00:00Z"
+      }
+    ]
+  },
+  "trips": [],
+  "calendarEvents": [
+    {
+      "id": "profile-faa-medical-expiry-2026-09-15",
+      "category": "personal",
+      "kind": "faaMedicalExpiry",
+      "title": "FAA Medical Expiry Date",
+      "timing": {
+        "semantics": "allDay",
+        "localStartDate": "2026-09-15",
+        "localEndDateExclusive": "2026-09-16",
+        "timeZone": "America/Anchorage",
+        "timeZoneSource": "selectedBidPeriodDomicile"
+      },
+      "source": "profileDate"
+    }
+  ],
+  "diagnostics": {
+    "partial": false,
+    "issues": []
+  }
+}
+```
+
+Owner identity and line fields are optional when unavailable. Missing rich CrewAccess
+data likewise produces a displayed-schedule fallback plus root and per-trip diagnostic
+issues; it does not invalidate the whole Bid Period export. `calendarEvents` includes
+user-owned Operational and Personal events, Bid and Financial rule events, and profile
+dates. Every event retains a category and one of `userCreated`, `calendarRule`, or
+`profileDate` as its source. Friends and other employees are not export inputs.
+
+`bidPeriod.payPeriods` comes from the same `BidPeriodService` definition that owns the
+parent BP boundary, Pay Period count, and public PP labels. Items are ordered by their
+stable one-based `ordinal`; `identifier` is the authoritative public label when TDH has
+one. A future definition without a public identifier retains the ordinal rather than
+inventing an operational label. PP intervals use the parent 03:00 domicile-local
+boundary, are half-open `[start, end)`, and are contained within the parent BP. Normal
+Bid Periods currently contain two items, while the known short Bid Period contains one.
+Pay Periods inherit the parent domicile, timezone, and boundary-local-time metadata.
+
+Each BP trip may also contain a structured `summary` sourced only from its matched rich
+CrewAccess payload:
+
+```json
+{
+  "summary": {
+    "dutyTime": { "minutes": 975, "display": "16:15" },
+    "blockTime": { "minutes": 765, "display": "12:45" },
+    "creditTime": { "minutes": 860, "display": "14:20" },
+    "tafb": { "minutes": 2890, "display": "48:10" },
+    "tripDays": { "days": 3, "display": "3" }
+  }
+}
+```
+
+Duty and block minutes are totals of the authoritative per-duty values retained in the
+rich payload. Credit, TAFB, and trip days map from their existing trip-level payload
+fields. Individual unavailable values are omitted; if no values are available, the
+whole `summary` is omitted. Corresponding `summary.*` names appear in the trip's
+`diagnostics.unavailableFieldGroups`. Displayed-schedule fallback trips never fabricate
+summary values. These additive BP-only fields remain part of unreleased BP schema `1.0`
+and do not change the single-trip JSON contract.
 
 ## Trip and stable identifiers
 
