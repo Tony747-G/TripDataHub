@@ -395,7 +395,7 @@ private struct FriendsManagementSection: View {
 
     var body: some View {
         Group {
-        Section("View Friend's Schedule") {
+        Section {
             if viewModel.acceptedFriendConnections.isEmpty {
                 Text("No friends yet.")
                     .font(.footnote)
@@ -438,6 +438,15 @@ private struct FriendsManagementSection: View {
                         }
                     }
                 }
+            }
+        } header: {
+            HStack {
+                Text("View Friend's Schedule")
+                Spacer()
+                Button("Sync") {
+                    Task { await viewModel.syncFriendCloudKit(reason: "ipad manual") }
+                }
+                .disabled(viewModel.isSyncingFriendCloudKit)
             }
         }
 
@@ -504,12 +513,6 @@ private struct FriendsManagementSection: View {
             }
         }
 
-        Section {
-            Button("Sync Friends") {
-                Task { await viewModel.syncFriendCloudKit(reason: "ipad manual") }
-            }
-            .disabled(viewModel.isSyncingFriendCloudKit)
-        }
         }
         .confirmationDialog(
             friendPendingRemoval.map { "Unfriend \($0.displayName)?" } ?? "Unfriend?",
