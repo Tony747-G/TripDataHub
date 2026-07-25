@@ -1,4 +1,5 @@
 import CloudKit
+import UIKit
 import UserNotifications
 import XCTest
 @testable import TripDataHub
@@ -50,32 +51,60 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
 
     // MARK: - Fetch: newer remote replaces local
 
-    func test_fetchDeviceSchedule_newerRemote_replacesLocalSchedule() async throws {
+    func test_fetchLegacyFallback_appliesSnapshotWhenTimelineIsEmpty() async throws {
         let deviceService = FakeDeviceScheduleCloudKitService()
-        // Snapshot must be newer than any local schedule (local schedule uses Date() at creation).
-        // Use a future timestamp to guarantee remote wins Gate 3 (local-wins protection).
-        let futureSnapshot = Date(timeIntervalSinceNow: 60)
+        let fetchKey = "device_schedule_last_fetch_at_v1"
+        UserDefaults.standard.removeObject(forKey: fetchKey)
+        defer { UserDefaults.standard.removeObject(forKey: fetchKey) }
         await deviceService.setSnapshot(DeviceScheduleSnapshot(
             ownerGEMSID: "7793942",
             ownerRecordName: "_rec",
             schedules: [makeSchedule(id: "CA26-99")],
             schemaVersion: 1,
-            updatedAt: futureSnapshot,
+            updatedAt: Date(),
             deviceID: "other-device",
             source: .iphone
         ))
 
         let vm = makeViewModel(deviceService: deviceService)
         setVerifiedIdentity(on: vm)
-        vm.crewAccessSchedules = [makeSchedule(id: "CA26-01")]
+        vm.crewAccessSchedules = []
 
-        await vm.fetchDeviceScheduleIfNeeded(reason: "test")
+        await vm.fetchLegacyDeviceScheduleFallbackIfNeeded(reason: "test")
 
         XCTAssertEqual(vm.crewAccessSchedules.count, 1)
         XCTAssertEqual(vm.crewAccessSchedules[0].id, "CA26-99")
     }
 
-    func test_fetchDeviceSchedule_olderRemote_keepsLocalSchedule() async throws {
+    /// The legacy snapshot has no per-trip merge, so it must never overwrite a Timeline that
+    /// the file-backed sync layer already rebuilt — regardless of how new the snapshot looks.
+    func test_fetchLegacyFallback_neverOverwritesTimelineRebuiltFromFiles() async throws {
+        let deviceService = FakeDeviceScheduleCloudKitService()
+        let fetchKey = "device_schedule_last_fetch_at_v1"
+        UserDefaults.standard.removeObject(forKey: fetchKey)
+        defer { UserDefaults.standard.removeObject(forKey: fetchKey) }
+        await deviceService.setSnapshot(DeviceScheduleSnapshot(
+            ownerGEMSID: "7793942",
+            ownerRecordName: "_rec",
+            schedules: [makeSchedule(id: "CA26-99")],
+            schemaVersion: 1,
+            updatedAt: Date(timeIntervalSinceNow: 3600),
+            deviceID: "other-device",
+            source: .iphone
+        ))
+
+        let vm = makeViewModel(deviceService: deviceService)
+        setVerifiedIdentity(on: vm)
+        vm.crewAccessSchedules = [makeSchedule(id: "CA26-from-files")]
+
+        await vm.fetchLegacyDeviceScheduleFallbackIfNeeded(reason: "test")
+
+        XCTAssertEqual(vm.crewAccessSchedules.map(\.id), ["CA26-from-files"])
+        let fetchCount = await deviceService.fetchCallCount
+        XCTAssertEqual(fetchCount, 0, "A non-empty Timeline must short-circuit before the network call")
+    }
+
+    func test_fetchLegacyFallback_alreadySeenSnapshot_isSkipped() async throws {
         let deviceService = FakeDeviceScheduleCloudKitService()
         let olderDate = Date(timeIntervalSinceNow: -3600)
         let newerDate = Date()
@@ -91,22 +120,22 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
 
         let vm = makeViewModel(deviceService: deviceService)
         setVerifiedIdentity(on: vm)
-        vm.crewAccessSchedules = [makeSchedule(id: "CA26-local")]
+        vm.crewAccessSchedules = []
         let fetchKey = "device_schedule_last_fetch_at_v1"
         UserDefaults.standard.set(newerDate, forKey: fetchKey)
         defer { UserDefaults.standard.removeObject(forKey: fetchKey) }
 
-        await vm.fetchDeviceScheduleIfNeeded(reason: "test")
+        await vm.fetchLegacyDeviceScheduleFallbackIfNeeded(reason: "test")
 
-        XCTAssertEqual(vm.crewAccessSchedules[0].id, "CA26-local")
+        XCTAssertTrue(vm.crewAccessSchedules.isEmpty)
     }
 
-    func test_fetchDeviceSchedule_sameDevice_keepsLocalSchedule() async throws {
+    func test_fetchLegacyFallback_sameDevice_isSkipped() async throws {
         let deviceService = FakeDeviceScheduleCloudKitService()
-        let knownDeviceID = "this-device-id-\(UUID().uuidString)"
-        let idKey = "device_id_v1"
-        UserDefaults.standard.set(knownDeviceID, forKey: idKey)
-        defer { UserDefaults.standard.removeObject(forKey: idKey) }
+        let knownDeviceID = try XCTUnwrap(UIDevice.current.identifierForVendor?.uuidString)
+        let fetchKey = "device_schedule_last_fetch_at_v1"
+        UserDefaults.standard.removeObject(forKey: fetchKey)
+        defer { UserDefaults.standard.removeObject(forKey: fetchKey) }
 
         await deviceService.setSnapshot(DeviceScheduleSnapshot(
             ownerGEMSID: "7793942",
@@ -120,18 +149,22 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
 
         let vm = makeViewModel(deviceService: deviceService)
         setVerifiedIdentity(on: vm)
-        vm.crewAccessSchedules = [makeSchedule(id: "CA26-local")]
+        vm.crewAccessSchedules = []
 
-        await vm.fetchDeviceScheduleIfNeeded(reason: "test")
+        await vm.fetchLegacyDeviceScheduleFallbackIfNeeded(reason: "test")
 
-        XCTAssertEqual(vm.crewAccessSchedules[0].id, "CA26-local")
+        XCTAssertTrue(vm.crewAccessSchedules.isEmpty)
     }
 
-    func test_fetchDeviceSchedule_localNewer_preventsRollback() async throws {
-        // Gate 3: if local schedule is newer than the remote snapshot, reject the remote.
-        // Scenario: local import succeeded but CloudKit upload failed; remote has older data.
+    /// Server modification dates and local file mtimes measure different events, so the
+    /// fallback must not compare them. With an empty Timeline a snapshot older than local
+    /// file mtimes is still the best available data.
+    func test_fetchLegacyFallback_doesNotCompareServerSnapshotToLocalFileTimestamp() async throws {
         let deviceService = FakeDeviceScheduleCloudKitService()
         let pastSnapshot = Date(timeIntervalSinceNow: -3600)
+        let fetchKey = "device_schedule_last_fetch_at_v1"
+        UserDefaults.standard.removeObject(forKey: fetchKey)
+        defer { UserDefaults.standard.removeObject(forKey: fetchKey) }
         await deviceService.setSnapshot(DeviceScheduleSnapshot(
             ownerGEMSID: "7793942",
             ownerRecordName: "_rec",
@@ -144,15 +177,16 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
 
         let vm = makeViewModel(deviceService: deviceService)
         setVerifiedIdentity(on: vm)
-        // Local schedule has updatedAt: Date() which is newer than pastSnapshot
-        vm.crewAccessSchedules = [makeSchedule(id: "CA26-local-new")]
+        // makeSchedule stamps updatedAt with Date(), i.e. newer than the snapshot.
+        vm.crewAccessSchedules = []
+        vm.bidproSchedules = [makeSchedule(id: "PP26-local-new")]
 
-        await vm.fetchDeviceScheduleIfNeeded(reason: "test")
+        await vm.fetchLegacyDeviceScheduleFallbackIfNeeded(reason: "test")
 
-        XCTAssertEqual(vm.crewAccessSchedules[0].id, "CA26-local-new")
+        XCTAssertEqual(vm.crewAccessSchedules.map(\.id), ["CA26-remote-old"])
     }
 
-    func test_fetchDeviceSchedule_noVerifiedIdentity_skips() async throws {
+    func test_fetchLegacyFallback_noVerifiedIdentity_skips() async throws {
         let deviceService = FakeDeviceScheduleCloudKitService()
         await deviceService.setSnapshot(DeviceScheduleSnapshot(
             ownerGEMSID: "7793942",
@@ -165,11 +199,51 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         ))
 
         let vm = makeViewModel(deviceService: deviceService)
+        vm.crewAccessSchedules = []
+
+        await vm.fetchLegacyDeviceScheduleFallbackIfNeeded(reason: "test")
+
+        XCTAssertTrue(vm.crewAccessSchedules.isEmpty)
+    }
+
+    func test_syncCrewAccessDeviceData_importFetchFailure_preservesLocalAndSkipsSnapshot() async throws {
+        try removeCrewAccessImportDirectory()
+        defer { try? removeCrewAccessImportDirectory() }
+
+        let deviceService = FakeDeviceScheduleCloudKitService()
+        let vm = makeViewModel(
+            deviceService: deviceService,
+            importCloudKitService: FailingCrewAccessImportCloudKitService()
+        )
+        setVerifiedIdentity(on: vm)
         vm.crewAccessSchedules = [makeSchedule(id: "CA26-local")]
 
-        await vm.fetchDeviceScheduleIfNeeded(reason: "test")
+        await vm.syncCrewAccessDeviceData(reason: "import fetch failure")
 
-        XCTAssertEqual(vm.crewAccessSchedules[0].id, "CA26-local")
+        XCTAssertEqual(vm.crewAccessSchedules.map(\.id), ["CA26-local"])
+        let fetchCount = await deviceService.fetchCallCount
+        let uploadCount = await deviceService.uploadCallCount
+        XCTAssertEqual(fetchCount, 0)
+        XCTAssertEqual(uploadCount, 0)
+    }
+
+    func test_syncCrewAccessDeviceData_snapshotFetchFailure_preservesLocalAndSkipsUpload() async throws {
+        try removeCrewAccessImportDirectory()
+        defer { try? removeCrewAccessImportDirectory() }
+
+        let deviceService = FakeDeviceScheduleCloudKitService()
+        await deviceService.setShouldFailFetch(true)
+        let vm = makeViewModel(deviceService: deviceService)
+        setVerifiedIdentity(on: vm)
+        vm.crewAccessSchedules = [makeSchedule(id: "CA26-local")]
+
+        await vm.syncCrewAccessDeviceData(reason: "snapshot fetch failure")
+
+        XCTAssertEqual(vm.crewAccessSchedules.map(\.id), ["CA26-local"])
+        let fetchCount = await deviceService.fetchCallCount
+        let uploadCount = await deviceService.uploadCallCount
+        XCTAssertEqual(fetchCount, 1)
+        XCTAssertEqual(uploadCount, 0)
     }
 
     func test_fetchCrewAccessImports_retriesPreviouslySkippedLocalUpload() async throws {
@@ -365,9 +439,12 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
 
     // MARK: - LogTen backlog survival
 
-    func test_fetchDeviceSchedule_logTenBacklogSurvivesRemoteReplacement() async throws {
+    func test_fetchLegacyFallback_logTenBacklogSurvivesRemoteReplacement() async throws {
         let deviceService = FakeDeviceScheduleCloudKitService()
         let futureSnapshot = Date(timeIntervalSinceNow: 60)
+        let fetchKey = "device_schedule_last_fetch_at_v1"
+        UserDefaults.standard.removeObject(forKey: fetchKey)
+        defer { UserDefaults.standard.removeObject(forKey: fetchKey) }
         await deviceService.setSnapshot(DeviceScheduleSnapshot(
             ownerGEMSID: "7793942",
             ownerRecordName: "_rec",
@@ -380,14 +457,97 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
 
         let vm = makeViewModel(deviceService: deviceService)
         setVerifiedIdentity(on: vm)
-        vm.crewAccessSchedules = [makeSchedule(id: "CA26-01")]
+        vm.crewAccessSchedules = []
 
-        await vm.fetchDeviceScheduleIfNeeded(reason: "test")
+        await vm.fetchLegacyDeviceScheduleFallbackIfNeeded(reason: "test")
 
-        // Remote schedule replaced local
+        // Remote schedule applied to the empty Timeline
         XCTAssertEqual(vm.crewAccessSchedules[0].id, "CA26-99")
         // LogTen export must not crash after replacement
         _ = vm.exportCrewAccessFlightsLogTenCSV()
+    }
+
+    /// reconcile → prune wipes the LogTen reference times when the Timeline rebuilds to empty.
+    /// A failed fallback fetch rolls the Timeline back, and the reference times must roll back
+    /// with it — otherwise a plain network error silently destroys the export backlog.
+    func test_syncCrewAccessDeviceData_snapshotFetchFailure_restoresLogTenReferenceTimes() async throws {
+        try removeCrewAccessImportDirectory()
+        defer { try? removeCrewAccessImportDirectory() }
+
+        let referenceKey = "crewaccess_leg_import_reference_times_v1"
+        UserDefaults.standard.removeObject(forKey: referenceKey)
+        defer { UserDefaults.standard.removeObject(forKey: referenceKey) }
+
+        let deviceService = FakeDeviceScheduleCloudKitService()
+        await deviceService.setShouldFailFetch(true)
+        let vm = makeViewModel(deviceService: deviceService)
+        setVerifiedIdentity(on: vm)
+        vm.crewAccessSchedules = [makeSchedule(id: "CA26-local")]
+        // Backfill derives reference times from the current schedules and persists them.
+        vm.backfillCrewAccessLegImportReferenceTimesIfNeeded()
+        let referenceTimesBefore = vm.crewAccessLegImportReferenceTimes
+        XCTAssertFalse(referenceTimesBefore.isEmpty, "precondition: backlog reference times exist")
+
+        await vm.syncCrewAccessDeviceData(reason: "snapshot fetch failure")
+
+        XCTAssertEqual(vm.crewAccessSchedules.map(\.id), ["CA26-local"])
+        XCTAssertEqual(
+            vm.crewAccessLegImportReferenceTimes,
+            referenceTimesBefore,
+            "LogTen reference times must be restored alongside the rolled-back Timeline"
+        )
+        let persisted = UserDefaults.standard.dictionary(forKey: referenceKey) as? [String: Double]
+        XCTAssertEqual(persisted?.count, referenceTimesBefore.count, "restore must also persist")
+    }
+
+    /// The success path is the easier one to get wrong: the fallback preserves whatever
+    /// reference-time map it finds on entry, so if reconcile's prune is not undone *before*
+    /// the fallback runs, a successful fetch quietly persists the emptied map.
+    func test_syncCrewAccessDeviceData_snapshotFetchSuccess_restoresLogTenReferenceTimes() async throws {
+        try removeCrewAccessImportDirectory()
+        defer { try? removeCrewAccessImportDirectory() }
+
+        let referenceKey = "crewaccess_leg_import_reference_times_v1"
+        let fetchKey = "device_schedule_last_fetch_at_v1"
+        UserDefaults.standard.removeObject(forKey: referenceKey)
+        UserDefaults.standard.removeObject(forKey: fetchKey)
+        defer {
+            UserDefaults.standard.removeObject(forKey: referenceKey)
+            UserDefaults.standard.removeObject(forKey: fetchKey)
+        }
+
+        let deviceService = FakeDeviceScheduleCloudKitService()
+        await deviceService.setSnapshot(DeviceScheduleSnapshot(
+            ownerGEMSID: "7793942",
+            ownerRecordName: "_rec",
+            schedules: [makeSchedule(id: "CA26-remote")],
+            schemaVersion: 1,
+            updatedAt: Date(),
+            deviceID: "other-device",
+            source: .iphone
+        ))
+
+        let vm = makeViewModel(deviceService: deviceService)
+        setVerifiedIdentity(on: vm)
+        vm.crewAccessSchedules = [makeSchedule(id: "CA26-local")]
+        vm.backfillCrewAccessLegImportReferenceTimesIfNeeded()
+        let referenceTimesBefore = vm.crewAccessLegImportReferenceTimes
+        XCTAssertFalse(referenceTimesBefore.isEmpty, "precondition: backlog reference times exist")
+
+        await vm.syncCrewAccessDeviceData(reason: "snapshot fetch success")
+
+        XCTAssertEqual(
+            vm.crewAccessSchedules.map(\.id),
+            ["CA26-remote"],
+            "precondition: the fallback actually applied the snapshot"
+        )
+        XCTAssertEqual(
+            vm.crewAccessLegImportReferenceTimes,
+            referenceTimesBefore,
+            "LogTen reference times must survive a successful fallback, not just a failed one"
+        )
+        let persisted = UserDefaults.standard.dictionary(forKey: referenceKey) as? [String: Double]
+        XCTAssertEqual(persisted?.count, referenceTimesBefore.count, "restore must also persist")
     }
 
     // MARK: - CrewAccess deletion
@@ -1020,10 +1180,13 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
 
 private actor FakeDeviceScheduleCloudKitService: DeviceScheduleCloudKitServicing {
     private(set) var uploadCallCount = 0
+    private(set) var fetchCallCount = 0
     private(set) var lastUploadedSchedules: [PayPeriodSchedule]?
     private var snapshot: DeviceScheduleSnapshot?
+    private var shouldFailFetch = false
 
     func setSnapshot(_ s: DeviceScheduleSnapshot) { snapshot = s }
+    func setShouldFailFetch(_ value: Bool) { shouldFailFetch = value }
 
     func uploadDeviceSchedule(
         gemsID: String,
@@ -1037,8 +1200,16 @@ private actor FakeDeviceScheduleCloudKitService: DeviceScheduleCloudKitServicing
     }
 
     func fetchDeviceSchedule(gemsID: String) async throws -> DeviceScheduleSnapshot? {
-        snapshot
+        fetchCallCount += 1
+        if shouldFailFetch {
+            throw TestSyncFailure.expected
+        }
+        return snapshot
     }
+}
+
+private enum TestSyncFailure: Error {
+    case expected
 }
 
 // MARK: - Noop service stubs
@@ -1131,6 +1302,22 @@ private struct NoopCrewAccessImportCloudKitService: CrewAccessImportCloudKitServ
     ) async throws {}
 
     func fetchImportFiles(gemsID: String) async throws -> [CrewAccessImportCloudKitRecord] { [] }
+
+    func tombstoneImportFile(gemsID: String, fileName: String) async throws {}
+}
+
+private struct FailingCrewAccessImportCloudKitService: CrewAccessImportCloudKitServicing {
+    func uploadImportFile(
+        gemsID: String,
+        fileName: String,
+        jsonData: Data,
+        tripInformationDate: String?,
+        firstDepartureUTC: String?
+    ) async throws {}
+
+    func fetchImportFiles(gemsID: String) async throws -> [CrewAccessImportCloudKitRecord] {
+        throw TestSyncFailure.expected
+    }
 
     func tombstoneImportFile(gemsID: String, fileName: String) async throws {}
 }

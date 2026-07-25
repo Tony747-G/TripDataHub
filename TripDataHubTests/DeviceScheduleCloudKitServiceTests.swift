@@ -83,6 +83,49 @@ final class DeviceScheduleCloudKitServiceTests: XCTestCase {
         XCTAssertEqual(decoded[0].id, "CA26-01")
     }
 
+    func test_uploadRetriesServerRecordChanged() async throws {
+        let database = DeviceScheduleFakeDatabase(conflictFirstSave: true)
+        let service = DeviceScheduleCloudKitService(databaseProvider: { database })
+
+        try await service.uploadDeviceSchedule(
+            gemsID: "7793942",
+            cloudKitRecordName: "_rec",
+            schedules: [makeSchedule(id: "CA26-retry")],
+            deviceID: "device-retry",
+            source: .iphone
+        )
+
+        let record = await database.savedRecord(named: "tdh_device_schedule_7793942")
+        let data = try XCTUnwrap(record?["schedulesData"] as? Data)
+        let decoded = try JSONDecoder().decode([PayPeriodSchedule].self, from: data)
+        XCTAssertEqual(decoded.first?.id, "CA26-retry")
+        let saveCount = await database.saveCount()
+        XCTAssertEqual(saveCount, 2)
+    }
+
+    /// Exhausting the retries must surface the real CloudKit error rather than reporting
+    /// success, so the caller leaves its upload fingerprint unadvanced and tries again later.
+    func test_uploadThrowsRealErrorAfterRetryLimit() async throws {
+        let database = DeviceScheduleFakeDatabase(alwaysConflict: true)
+        let service = DeviceScheduleCloudKitService(databaseProvider: { database })
+
+        do {
+            try await service.uploadDeviceSchedule(
+                gemsID: "7793942",
+                cloudKitRecordName: "_rec",
+                schedules: [makeSchedule(id: "CA26-conflict")],
+                deviceID: "device-conflict",
+                source: .iphone
+            )
+            XCTFail("Expected the upload to throw once retries are exhausted")
+        } catch let error as CKError {
+            XCTAssertEqual(error.code, .serverRecordChanged)
+        }
+
+        let saveCount = await database.saveCount()
+        XCTAssertEqual(saveCount, DeviceScheduleCloudKitService.conflictRetryLimit)
+    }
+
     // MARK: - fetch
 
     func test_fetchReturnsNilForUnknownGEMSID() async throws {
@@ -188,6 +231,14 @@ final class DeviceScheduleCloudKitServiceTests: XCTestCase {
 
 private actor DeviceScheduleFakeDatabase: DeviceScheduleCloudKitDatabase {
     private var records: [String: CKRecord] = [:]
+    private var conflictFirstSave: Bool
+    private var alwaysConflict: Bool
+    private var totalSaveCount = 0
+
+    init(conflictFirstSave: Bool = false, alwaysConflict: Bool = false) {
+        self.conflictFirstSave = conflictFirstSave
+        self.alwaysConflict = alwaysConflict
+    }
 
     func record(for recordID: CKRecord.ID) async throws -> CKRecord {
         guard let record = records[recordID.recordName] else {
@@ -197,11 +248,25 @@ private actor DeviceScheduleFakeDatabase: DeviceScheduleCloudKitDatabase {
     }
 
     func save(_ record: CKRecord) async throws -> CKRecord {
+        totalSaveCount += 1
+        if alwaysConflict {
+            records[record.recordID.recordName] = record
+            throw CKError(.serverRecordChanged)
+        }
+        if conflictFirstSave {
+            conflictFirstSave = false
+            records[record.recordID.recordName] = record
+            throw CKError(.serverRecordChanged)
+        }
         records[record.recordID.recordName] = record
         return record
     }
 
     func savedRecord(named name: String) -> CKRecord? {
         records[name]
+    }
+
+    func saveCount() -> Int {
+        totalSaveCount
     }
 }

@@ -544,6 +544,44 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertEqual(record?["ownerGEMSID"] as? String, "0111111")
     }
 
+    /// "Last Updated" in FriendsTabView is derived from the record's modification date, and this
+    /// method runs on every app open. Re-saving identical content would advance that timestamp
+    /// against unchanged schedules — the exact symptom seen on device.
+    func test_friendCloudKitUploadSchedule_skipsSaveWhenContentIsUnchanged() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+        let schedules = [makeSchedule(legs: [makeLeg(leg: 1, flight: "100", depAirport: "ANC", arrAirport: "SDF", depUTC: "2026-05-01T06:00:00Z", arrUTC: "2026-05-01T10:00:00Z")])]
+
+        try await service.uploadSchedule(gemsID: "111111", cloudKitRecordName: "_rec", schedules: schedules)
+        let savesAfterFirst = await database.saveCount()
+
+        try await service.uploadSchedule(gemsID: "111111", cloudKitRecordName: "_rec", schedules: schedules)
+        try await service.uploadSchedule(gemsID: "111111", cloudKitRecordName: "_rec", schedules: schedules)
+        let savesAfterRepeats = await database.saveCount()
+
+        XCTAssertEqual(savesAfterFirst, 1)
+        XCTAssertEqual(savesAfterRepeats, 1, "identical content must not be republished")
+    }
+
+    func test_friendCloudKitUploadSchedule_savesWhenContentChanges() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+        let first = [makeSchedule(legs: [makeLeg(leg: 1, flight: "100", depAirport: "ANC", arrAirport: "SDF", depUTC: "2026-05-01T06:00:00Z", arrUTC: "2026-05-01T10:00:00Z")])]
+        let second = [makeSchedule(legs: [makeLeg(leg: 1, flight: "999", depAirport: "ANC", arrAirport: "NRT", depUTC: "2026-06-01T06:00:00Z", arrUTC: "2026-06-01T16:00:00Z")])]
+
+        try await service.uploadSchedule(gemsID: "111111", cloudKitRecordName: "_rec", schedules: first)
+        try await service.uploadSchedule(gemsID: "111111", cloudKitRecordName: "_rec", schedules: second)
+
+        let saveCount = await database.saveCount()
+        XCTAssertEqual(saveCount, 2)
+
+        let snapshot = await database.recordSnapshot(named: "tdh_schedule_0111111")
+        let record = try XCTUnwrap(snapshot)
+        let data = try XCTUnwrap(record["schedulesData"] as? Data)
+        let decoded = try JSONDecoder().decode([PayPeriodSchedule].self, from: data)
+        XCTAssertEqual(decoded.flatMap { $0.legs.map(\.flight) }, ["999"])
+    }
+
     func test_friendCloudKitUploadSchedule_allowsEmptyScheduleToClearRemoteData() async throws {
         let database = FriendCloudKitFakeDatabase()
         let service = FriendScheduleCloudKitService(databaseProvider: { database })
@@ -777,6 +815,103 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertEqual(migratedRecord?["status"] as? String, "accepted")
     }
 
+    func test_refreshConnections_doesNotRestoreAcceptedConnectionOlderThanReset() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+        let local = FriendConnection(
+            employeeID: "222222",
+            status: .accepted,
+            requestedAt: Date(timeIntervalSince1970: 1),
+            linkedAt: Date(timeIntervalSince1970: 2),
+            acceptedAt: Date(timeIntervalSince1970: 2)
+        )
+
+        let refreshed = try await service.refreshConnections(
+            myGEMSID: "111111",
+            connections: [local],
+            friendResetAt: Date(timeIntervalSince1970: 3)
+        )
+
+        XCTAssertEqual(refreshed.first?.status, .accepted)
+        let migratedRecord = await database.recordSnapshot(named: "tdh_friend_0111111_0222222")
+        XCTAssertNil(migratedRecord)
+    }
+
+    func test_cancelFriendRequest_createsCancellationWhenCanonicalLinkIsMissing() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+
+        try await service.cancelFriendRequest(myGEMSID: "111111", friendGEMSID: "222222")
+
+        let record = await database.recordSnapshot(named: "tdh_friend_0111111_0222222")
+        XCTAssertEqual(record?["status"] as? String, "canceled")
+        XCTAssertEqual(record?["approvedA"] as? Bool, false)
+        XCTAssertEqual(record?["approvedB"] as? Bool, false)
+    }
+
+    /// A missing Queryable index on gemsA/gemsB in Production made the link query throw, which
+    /// aborted the whole refresh and left every friend showing cached data. Known friends are
+    /// fetched by record ID and need no index, so they must still refresh.
+    func test_refreshConnections_degradesToRecordIDFetchWhenLinkQueryFails() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        await database.insertFriendLink(
+            gemsA: "0111111",
+            gemsB: "0222222",
+            approvedA: true,
+            approvedB: true,
+            status: "accepted",
+            linkedAt: Date(timeIntervalSince1970: 1000)
+        )
+        await database.failQueries()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+
+        let refreshed = try await service.refreshConnections(
+            myGEMSID: "111111",
+            connections: [FriendConnection(employeeID: "0222222", status: .pending)]
+        )
+
+        XCTAssertEqual(refreshed.count, 1)
+        XCTAssertEqual(
+            refreshed.first?.status,
+            .accepted,
+            "a known friend must still refresh by record ID when the discovery query fails"
+        )
+    }
+
+    func test_refreshConnections_preservesOnlyFailedFriendAndKeepsOtherResults() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+        let failed = FriendConnection(
+            employeeID: "222222",
+            status: .accepted,
+            requestedAt: Date(timeIntervalSince1970: 1),
+            linkedAt: Date(timeIntervalSince1970: 2)
+        )
+        let succeeds = FriendConnection(
+            employeeID: "333333",
+            status: .accepted,
+            requestedAt: Date(timeIntervalSince1970: 1),
+            linkedAt: Date(timeIntervalSince1970: 2)
+        )
+        await database.insertFriendLink(
+            gemsA: "0111111",
+            gemsB: "0333333",
+            approvedA: false,
+            approvedB: false,
+            status: "canceled",
+            linkedAt: nil
+        )
+        await database.failRecordFetch(named: "tdh_friend_0111111_0222222")
+
+        let refreshed = try await service.refreshConnections(
+            myGEMSID: "111111",
+            connections: [failed, succeeds]
+        )
+
+        XCTAssertEqual(refreshed.first(where: { $0.employeeID == "0222222" })?.status, .accepted)
+        XCTAssertEqual(refreshed.first(where: { $0.employeeID == "0333333" })?.status, .pending)
+    }
+
     func test_refreshConnections_clearsSharedSchedulesWhenFriendLinkIsCanceled() async throws {
         let database = FriendCloudKitFakeDatabase()
         let service = FriendScheduleCloudKitService(databaseProvider: { database })
@@ -933,6 +1068,259 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertEqual(vm.friendConnections.first?.status, .accepted)
         XCTAssertFalse(vm.isScheduleSharingEnabled)
         XCTAssertEqual(service.uploadScheduleCallCount, 0)
+    }
+
+    @MainActor
+    func test_syncFriendCloudKit_replaysRequestThatArrivesDuringActiveSync() async throws {
+        let service = CapturingFriendCloudKitService()
+        service.refreshDelayNanoseconds = 100_000_000
+        let vm = AppViewModel(friendScheduleCloudKitService: service)
+        setVerifiedIdentity(on: vm, gemsID: "111111")
+
+        let first = Task {
+            await vm.syncFriendCloudKit(reason: "app active")
+        }
+        try await Task.sleep(nanoseconds: 20_000_000)
+        let second = Task {
+            await vm.syncFriendCloudKit(reason: "friends opened")
+        }
+
+        await first.value
+        await second.value
+
+        XCTAssertEqual(service.refreshCallCount, 2)
+    }
+
+    // MARK: - What gets published, not just how often
+
+    /// The reported real-device symptom was a fresh "Last Updated" against stale content, which
+    /// call-count assertions cannot detect. This is the sequence that produces it: the app opens
+    /// with a stale cache, a friend upload starts, device sync then loads newer schedules, and the
+    /// coalesced upload must publish the newer data.
+    @MainActor
+    func test_friendUpload_coalescedRequestPublishesSchedulesLoadedDuringUpload() async throws {
+        let service = CapturingFriendCloudKitService()
+        let vm = AppViewModel(
+            friendLinkNotificationService: CapturingFriendLinkNotificationService(),
+            friendScheduleCloudKitService: service
+        )
+        setVerifiedIdentity(on: vm, gemsID: "111111")
+        vm.friendConnections = [FriendConnection(employeeID: "0222222", status: .accepted)]
+        vm.isScheduleSharingEnabled = true
+
+        let staleLeg = makeLeg(leg: 1, flight: "100", depAirport: "ANC", arrAirport: "SDF", depUTC: "2026-05-01T06:00:00Z", arrUTC: "2026-05-01T10:00:00Z")
+        let freshLeg = makeLeg(leg: 1, flight: "999", depAirport: "ANC", arrAirport: "NRT", depUTC: "2026-06-01T06:00:00Z", arrUTC: "2026-06-01T16:00:00Z")
+        vm.crewAccessSchedules = [makeSchedule(legs: [staleLeg])]
+        vm.schedules = [makeSchedule(legs: [staleLeg])]
+
+        let freshSchedule = makeSchedule(legs: [freshLeg])
+        let secondUpload = expectation(description: "coalesced upload publishes newer schedules")
+        service.onUploadRecorded = { count in
+            if count == 2 { secondUpload.fulfill() }
+        }
+        // Device sync lands while the first upload is provably still in flight.
+        service.onFirstUploadInFlight = { [weak vm] in
+            guard let vm else { return }
+            vm.crewAccessSchedules = [freshSchedule]
+            vm.schedules = [freshSchedule]
+            vm.handleSchedulesChangedForSharing()
+        }
+
+        await vm.syncFriendCloudKit(reason: "app opened")
+        await fulfillment(of: [secondUpload], timeout: 5)
+
+        let published = try XCTUnwrap(service.lastUploadedSchedules)
+        XCTAssertEqual(
+            published.flatMap { $0.legs.map(\.flight) },
+            ["999"],
+            "the last published payload must be the post-device-sync schedule, not the stale cache"
+        )
+    }
+
+    /// A schedule change that arrives while sharing is off must not be silently dropped:
+    /// refreshFriendSchedulesFromCloud can enable sharing part-way through the same sync.
+    @MainActor
+    func test_friendUpload_republishesScheduleChangeDeferredWhileSharingWasDisabled() async throws {
+        let service = CapturingFriendCloudKitService()
+        service.refreshedConnections = [
+            FriendConnection(employeeID: "0222222", status: .accepted)
+        ]
+        // pending → accepted fires notifyFriendLinked. The real service asks the Simulator for
+        // notification authorization and blocks the test, so inject the capturing double.
+        let vm = AppViewModel(
+            friendLinkNotificationService: CapturingFriendLinkNotificationService(),
+            friendScheduleCloudKitService: service
+        )
+        setVerifiedIdentity(on: vm, gemsID: "111111")
+        vm.friendConnections = [FriendConnection(employeeID: "0222222", status: .pending)]
+        vm.isScheduleSharingEnabled = false
+
+        let freshLeg = makeLeg(leg: 1, flight: "777", depAirport: "ANC", arrAirport: "ICN", depUTC: "2026-06-02T06:00:00Z", arrUTC: "2026-06-02T16:00:00Z")
+        vm.crewAccessSchedules = [makeSchedule(legs: [freshLeg])]
+        vm.schedules = [makeSchedule(legs: [freshLeg])]
+
+        let published = expectation(description: "deferred schedule change is republished")
+        service.onUploadRecorded = { _ in published.fulfill() }
+        published.assertForOverFulfill = false
+
+        // Device sync finishes before sharing is enabled — previously this notification was dropped.
+        vm.handleSchedulesChangedForSharing()
+        XCTAssertEqual(service.uploadScheduleCallCount, 0, "precondition: nothing published while sharing was off")
+
+        await vm.syncFriendCloudKit(reason: "app opened")
+        await fulfillment(of: [published], timeout: 5)
+
+        XCTAssertTrue(vm.isScheduleSharingEnabled)
+        let uploaded = try XCTUnwrap(service.lastUploadedSchedules)
+        XCTAssertEqual(uploaded.flatMap { $0.legs.map(\.flight) }, ["777"])
+    }
+
+    /// `schedules` is the merged crew+bidpro array and is what gets published. If it were ever
+    /// stale relative to its inputs the friend would see pre-sync data.
+    @MainActor
+    func test_friendUpload_publishesMergedSchedulesNotOnlyCrewAccess() async throws {
+        let service = CapturingFriendCloudKitService()
+        let vm = AppViewModel(
+            friendLinkNotificationService: CapturingFriendLinkNotificationService(),
+            friendScheduleCloudKitService: service
+        )
+        setVerifiedIdentity(on: vm, gemsID: "111111")
+        vm.friendConnections = [FriendConnection(employeeID: "0222222", status: .accepted)]
+        vm.isScheduleSharingEnabled = true
+
+        let crewLeg = makeLeg(leg: 1, flight: "100", depAirport: "ANC", arrAirport: "SDF", depUTC: "2026-05-01T06:00:00Z", arrUTC: "2026-05-01T10:00:00Z")
+        let bidproLeg = makeLeg(leg: 2, flight: "200", depAirport: "SDF", arrAirport: "ANC", depUTC: "2026-05-02T06:00:00Z", arrUTC: "2026-05-02T10:00:00Z")
+        vm.crewAccessSchedules = [makeSchedule(legs: [crewLeg])]
+        vm.schedules = [makeSchedule(legs: [crewLeg, bidproLeg])]
+
+        await vm.syncFriendCloudKit(reason: "manual")
+
+        let published = try XCTUnwrap(service.lastUploadedSchedules)
+        XCTAssertEqual(
+            Set(published.flatMap { $0.legs.map(\.flight) }),
+            Set(["100", "200"]),
+            "the merged schedules array must be published, not crewAccessSchedules alone"
+        )
+    }
+
+    func test_newerFriendSchedules_prefersScheduleWithLatestLastUpdated() {
+        let older = PayPeriodSchedule(
+            id: "PP26-01",
+            label: "Old",
+            tripCount: 0,
+            legCount: 0,
+            openTimeCount: 0,
+            updatedAt: Date(timeIntervalSince1970: 100),
+            legs: [],
+            openTimeTrips: []
+        )
+        let newer = PayPeriodSchedule(
+            id: "PP26-01",
+            label: "New",
+            tripCount: 0,
+            legCount: 0,
+            openTimeCount: 0,
+            updatedAt: Date(timeIntervalSince1970: 200),
+            legs: [],
+            openTimeTrips: []
+        )
+
+        let merged = AppViewModel.newerFriendSchedules([older], [newer])
+
+        XCTAssertEqual(merged.map(\.label), ["New"])
+        XCTAssertEqual(merged.map(\.updatedAt).max(), newer.updatedAt)
+    }
+
+    func test_newerFriendSchedules_preservesPayPeriodsKnownOnlyToOneDevice() {
+        let localOnly = PayPeriodSchedule(
+            id: "PP26-01",
+            label: "Local",
+            tripCount: 0,
+            legCount: 0,
+            openTimeCount: 0,
+            updatedAt: Date(timeIntervalSince1970: 200),
+            legs: [],
+            openTimeTrips: []
+        )
+        let remoteOnly = PayPeriodSchedule(
+            id: "PP26-02",
+            label: "Remote",
+            tripCount: 0,
+            legCount: 0,
+            openTimeCount: 0,
+            updatedAt: Date(timeIntervalSince1970: 100),
+            legs: [],
+            openTimeTrips: []
+        )
+
+        let merged = AppViewModel.newerFriendSchedules([localOnly], [remoteOnly])
+
+        XCTAssertEqual(Set(merged.map(\.id)), Set(["PP26-01", "PP26-02"]))
+    }
+
+    func test_newerFriendSchedules_keepsNonemptyScheduleWhenOtherCacheIsEmpty() {
+        let cached = PayPeriodSchedule(
+            id: "PP26-01",
+            label: "Cached",
+            tripCount: 0,
+            legCount: 0,
+            openTimeCount: 0,
+            updatedAt: Date(timeIntervalSince1970: 100),
+            legs: [],
+            openTimeTrips: []
+        )
+
+        XCTAssertEqual(
+            AppViewModel.newerFriendSchedules([cached], []).map(\.id),
+            ["PP26-01"]
+        )
+        XCTAssertEqual(
+            AppViewModel.newerFriendSchedules([], [cached]).map(\.id),
+            ["PP26-01"]
+        )
+    }
+
+    /// Both arrays arrive from another user's device. A CrewAccess schedule id is the import
+    /// label, built one-per-file, so the same trip present under both a legacy and a current
+    /// file name yields duplicate ids. Merging must collapse them, never trap.
+    func test_newerFriendSchedules_collapsesDuplicateIDsWithoutTrapping() {
+        func schedule(label: String, updatedAt: Date) -> PayPeriodSchedule {
+            PayPeriodSchedule(
+                id: "CA26-07-A70606",
+                label: label,
+                tripCount: 0,
+                legCount: 0,
+                openTimeCount: 0,
+                updatedAt: updatedAt,
+                legs: [],
+                openTimeTrips: []
+            )
+        }
+
+        let legacyNamed = schedule(label: "Legacy", updatedAt: Date(timeIntervalSince1970: 100))
+        let currentNamed = schedule(label: "Current", updatedAt: Date(timeIntervalSince1970: 200))
+        let remote = schedule(label: "Remote", updatedAt: Date(timeIntervalSince1970: 150))
+
+        let merged = AppViewModel.newerFriendSchedules([legacyNamed, currentNamed], [remote])
+
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged.map(\.id), ["CA26-07-A70606"])
+        XCTAssertEqual(merged.first?.label, "Current", "the newest copy of a duplicated id wins")
+
+        // Duplicates on the incoming side must be tolerated too.
+        let mergedReversed = AppViewModel.newerFriendSchedules([remote], [legacyNamed, currentNamed])
+        XCTAssertEqual(mergedReversed.count, 1)
+        XCTAssertEqual(mergedReversed.first?.label, "Current")
+
+        // An empty counterpart must not short-circuit the merge: a lone array can carry
+        // duplicate ids of its own and they still have to be collapsed.
+        let mergedLHSOnly = AppViewModel.newerFriendSchedules([legacyNamed, currentNamed], [])
+        XCTAssertEqual(mergedLHSOnly.count, 1)
+        XCTAssertEqual(mergedLHSOnly.first?.label, "Current")
+
+        let mergedRHSOnly = AppViewModel.newerFriendSchedules([], [legacyNamed, currentNamed])
+        XCTAssertEqual(mergedRHSOnly.count, 1)
+        XCTAssertEqual(mergedRHSOnly.first?.label, "Current")
     }
 
     @MainActor
@@ -1192,9 +1580,29 @@ private final class CapturingFriendCloudKitService: FriendScheduleCloudKitServic
     private(set) var lastDeletedFriendSharingGEMSID: String?
     var refreshedConnections: [FriendConnection]?
     var nextRequestIsAccepted = false
+    var refreshDelayNanoseconds: UInt64 = 0
+
+    /// Every payload this fake was asked to publish, in order. Counting calls is not enough —
+    /// the bug class we care about is publishing the *wrong* schedule, not the wrong number of times.
+    private(set) var uploadedSchedulesHistory: [[PayPeriodSchedule]] = []
+    var lastUploadedSchedules: [PayPeriodSchedule]? { uploadedSchedulesHistory.last }
+
+    /// Runs once, while the first upload is still in flight. Lets a test simulate device sync
+    /// landing mid-upload without a fixed `Task.sleep`, so the ordering is guaranteed rather
+    /// than hoped for.
+    var onFirstUploadInFlight: (@MainActor () -> Void)?
+    /// Called after each upload is recorded, with the running call count. Pair with an
+    /// XCTestExpectation to await a specific upload instead of sleeping.
+    var onUploadRecorded: ((Int) -> Void)?
 
     func uploadSchedule(gemsID: String, cloudKitRecordName: String, schedules: [PayPeriodSchedule]) async throws {
         uploadScheduleCallCount += 1
+        uploadedSchedulesHistory.append(schedules)
+        if let hook = onFirstUploadInFlight {
+            onFirstUploadInFlight = nil
+            await hook()
+        }
+        onUploadRecorded?(uploadScheduleCallCount)
     }
 
     func uploadScheduleSnapshot(gemsID: String, ownerDisplayName: String, crewAccessTrips: [CrewAccessTripJSON]) async throws {}
@@ -1227,6 +1635,9 @@ private final class CapturingFriendCloudKitService: FriendScheduleCloudKitServic
 
     func refreshConnections(myGEMSID: String, connections: [FriendConnection], friendResetAt: Date?) async throws -> [FriendConnection] {
         refreshCallCount += 1
+        if refreshDelayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: refreshDelayNanoseconds)
+        }
         return refreshedConnections ?? connections
     }
 }
@@ -1246,9 +1657,11 @@ private final class CapturingFriendLinkNotificationService: FriendLinkNotificati
 
 private actor FriendCloudKitFakeDatabase: FriendScheduleCloudKitDatabase {
     private var records: [String: CKRecord] = [:]
+    private var failedRecordFetches: Set<String> = []
     private var conflictFirstFriendLinkSaveWithOtherApproval: Bool
     private var denyCanonicalFriendLinkUpdates: Bool
     private var saveCallCount = 0
+    private var queryFailureCode: CKError.Code?
 
     init(
         conflictFirstFriendLinkSaveWithOtherApproval: Bool = false,
@@ -1259,10 +1672,17 @@ private actor FriendCloudKitFakeDatabase: FriendScheduleCloudKitDatabase {
     }
 
     func record(for recordID: CKRecord.ID) async throws -> CKRecord {
+        if failedRecordFetches.contains(recordID.recordName) {
+            throw CKError(.networkFailure)
+        }
         guard let record = records[recordID.recordName] else {
             throw CKError(.unknownItem)
         }
         return record
+    }
+
+    func failRecordFetch(named recordName: String) {
+        failedRecordFetches.insert(recordName)
     }
 
     func save(_ record: CKRecord) async throws -> CKRecord {
@@ -1295,8 +1715,17 @@ private actor FriendCloudKitFakeDatabase: FriendScheduleCloudKitDatabase {
         return recordID
     }
 
+    /// Simulates a CloudKit environment where gemsA/gemsB have no Queryable index — the usual
+    /// Development-vs-Production schema gap.
+    func failQueries(with code: CKError.Code = .invalidArguments) {
+        queryFailureCode = code
+    }
+
     func records(matching query: CKQuery) async throws -> [CKRecord] {
-        records.values.filter { record in
+        if let queryFailureCode {
+            throw CKError(queryFailureCode)
+        }
+        return records.values.filter { record in
             guard record.recordType == query.recordType else { return false }
             guard let comparison = query.predicate as? NSComparisonPredicate,
                   comparison.leftExpression.expressionType == .keyPath,

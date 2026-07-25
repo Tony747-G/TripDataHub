@@ -97,12 +97,39 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         self.databaseProvider = databaseProvider
     }
 
+    /// Publishes this user's schedule for their friends.
+    ///
+    /// **Skips the save entirely when the stored payload already means the same thing.**
+    /// This is not just an optimisation: `fetchSchedule` reports `record.modificationDate` as each
+    /// schedule's `updatedAt`, and `FriendsTabView` renders the maximum of those as "Last Updated".
+    /// Because this method is called on every app open / app active / Friends tab appearance, an
+    /// unconditional save would advance that timestamp every time a friend merely launched the
+    /// app — showing a fresh "Last Updated" against unchanged content. Writing only on real change
+    /// is what makes the server modification date a truthful content-freshness signal.
+    ///
+    /// The comparison decodes both sides rather than comparing bytes: `JSONEncoder` gives no
+    /// key-order guarantee, so two encodes of identical content are not reliably byte-equal.
+    /// The new payload is round-tripped too, so both operands have been through the same
+    /// encode/decode and the check answers the question that actually matters — would a reader
+    /// decode the same value?
     func uploadSchedule(gemsID: String, cloudKitRecordName: String, schedules: [PayPeriodSchedule]) async throws {
         let database = databaseProvider()
         let recordID = CKRecord.ID(recordName: Self.scheduleRecordName(for: gemsID))
-        let record = (try? await database.record(for: recordID))
-            ?? CKRecord(recordType: RecordType.sharedSchedule, recordID: recordID)
+        let existing = try? await database.record(for: recordID)
+        let record = existing ?? CKRecord(recordType: RecordType.sharedSchedule, recordID: recordID)
         let data = try JSONEncoder().encode(schedules)
+
+        if let existing,
+           existing[Field.ownerRecordName] == nil,
+           existing[Field.ownerGEMSID] as? String == GEMSIDNormalizer.normalize(gemsID),
+           let existingData = existing[Field.schedulesData] as? Data,
+           let existingSchedules = try? JSONDecoder().decode([PayPeriodSchedule].self, from: existingData),
+           let outgoingSchedules = try? JSONDecoder().decode([PayPeriodSchedule].self, from: data),
+           existingSchedules == outgoingSchedules {
+            logger.info("[TDHSchedule] uploadSchedule: unchanged, skipping save to preserve modificationDate")
+            return
+        }
+
         record[Field.ownerGEMSID] = GEMSIDNormalizer.normalize(gemsID) as CKRecordValue
         record[Field.ownerRecordName] = nil
         record[Field.schedulesData] = data as CKRecordValue
@@ -110,6 +137,14 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         _ = try await database.save(record)
     }
 
+    /// Publishes the web-facing snapshot.
+    ///
+    /// Deliberately NOT fingerprinted, unlike `uploadSchedule`. `TripScheduleSnapshotEncoder`
+    /// embeds `generatedAtUTC` in the payload, so consecutive encodes of identical content are
+    /// never byte-equal; skipping identical writes would need a separate content-hash field and
+    /// therefore a Production schema deployment. This record's modification date is not surfaced
+    /// anywhere in the app — "Last Updated" comes from `TDHSharedSchedule` via `fetchSchedule` —
+    /// so republishing it costs write churn only, not a misleading timestamp.
     func uploadScheduleSnapshot(gemsID: String, ownerDisplayName: String, crewAccessTrips: [CrewAccessTripJSON]) async throws {
         let database = databaseProvider()
         let recordID = CKRecord.ID(recordName: Self.snapshotRecordName(for: gemsID))
@@ -271,6 +306,17 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
                 do {
                     record = try await database.record(for: recordID)
                 } catch let error as CKError where error.code == .unknownItem {
+                    // Persist the cancellation in the canonical record. Returning with no
+                    // record lets another device restore an accepted link from stale local
+                    // state.
+                    record = CKRecord(recordType: RecordType.friendLink, recordID: recordID)
+                    record[Field.gemsA] = pair.first as CKRecordValue
+                    record[Field.gemsB] = pair.second as CKRecordValue
+                    record[Field.approvedA] = false as CKRecordValue
+                    record[Field.approvedB] = false as CKRecordValue
+                    record[Field.status] = LinkStatus.canceled as CKRecordValue
+                    record[Field.updatedAt] = Date() as CKRecordValue
+                    _ = try await database.save(record)
                     try await deleteUserOwnedFriendLinkRecords(
                         myGEMSID: my,
                         friendGEMSID: friend,
@@ -369,24 +415,51 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
     func refreshConnections(myGEMSID: String, connections: [FriendConnection], friendResetAt: Date? = nil) async throws -> [FriendConnection] {
         let my = GEMSIDNormalizer.normalize(myGEMSID)
         let database = databaseProvider()
-        let cloudConnections = try await cloudConnections(myGEMSID: my, friendResetAt: friendResetAt, database: database)
-        let mergedConnections = mergeConnections(connections + cloudConnections)
+
+        // Discovering links needs a CKQuery on gemsA/gemsB, which fails outright if those fields
+        // have no Queryable index in the target CloudKit environment — a very easy thing to have
+        // in Development but not Production. Letting that throw would abort the whole refresh and
+        // leave every friend showing cached (stale) data. Degrade instead: known friends are
+        // still refreshed below by record ID, which needs no index. Only the discovery of links
+        // this device has never seen is lost.
+        let discoveredConnections: [FriendConnection]
+        do {
+            discoveredConnections = try await cloudConnections(
+                myGEMSID: my,
+                friendResetAt: friendResetAt,
+                database: database
+            )
+        } catch {
+            logger.error(
+                "[TDHFriendLink] friend link query failed; refreshing known friends by record ID only: \(error.localizedDescription, privacy: .public)"
+            )
+            discoveredConnections = []
+        }
+
+        let mergedConnections = mergeConnections(connections + discoveredConnections)
         var refreshed = Array(repeating: FriendConnection(employeeID: "", status: .pending), count: mergedConnections.count)
 
-        try await withThrowingTaskGroup(of: (Int, FriendConnection).self) { group in
+        await withTaskGroup(of: (Int, FriendConnection).self) { group in
             for (index, connection) in mergedConnections.enumerated() {
                 group.addTask {
-                    let updated = try await self.refreshConnection(
-                        connection,
-                        myGEMSID: my,
-                        friendResetAt: friendResetAt,
-                        database: database
-                    )
-                    return (index, updated)
+                    do {
+                        let updated = try await self.refreshConnection(
+                            connection,
+                            myGEMSID: my,
+                            friendResetAt: friendResetAt,
+                            database: database
+                        )
+                        return (index, updated)
+                    } catch {
+                        logger.error(
+                            "[TDHFriendLink] refreshConnection failed; preserving cached friend: \(error.localizedDescription, privacy: .public)"
+                        )
+                        return (index, connection)
+                    }
                 }
             }
 
-            for try await (index, connection) in group {
+            for await (index, connection) in group {
                 refreshed[index] = connection
             }
         }
@@ -468,6 +541,7 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
                 pair: pair,
                 record: CKRecord(recordType: RecordType.friendLink, recordID: recordID),
                 canCreateAcceptedRecord: true,
+                friendResetAt: friendResetAt,
                 database: database
             ) {
                 return restored
@@ -532,6 +606,7 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
                     pair: pair,
                     record: record,
                     canCreateAcceptedRecord: false,
+                    friendResetAt: friendResetAt,
                     database: database
                 ) {
                     return restored
@@ -643,9 +718,13 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         pair: (first: String, second: String),
         record: CKRecord,
         canCreateAcceptedRecord: Bool,
+        friendResetAt: Date?,
         database: FriendScheduleCloudKitDatabase
     ) async throws -> FriendConnection? {
         guard let acceptedAt = connection.acceptedAt ?? (connection.status == .accepted ? connection.linkedAt : nil) else {
+            return nil
+        }
+        if let friendResetAt, acceptedAt < friendResetAt {
             return nil
         }
         guard canCreateAcceptedRecord || isAccepted(record) else {
@@ -689,8 +768,22 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
                 return []
             }
             let schedules = try JSONDecoder().decode([PayPeriodSchedule].self, from: data)
+            let authoritativeUpdatedAt = record.modificationDate ?? (record[Field.updatedAt] as? Date)
+            let serverDatedSchedules = schedules.map { schedule in
+                guard let authoritativeUpdatedAt else { return schedule }
+                return PayPeriodSchedule(
+                    id: schedule.id,
+                    label: schedule.label,
+                    tripCount: schedule.tripCount,
+                    legCount: schedule.legCount,
+                    openTimeCount: schedule.openTimeCount,
+                    updatedAt: authoritativeUpdatedAt,
+                    legs: schedule.legs,
+                    openTimeTrips: schedule.openTimeTrips
+                )
+            }
             logger.info("[TDHSchedule] fetchSchedule: success, \(schedules.count, privacy: .public) schedules")
-            return schedules
+            return serverDatedSchedules
         } catch {
             logger.error("[TDHSchedule] fetchSchedule: FAILED error=\(error.localizedDescription, privacy: .public)")
             throw error

@@ -110,7 +110,9 @@ struct RootTabView: View {
             viewModel.refreshFlightCountdownPresentation()
             Task {
                 await viewModel.autoFetchOnAppActiveIfEnabled(autoFetchOnOpen)
-                if AppEnvironment.isFriendSharingVisible {
+            }
+            if AppEnvironment.isFriendSharingVisible {
+                Task {
                     await viewModel.syncFriendCloudKit(reason: "app opened")
                 }
             }
@@ -122,7 +124,9 @@ struct RootTabView: View {
                 viewModel.refreshFlightCountdownPresentation()
                 Task {
                     await viewModel.autoFetchOnAppActiveIfEnabled(autoFetchOnOpen)
-                    if AppEnvironment.isFriendSharingVisible {
+                }
+                if AppEnvironment.isFriendSharingVisible {
+                    Task {
                         await viewModel.syncFriendCloudKit(reason: "app active")
                     }
                 }

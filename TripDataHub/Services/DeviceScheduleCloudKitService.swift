@@ -45,6 +45,10 @@ final class DeviceScheduleCloudKitService: DeviceScheduleCloudKitServicing, @unc
         static let source = "source"
     }
 
+    /// Number of save attempts when another device writes the same record between
+    /// our fetch and our save.
+    static let conflictRetryLimit = 3
+
     private let containerIdentifier: String
     private let databaseProvider: () -> DeviceScheduleCloudKitDatabase
 
@@ -60,6 +64,16 @@ final class DeviceScheduleCloudKitService: DeviceScheduleCloudKitServicing, @unc
         self.databaseProvider = databaseProvider
     }
 
+    /// Writes this device's whole-Timeline snapshot.
+    ///
+    /// This record is **intentionally last-writer-wins and is NOT merged.** The payload is
+    /// a snapshot rebuilt from this device's `CrewAccessImports` files, and those files are
+    /// the authoritative, per-trip, tombstoned sync layer (`CrewAccessImportCloudKitService`).
+    /// The snapshot exists only as a fallback for installs that cannot rebuild a Timeline
+    /// from files. Retrying on `.serverRecordChanged` therefore replaces another device's
+    /// snapshot with an equally valid one — it refreshes the change tag, it does not
+    /// resolve a data conflict. Do not add per-trip state here that only lives in this
+    /// record; it would be silently lost on a concurrent write.
     func uploadDeviceSchedule(
         gemsID: String,
         cloudKitRecordName: String,
@@ -70,17 +84,33 @@ final class DeviceScheduleCloudKitService: DeviceScheduleCloudKitServicing, @unc
         let database = databaseProvider()
         let normalizedGEMSID = GEMSIDNormalizer.normalize(gemsID)
         let recordID = CKRecord.ID(recordName: Self.recordName(for: normalizedGEMSID))
-        let record = (try? await database.record(for: recordID))
-            ?? CKRecord(recordType: RecordType.deviceScheduleSnapshot, recordID: recordID)
         let data = try JSONEncoder().encode(schedules)
-        record[Field.ownerGEMSID] = normalizedGEMSID as CKRecordValue
-        record[Field.ownerRecordName] = cloudKitRecordName as CKRecordValue
-        record[Field.schedulesData] = data as CKRecordValue
-        record[Field.schemaVersion] = Int64(Self.schemaVersion) as CKRecordValue
-        record[Field.updatedAt] = Date() as CKRecordValue
-        record[Field.deviceID] = deviceID as CKRecordValue
-        record[Field.source] = source.rawValue as CKRecordValue
-        _ = try await database.save(record)
+        let updatedAt = Date()
+        var lastConflict: Error?
+
+        for _ in 0..<Self.conflictRetryLimit {
+            let record: CKRecord
+            do {
+                record = try await database.record(for: recordID)
+            } catch let error as CKError where error.code == .unknownItem {
+                record = CKRecord(recordType: RecordType.deviceScheduleSnapshot, recordID: recordID)
+            }
+            record[Field.ownerGEMSID] = normalizedGEMSID as CKRecordValue
+            record[Field.ownerRecordName] = cloudKitRecordName as CKRecordValue
+            record[Field.schedulesData] = data as CKRecordValue
+            record[Field.schemaVersion] = Int64(Self.schemaVersion) as CKRecordValue
+            record[Field.updatedAt] = updatedAt as CKRecordValue
+            record[Field.deviceID] = deviceID as CKRecordValue
+            record[Field.source] = source.rawValue as CKRecordValue
+            do {
+                _ = try await database.save(record)
+                return
+            } catch let error as CKError where error.code == .serverRecordChanged {
+                // Re-fetch to pick up the current change tag, then write the same payload.
+                lastConflict = error
+            }
+        }
+        throw lastConflict ?? CKError(.serverRecordChanged)
     }
 
     func fetchDeviceSchedule(gemsID: String) async throws -> DeviceScheduleSnapshot? {
@@ -106,10 +136,11 @@ final class DeviceScheduleCloudKitService: DeviceScheduleCloudKitServicing, @unc
         guard let ownerGEMSID = record[Field.ownerGEMSID] as? String,
               let ownerRecordName = record[Field.ownerRecordName] as? String,
               let data = record[Field.schedulesData] as? Data,
-              let updatedAt = record[Field.updatedAt] as? Date
+              let clientUpdatedAt = record[Field.updatedAt] as? Date
         else {
             throw DeviceScheduleDecodeError.missingRequiredField
         }
+        let updatedAt = record.modificationDate ?? clientUpdatedAt
         let schedules = try JSONDecoder().decode([PayPeriodSchedule].self, from: data)
         let schemaVersion = (record[Field.schemaVersion] as? Int64).map(Int.init) ?? 1
         let deviceID = record[Field.deviceID] as? String ?? ""
@@ -177,6 +208,13 @@ final class ManualEventCloudKitService: ManualEventCloudKitServicing, @unchecked
         self.databaseProvider = databaseProvider
     }
 
+    /// Writes the manual-event snapshot.
+    ///
+    /// Unlike `uploadDeviceSchedule`, this **is** real conflict resolution: the server
+    /// snapshot is decoded and merged into the payload with `mergeManualEventSnapshots`
+    /// (per-ID last-writer-wins plus tombstones) on every attempt, so a concurrent write
+    /// from another device is preserved rather than overwritten. The merge is idempotent,
+    /// so accumulating it across retries is safe.
     func uploadManualEvents(
         gemsID: String,
         cloudKitRecordName: String,
@@ -187,17 +225,38 @@ final class ManualEventCloudKitService: ManualEventCloudKitServicing, @unchecked
         let database = databaseProvider()
         let normalizedGEMSID = GEMSIDNormalizer.normalize(gemsID)
         let recordID = CKRecord.ID(recordName: Self.recordName(for: normalizedGEMSID))
-        let record = (try? await database.record(for: recordID))
-            ?? CKRecord(recordType: RecordType.manualEventSnapshot, recordID: recordID)
-        let data = try JSONEncoder().encode(snapshot)
-        record[Field.ownerGEMSID] = normalizedGEMSID as CKRecordValue
-        record[Field.ownerRecordName] = cloudKitRecordName as CKRecordValue
-        record[Field.manualEventsData] = data as CKRecordValue
-        record[Field.schemaVersion] = Int64(Self.schemaVersion) as CKRecordValue
-        record[Field.updatedAt] = Date() as CKRecordValue
-        record[Field.deviceID] = deviceID as CKRecordValue
-        record[Field.source] = source.rawValue as CKRecordValue
-        _ = try await database.save(record)
+        let updatedAt = Date()
+        var snapshotToSave = snapshot
+        var lastConflict: Error?
+
+        for _ in 0..<DeviceScheduleCloudKitService.conflictRetryLimit {
+            let record: CKRecord
+            do {
+                record = try await database.record(for: recordID)
+                if let serverData = record[Field.manualEventsData] as? Data,
+                   let serverSnapshot = try? JSONDecoder().decode(ManualEventStoreSnapshot.self, from: serverData) {
+                    snapshotToSave = mergeManualEventSnapshots(local: snapshotToSave, remote: serverSnapshot)
+                }
+            } catch let error as CKError where error.code == .unknownItem {
+                record = CKRecord(recordType: RecordType.manualEventSnapshot, recordID: recordID)
+            }
+            let data = try JSONEncoder().encode(snapshotToSave)
+            record[Field.ownerGEMSID] = normalizedGEMSID as CKRecordValue
+            record[Field.ownerRecordName] = cloudKitRecordName as CKRecordValue
+            record[Field.manualEventsData] = data as CKRecordValue
+            record[Field.schemaVersion] = Int64(Self.schemaVersion) as CKRecordValue
+            record[Field.updatedAt] = updatedAt as CKRecordValue
+            record[Field.deviceID] = deviceID as CKRecordValue
+            record[Field.source] = source.rawValue as CKRecordValue
+            do {
+                _ = try await database.save(record)
+                return
+            } catch let error as CKError where error.code == .serverRecordChanged {
+                // Re-fetch so the next attempt merges the newly written server state.
+                lastConflict = error
+            }
+        }
+        throw lastConflict ?? CKError(.serverRecordChanged)
     }
 
     func fetchManualEvents(gemsID: String) async throws -> ManualEventCloudKitSnapshot? {
@@ -221,10 +280,11 @@ final class ManualEventCloudKitService: ManualEventCloudKitServicing, @unchecked
         guard let ownerGEMSID = record[Field.ownerGEMSID] as? String,
               let ownerRecordName = record[Field.ownerRecordName] as? String,
               let data = record[Field.manualEventsData] as? Data,
-              let updatedAt = record[Field.updatedAt] as? Date
+              let clientUpdatedAt = record[Field.updatedAt] as? Date
         else {
             throw DeviceScheduleDecodeError.missingRequiredField
         }
+        let updatedAt = record.modificationDate ?? clientUpdatedAt
         let manualEvents = try JSONDecoder().decode(ManualEventStoreSnapshot.self, from: data)
         let schemaVersion = (record[Field.schemaVersion] as? Int64).map(Int.init) ?? 1
         let deviceID = record[Field.deviceID] as? String ?? ""

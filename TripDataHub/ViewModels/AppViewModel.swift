@@ -288,13 +288,21 @@ final class AppViewModel: ObservableObject {
     private var pendingProfileUploadTask: Task<Void, Never>?
     private var recentlyConsumedHandoffFileNames: Set<String> = []
     private var isConsumingAppGroupHandoff = false
-    private var crewAccessLegImportReferenceTimes: [String: Date] = [:]
+    /// Import timestamps backing the LogTen export backlog. Readable internally so tests can
+    /// assert it survives a rolled-back Timeline rebuild; only this type may mutate it.
+    private(set) var crewAccessLegImportReferenceTimes: [String: Date] = [:]
     private var logTenExportBacklog: [LogTenExportBacklogRecord] = []
     private var logTenExportedFingerprints: [String: String] = [:]
     private var deletedCrewAccessTripIntents: [String: Date] = [:]
     private var isUploadingSharedSchedule = false
     private var needsSharedScheduleUpload = false
     private var pendingSharedScheduleUploadReason: String?
+    /// A schedule change that arrived while `isScheduleSharingEnabled` was false. Replayed by
+    /// `flushPendingSharedScheduleChangeIfNeeded()` once sharing turns on.
+    private var hasPendingSharedScheduleChange = false
+    private var needsFriendCloudKitSync = false
+    private var pendingFriendCloudKitSyncReason: String?
+    private var deviceSyncActivityCount = 0
     private var isUploadingDeviceSchedule = false
     private var needsDeviceScheduleUpload = false
     private var pendingDeviceScheduleUploadReason: String?
@@ -1038,6 +1046,9 @@ final class AppViewModel: ObservableObject {
         isScheduleSharingEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: scheduleSharingEnabledKey)
         if enabled {
+            // The sync below republishes anyway; clearing the deferred flag keeps it from
+            // queueing a second, redundant upload.
+            hasPendingSharedScheduleChange = false
             Task { [weak self] in
                 await self?.syncFriendCloudKit(reason: "sharing enabled")
             }
@@ -1051,6 +1062,24 @@ final class AppViewModel: ObservableObject {
         guard !isScheduleSharingEnabled else { return }
         isScheduleSharingEnabled = true
         UserDefaults.standard.set(true, forKey: scheduleSharingEnabledKey)
+        flushPendingSharedScheduleChangeIfNeeded()
+    }
+
+    /// Republishes if a schedule change arrived while sharing was off.
+    ///
+    /// `refreshFriendSchedulesFromCloud` can turn sharing on part-way through a sync
+    /// (`enableScheduleSharingForFriends`), and device sync can finish at any moment. Without
+    /// this, a change that landed during the window when sharing was still off would be dropped
+    /// by `handleSchedulesChangedForSharing` and never republished, leaving friends on the
+    /// pre-sync schedule until something else happened to change it again.
+    private func flushPendingSharedScheduleChangeIfNeeded() {
+        guard hasPendingSharedScheduleChange else { return }
+        guard isScheduleSharingEnabled else { return }
+        hasPendingSharedScheduleChange = false
+        logNonFatal("Replaying schedule change deferred while sharing was disabled")
+        Task { [weak self] in
+            await self?.uploadSharedScheduleIfNeeded(reason: "deferred schedule change")
+        }
     }
 
     private func updateScheduleSharingAfterFriendListChange() {
@@ -1083,7 +1112,13 @@ final class AppViewModel: ObservableObject {
     func handleSchedulesChangedForSharing() {
         guard !AppEnvironment.isAppStoreReviewMode else { return }
         guard !isAppReviewMockVerifiedIdentity else { return }
-        guard isScheduleSharingEnabled else { return }
+        guard isScheduleSharingEnabled else {
+            // Do not drop the change: sharing may be enabled moments later by
+            // enableScheduleSharingForFriends() during the same friend sync.
+            hasPendingSharedScheduleChange = true
+            return
+        }
+        hasPendingSharedScheduleChange = false
         Task { [weak self] in
             await self?.uploadSharedScheduleIfNeeded(reason: "schedule changed")
         }
@@ -1100,12 +1135,33 @@ final class AppViewModel: ObservableObject {
             }
             return
         }
-        guard !isSyncingFriendCloudKit else { return }
-        isSyncingFriendCloudKit = true
-        defer { isSyncingFriendCloudKit = false }
+        if isSyncingFriendCloudKit {
+            needsFriendCloudKitSync = true
+            pendingFriendCloudKitSyncReason = reason
+            logNonFatal("Friend CloudKit sync coalesced: \(reason)")
+            return
+        }
 
-        await refreshFriendSchedulesFromCloud()
-        await uploadSharedScheduleIfNeeded(reason: reason)
+        isSyncingFriendCloudKit = true
+        var nextReason: String? = reason
+        defer {
+            isSyncingFriendCloudKit = false
+            needsFriendCloudKitSync = false
+            pendingFriendCloudKitSyncReason = nil
+        }
+
+        while let currentReason = nextReason {
+            nextReason = nil
+            needsFriendCloudKitSync = false
+            pendingFriendCloudKitSyncReason = nil
+
+            await refreshFriendSchedulesFromCloud()
+            await uploadSharedScheduleIfNeeded(reason: currentReason)
+
+            if needsFriendCloudKitSync {
+                nextReason = pendingFriendCloudKitSyncReason ?? "coalesced"
+            }
+        }
     }
 
     private func uploadSharedScheduleIfNeeded(reason: String) async {
@@ -1230,6 +1286,16 @@ final class AppViewModel: ObservableObject {
 
     // MARK: - Device Schedule Sync
 
+    private func beginDeviceSyncActivity() {
+        deviceSyncActivityCount += 1
+        isDeviceSyncing = true
+    }
+
+    private func endDeviceSyncActivity() {
+        deviceSyncActivityCount = max(0, deviceSyncActivityCount - 1)
+        isDeviceSyncing = deviceSyncActivityCount > 0
+    }
+
     @discardableResult
     func uploadDeviceScheduleIfNeeded(reason: String) async -> Bool {
         // Coalescing: if an upload is already in flight, queue the request and return.
@@ -1243,14 +1309,14 @@ final class AppViewModel: ObservableObject {
         }
 
         isUploadingDeviceSchedule = true
-        isDeviceSyncing = true
+        beginDeviceSyncActivity()
         var nextReason: String? = reason
         var allSucceeded = true
         defer {
             isUploadingDeviceSchedule = false
             needsDeviceScheduleUpload = false
             pendingDeviceScheduleUploadReason = nil
-            isDeviceSyncing = false
+            endDeviceSyncActivity()
         }
 
         while let currentReason = nextReason {
@@ -1300,12 +1366,29 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    /// Applies the legacy whole-Timeline snapshot.
+    ///
+    /// The authoritative source is the per-trip `CrewAccessImports` files; this snapshot only
+    /// covers installs that cannot rebuild a Timeline from files. Because it replaces
+    /// `crewAccessSchedules` wholesale and has no per-trip merge, it must never run against a
+    /// Timeline that files already produced — that is enforced here rather than left to the
+    /// caller, so the guarantee cannot be lost by a future call site.
+    ///
+    /// Deliberately does NOT compare `snapshot.updatedAt` (a CloudKit server modification date)
+    /// against `schedule.updatedAt` (a local file mtime). Those are different clocks measuring
+    /// different events; the empty-Timeline precondition replaces that comparison.
     @discardableResult
-    func fetchDeviceScheduleIfNeeded(reason: String) async -> Bool {
+    func fetchLegacyDeviceScheduleFallbackIfNeeded(reason: String) async -> Bool {
         guard isIdentityVerified,
               let verifiedIdentity else { return false }
-        isDeviceSyncing = true
-        defer { isDeviceSyncing = false }
+
+        guard crewAccessSchedules.isEmpty else {
+            logNonFatal("Legacy device schedule fallback skipped, Timeline rebuilt from files: \(reason)")
+            return true
+        }
+
+        beginDeviceSyncActivity()
+        defer { endDeviceSyncActivity() }
 
         do {
             guard let snapshot = try await deviceScheduleCloudKitService.fetchDeviceSchedule(
@@ -1318,11 +1401,6 @@ final class AppViewModel: ObservableObject {
             // Gate 2: skip snapshots uploaded by this device — they mirror local state.
             let myDeviceID = getOrCreateDeviceID()
             if snapshot.deviceID == myDeviceID { return true }
-
-            // Gate 3 (local-wins): reject remote if any local schedule is newer than the snapshot.
-            // This prevents a stale remote from rolling back a local import that failed to upload.
-            let localMaxUpdatedAt = crewAccessSchedules.map(\.updatedAt).max()
-            if let localMax = localMaxUpdatedAt, snapshot.updatedAt <= localMax { return true }
 
             // LogTen backlog protection: preserve import reference times across schedule replacement.
             // Intentionally not pruned so past-leg entries survive for any future LogTen export.
@@ -1351,6 +1429,7 @@ final class AppViewModel: ObservableObject {
             logNonFatal("Device schedule fetched: \(reason) source=\(snapshot.source.rawValue) tripCount=\(remoteSchedules.count)")
             return true
         } catch {
+            deviceSyncStatusMessage = "Device sync download failed. Local schedule preserved."
             logNonFatal("Device schedule fetch failed: \(error.localizedDescription) reason=\(reason)")
             return false
         }
@@ -1376,13 +1455,13 @@ final class AppViewModel: ObservableObject {
         }
 
         isUploadingManualEvents = true
-        isDeviceSyncing = true
+        beginDeviceSyncActivity()
         var nextReason: String? = reason
         defer {
             isUploadingManualEvents = false
             needsManualEventUpload = false
             pendingManualEventUploadReason = nil
-            isDeviceSyncing = false
+            endDeviceSyncActivity()
         }
 
         while let currentReason = nextReason {
@@ -1430,8 +1509,8 @@ final class AppViewModel: ObservableObject {
     func fetchManualEventsIfNeeded(reason: String) async {
         guard isIdentityVerified,
               let verifiedIdentity else { return }
-        isDeviceSyncing = true
-        defer { isDeviceSyncing = false }
+        beginDeviceSyncActivity()
+        defer { endDeviceSyncActivity() }
 
         do {
             guard let remote = try await manualEventCloudKitService.fetchManualEvents(
@@ -1649,7 +1728,28 @@ final class AppViewModel: ObservableObject {
         return allSucceeded
     }
 
+    /// Identifies this device for the "skip snapshots this device uploaded" gate.
+    ///
+    /// `identifierForVendor` is device+vendor scoped and, unlike a UUID in UserDefaults, is not
+    /// carried into a restored backup — so an iPad restored from an iPhone backup no longer
+    /// shares an identity and the two devices cannot mutually ignore each other's uploads.
+    ///
+    /// Two accepted consequences: the value changes if the user removes every app from this
+    /// vendor and reinstalls, and it changes once for existing installs on the update that
+    /// introduced this. In both cases the device stops recognising its own earlier snapshot and
+    /// may re-apply it. That is bounded because `fetchLegacyDeviceScheduleFallbackIfNeeded`
+    /// only applies a snapshot when the file-backed Timeline is empty, in which case re-applying
+    /// this device's own last known Timeline is the desired outcome anyway.
+    ///
+    /// Returns nil before first unlock, so the legacy stored UUID remains as a fallback.
     private func getOrCreateDeviceID() -> String {
+        if let vendorID = UIDevice.current.identifierForVendor?.uuidString {
+            if cachedDeviceID != vendorID {
+                UserDefaults.standard.set(vendorID, forKey: deviceIDKey)
+                cachedDeviceID = vendorID
+            }
+            return vendorID
+        }
         if let existing = cachedDeviceID { return existing }
         let stored = UserDefaults.standard.string(forKey: deviceIDKey)
         if let stored {
@@ -1729,6 +1829,9 @@ final class AppViewModel: ObservableObject {
                     self.updateAdminStatus()
                     if self.isIdentityVerified {
                         self.logNonFatal("CloudKit identity confirmed for cached GEMS verification.")
+                        Task { [weak self] in
+                            await self?.recoverCloudSyncAfterIdentityAvailable(reason: "identity resolved")
+                        }
                     }
                 case let .failure(error):
                     if case CloudKitIdentityFetchError.timeout = error {
@@ -1799,14 +1902,14 @@ final class AppViewModel: ObservableObject {
         }
 
         isSyncingCrewAccessDeviceData = true
-        isDeviceSyncing = true
+        beginDeviceSyncActivity()
         isTripSyncing = true
         var nextReason: String? = reason
         defer {
             isSyncingCrewAccessDeviceData = false
             needsCrewAccessDeviceDataSync = false
             pendingCrewAccessDeviceDataSyncReason = nil
-            isDeviceSyncing = false
+            endDeviceSyncActivity()
             isTripSyncing = false
         }
 
@@ -1828,12 +1931,48 @@ final class AppViewModel: ObservableObject {
 
     private func performCrewAccessDeviceSync(reason: String) async -> Bool {
         // Download files first, rebuild local Timeline from the file source of truth,
-        // then read/write the compact snapshot so older installs and fast UI paths converge.
+        // then use the compact snapshot only as a legacy fallback when no import
+        // files can rebuild the Timeline.
         let filesFetched = await fetchCrewAccessImportFilesIfNeeded(reason: reason)
+        guard filesFetched else {
+            deviceSyncStatusMessage = "Trip sync download failed. Local schedule preserved."
+            logNonFatal("CrewAccess device sync stopped after import file fetch failure: \(reason)")
+            return false
+        }
+
+        let schedulesBeforeReconcile = crewAccessSchedules
+        // reconcile → pruneCrewAccessLegImportReferenceTimes() filters these down to the
+        // rebuilt Timeline and persists the result.
+        let referenceTimesBeforeReconcile = crewAccessLegImportReferenceTimes
         await applyCrewAccessRetentionPolicy()
-        let snapshotFetched = await fetchDeviceScheduleIfNeeded(reason: reason)
+        if crewAccessSchedules.isEmpty {
+            // An empty rebuild means "no import files to rebuild from", not "the user deleted
+            // every trip", so reconcile's prune of the LogTen reference times was not
+            // authoritative. Put them back *before* the fallback runs: the fallback preserves
+            // whatever map it finds on entry, so restoring afterwards would only cover the
+            // failure path and still leave the export backlog wiped on success.
+            restoreCrewAccessLegImportReferenceTimes(referenceTimesBeforeReconcile)
+
+            let snapshotFetched = await fetchLegacyDeviceScheduleFallbackIfNeeded(reason: reason)
+            guard snapshotFetched else {
+                // Reconciliation may have cleared an in-memory/cache fallback before
+                // the legacy snapshot fetch failed. Restore it so a network failure
+                // never turns into local data loss.
+                crewAccessSchedules = schedulesBeforeReconcile
+                schedules = mergeAndSortSchedules(crew: schedulesBeforeReconcile, bidpro: bidproSchedules)
+                try? cacheService.save(ScheduleCacheSnapshotV2(
+                    crewAccessSchedules: schedulesBeforeReconcile,
+                    bidproSchedules: bidproSchedules,
+                    lastSyncAt: lastSyncAt ?? Date(),
+                    migratedAt: nil
+                ))
+                deviceSyncStatusMessage = "Trip sync download failed. Cloud schedule not overwritten."
+                logNonFatal("CrewAccess device sync stopped after snapshot fetch failure: \(reason)")
+                return false
+            }
+        }
         let snapshotUploaded = await uploadDeviceScheduleIfNeeded(reason: "\(reason) recovery")
-        return filesFetched && snapshotFetched && snapshotUploaded
+        return snapshotUploaded
     }
 
     private func markTripSyncCompleted() {
@@ -3378,6 +3517,19 @@ final class AppViewModel: ObservableObject {
         UserDefaults.standard.set(logTenExportedFingerprints, forKey: logTenExportedFingerprintsKey)
     }
 
+    /// Puts back reference times that `pruneCrewAccessLegImportReferenceTimes` dropped when a
+    /// Timeline rebuild was later rolled back. Restores the in-memory map and the persisted copy
+    /// together so the LogTen backlog cannot be lost to a transient sync failure.
+    private func restoreCrewAccessLegImportReferenceTimes(_ referenceTimes: [String: Date]) {
+        guard crewAccessLegImportReferenceTimes != referenceTimes else { return }
+        crewAccessLegImportReferenceTimes = referenceTimes
+        Self.saveCrewAccessLegImportReferenceTimes(
+            referenceTimes,
+            to: UserDefaults.standard,
+            key: crewAccessLegImportReferenceTimesKey
+        )
+    }
+
     private func pruneCrewAccessLegImportReferenceTimes() {
         let activeKeys = Set(crewAccessSchedules.flatMap { schedule in
             schedule.legs.map(Self.logTenLegDedupKey(for:))
@@ -3390,7 +3542,7 @@ final class AppViewModel: ObservableObject {
         )
     }
 
-    private func backfillCrewAccessLegImportReferenceTimesIfNeeded() {
+    func backfillCrewAccessLegImportReferenceTimesIfNeeded() {
         var didBackfill = false
         for schedule in crewAccessSchedules {
             for leg in schedule.legs {
@@ -5869,9 +6021,53 @@ final class AppViewModel: ObservableObject {
             requestedAt: min(lhs.requestedAt, rhs.requestedAt),
             linkedAt: lhs.linkedAt ?? rhs.linkedAt,
             acceptedAt: acceptedAt,
-            sharedSchedules: lhs.sharedSchedules.isEmpty ? rhs.sharedSchedules : lhs.sharedSchedules,
+            sharedSchedules: Self.newerFriendSchedules(lhs.sharedSchedules, rhs.sharedSchedules),
             sharedTimelineCards: lhs.sharedTimelineCards.isEmpty ? rhs.sharedTimelineCards : lhs.sharedTimelineCards
         )
+    }
+
+    nonisolated static func newerFriendSchedules(
+        _ lhs: [PayPeriodSchedule],
+        _ rhs: [PayPeriodSchedule]
+    ) -> [PayPeriodSchedule] {
+        // Friend caches can contain different pay periods. Comparing only each
+        // array's maximum timestamp lets one recently updated period discard
+        // unrelated periods known only to the other device.
+        //
+        // Both arrays arrive from another user's device, so duplicate ids must be
+        // treated as ordinary input, never as a precondition. `PayPeriodSchedule.id`
+        // is the CrewAccess label (e.g. "CA26-07-A70606") built one-per-import-file,
+        // and the same trip can legitimately exist under both a legacy and a current
+        // file name — `Dictionary(uniqueKeysWithValues:)` would trap on that.
+        //
+        // Deliberately no early return when one side is empty: a lone array can carry
+        // duplicate ids of its own, and short-circuiting would pass them through
+        // un-collapsed. Every input reaches the same merge so the result is always
+        // deduplicated and ordered consistently.
+        var mergedByID: [String: PayPeriodSchedule] = [:]
+        mergedByID.reserveCapacity(lhs.count + rhs.count)
+        for schedule in lhs + rhs {
+            if let existing = mergedByID[schedule.id] {
+                mergedByID[schedule.id] = Self.newerSchedule(existing, schedule)
+            } else {
+                mergedByID[schedule.id] = schedule
+            }
+        }
+        return mergedByID.values.sorted {
+            if $0.updatedAt == $1.updatedAt { return $0.id < $1.id }
+            return $0.updatedAt > $1.updatedAt
+        }
+    }
+
+    /// Ties resolve to `candidate`. A friend's schedules are all stamped with the same
+    /// server record timestamp by `fetchSchedule`, so equal timestamps mean "same fetch"
+    /// and either value is correct; taking the later argument keeps the freshly fetched
+    /// copy when merging a cache into a new fetch.
+    private nonisolated static func newerSchedule(
+        _ current: PayPeriodSchedule,
+        _ candidate: PayPeriodSchedule
+    ) -> PayPeriodSchedule {
+        current.updatedAt > candidate.updatedAt ? current : candidate
     }
 
     func setFriendNickname(id: UUID, nickname: String) {
@@ -5901,9 +6097,21 @@ final class AppViewModel: ObservableObject {
         // race condition where the device without cache wipes out the cached
         // data that another device wrote.
         let existingEntries = iCloudKVFriendConnectionEntries()
-        let existingByID = Dictionary(uniqueKeysWithValues: existingEntries.map {
-            (GEMSIDNormalizer.normalize($0.employeeID), $0)
-        })
+        // Normalisation can collapse two legacy KV entries onto one id, so duplicates are
+        // ordinary input here, not a precondition. Keep the entry that proves acceptance.
+        let existingByID = Dictionary(
+            existingEntries.map { (GEMSIDNormalizer.normalize($0.employeeID), $0) },
+            uniquingKeysWith: { current, candidate in
+                switch (current.acceptedAt, candidate.acceptedAt) {
+                case let (currentAccepted?, candidateAccepted?):
+                    return candidateAccepted > currentAccepted ? candidate : current
+                case (nil, _?):
+                    return candidate
+                default:
+                    return current
+                }
+            }
+        )
         var kvBudget = 800_000
         let encoder = JSONEncoder()
         let entries = connectionsToSave.map { conn -> FriendConnectionSyncEntry in
