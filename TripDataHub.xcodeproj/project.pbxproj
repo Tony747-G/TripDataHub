@@ -20,6 +20,9 @@
 		1413F694AAE3B23F47C3C436 /* FlightCountdownSharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58C18FF3A67E7E968B09F58E /* FlightCountdownSharedModels.swift */; };
 		1F77FF7A3E779E0AB3300001 /* TripJSONExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F77FF7A3E779E0AB3300002 /* TripJSONExportService.swift */; };
 		1F77FF7A3E779E0AB3300003 /* TripJSONExportServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F77FF7A3E779E0AB3300004 /* TripJSONExportServiceTests.swift */; };
+		1F77FF7A3E779E0AB3300011 /* BidPeriodCalendarEventService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F77FF7A3E779E0AB3300012 /* BidPeriodCalendarEventService.swift */; };
+		1F77FF7A3E779E0AB3300013 /* BidPeriodScheduleExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F77FF7A3E779E0AB3300014 /* BidPeriodScheduleExportService.swift */; };
+		1F77FF7A3E779E0AB3300015 /* BidPeriodScheduleExportServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F77FF7A3E779E0AB3300016 /* BidPeriodScheduleExportServiceTests.swift */; };
 		235EF66A04B56236E1DFB575 /* FriendScheduleCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA4B8F120FCBF73865EE520 /* FriendScheduleCloudKitService.swift */; };
 		27B924E6CA6484B9156032EC /* FlightCountdownCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F6C86491D2E927C2CEC60D5 /* FlightCountdownCoordinator.swift */; };
 		32AB31ECA2C3DA85192193E3 /* TripLegDisplaySupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AA31B4F87A8944508CA4749 /* TripLegDisplaySupport.swift */; };
@@ -138,6 +141,9 @@
 		13F6EFC17A823450FE7E3210 /* TripDataHubTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TripDataHubTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1F77FF7A3E779E0AB3300002 /* TripJSONExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripJSONExportService.swift; sourceTree = "<group>"; };
 		1F77FF7A3E779E0AB3300004 /* TripJSONExportServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripJSONExportServiceTests.swift; sourceTree = "<group>"; };
+		1F77FF7A3E779E0AB3300012 /* BidPeriodCalendarEventService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BidPeriodCalendarEventService.swift; sourceTree = "<group>"; };
+		1F77FF7A3E779E0AB3300014 /* BidPeriodScheduleExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BidPeriodScheduleExportService.swift; sourceTree = "<group>"; };
+		1F77FF7A3E779E0AB3300016 /* BidPeriodScheduleExportServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BidPeriodScheduleExportServiceTests.swift; sourceTree = "<group>"; };
 		1FDA7EA4639BB0121DD6B803 /* ViewShared.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewShared.swift; sourceTree = "<group>"; };
 		24F3AE1A0D7CD7D7B5816484 /* AdminSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminSections.swift; sourceTree = "<group>"; };
 		26F1CF972BCCEF2CFFA1D9B1 /* NextReportNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextReportNotificationService.swift; sourceTree = "<group>"; };
@@ -329,6 +335,8 @@
 			isa = PBXGroup;
 			children = (
 				6FA878543A7B3FFB0BC0D0E6 /* AppEnvironment.swift */,
+				1F77FF7A3E779E0AB3300012 /* BidPeriodCalendarEventService.swift */,
+				1F77FF7A3E779E0AB3300014 /* BidPeriodScheduleExportService.swift */,
 				9B6FCCCA54583B5E8D70721D /* BidPeriodService.swift */,
 				B3CE005F5518E5100BD8071A /* CrewAccessImportCloudKitService.swift */,
 				0AF942899EBB7E90814E4995 /* CrewAccessPDFImportService.swift */,
@@ -383,6 +391,7 @@
 			children = (
 				F704B25EFA9967FD3C609BE4 /* AppViewModelDeviceSyncTests.swift */,
 				A3333297AB2139014598E2FD /* AppViewModelLogTenExportTests.swift */,
+				1F77FF7A3E779E0AB3300016 /* BidPeriodScheduleExportServiceTests.swift */,
 				30EA7A40210086623915E4DE /* CalendarSupportTests.swift */,
 				41B93306AF0DF77C8A58D12F /* CrewAccessImportCloudKitServiceTests.swift */,
 				A6525000DBE9BF9003668EC3 /* CrewAccessParserRegressionTests.swift */,
@@ -626,6 +635,7 @@
 			files = (
 				1212BF43E98EB31FB58E9A8F /* AppViewModelDeviceSyncTests.swift in Sources */,
 				68AE24D4DC9200A316B42E55 /* AppViewModelLogTenExportTests.swift in Sources */,
+				1F77FF7A3E779E0AB3300015 /* BidPeriodScheduleExportServiceTests.swift in Sources */,
 				BCA4AE729D06B2ACB035CB39 /* CalendarSupportTests.swift in Sources */,
 				95EA363B67369FCF2A615031 /* CrewAccessImportCloudKitServiceTests.swift in Sources */,
 				659F96191E8496BC418E8015 /* CrewAccessParserRegressionTests.swift in Sources */,
@@ -667,6 +677,8 @@
 				D50EEB6012D9F93407B92FE0 /* AppEnvironment.swift in Sources */,
 				F4130D36B01FE4896582FC2F /* AppViewModel+PreviewData.swift in Sources */,
 				DEA186B6F8256B4A0B01C291 /* AppViewModel.swift in Sources */,
+				1F77FF7A3E779E0AB3300011 /* BidPeriodCalendarEventService.swift in Sources */,
+				1F77FF7A3E779E0AB3300013 /* BidPeriodScheduleExportService.swift in Sources */,
 				5C839E2F9397C27B75B962A9 /* BidPeriodService.swift in Sources */,
 				1322F51E683F63D579467CC2 /* BrowserTabView.swift in Sources */,
 				0286C7D60F7772DFCFDB8797 /* BrowserViewModel.swift in Sources */,

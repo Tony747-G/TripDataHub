@@ -888,91 +888,29 @@ private enum IPadCalendarPersonalWarningState: Equatable {
 }
 
 private enum IPadCalendarCycleData {
-    private static let smallCheckBase = "2025-12-29"
-    private static let bigCheckBase = "2026-01-12"
-
-    private static let bidPackageOutByBP: [(String, String)] = [
-        ("2025-12-25", "BP26-02"),
-        ("2026-02-19", "BP26-03"),
-        ("2026-04-16", "BP26-04"),
-        ("2026-06-11", "BP26-05"),
-        ("2026-08-06", "BP26-06"),
-        ("2026-10-01", "BP26-07"),
-        ("2026-10-29", "BP27-01"),
-        ("2026-12-24", "BP27-02")
-    ]
-
-    private static let caBidCloseByBP: [(String, String)] = [
-        ("2026-01-01", "BP26-02"),
-        ("2026-02-26", "BP26-03"),
-        ("2026-04-23", "BP26-04"),
-        ("2026-06-18", "BP26-05"),
-        ("2026-08-13", "BP26-06"),
-        ("2026-10-08", "BP26-07"),
-        ("2026-11-05", "BP27-01"),
-        ("2026-12-31", "BP27-02")
-    ]
-
-    /// Day-number since epoch for the two paycheck anchor dates. Precomputed so the
-    /// per-day indicator check is integer arithmetic instead of repeated date parsing
-    /// (this runs for every visible day cell — ~280 per calendar refresh).
-    private static let smallCheckBaseDay: Int? = epochDay(from: smallCheckBase)
-    private static let bigCheckBaseDay: Int? = epochDay(from: bigCheckBase)
-
     static func financialIndicator(for dateKey: String) -> IPadCalendarFinancialIndicator? {
-        guard let day = epochDay(from: dateKey) else { return nil }
-        if let base = smallCheckBaseDay, day >= base, (day - base) % 28 == 0 {
+        guard let event = BidPeriodCalendarEventService.financialEvents(on: dateKey).first else {
+            return nil
+        }
+        switch event.kind {
+        case .payDay:
             return .smallCheck
-        }
-        if let base = bigCheckBaseDay, day >= base, (day - base) % 28 == 0 {
+        case .enhancedPayDay:
             return .bigCheck
+        default:
+            return nil
         }
-        return nil
     }
-
-    /// All bid-transition chips, fully expanded from the static tables and keyed by
-    /// date for O(1) per-day lookup. Built once per qualification; the uncached path
-    /// did ~100 DateFormatter operations per visible day.
-    private static var chipsByDateKeyCache: [PilotQualification: [String: [IPadCalendarEventChip]]] = [:]
-    private static let chipsCacheLock = NSLock()
 
     static func bidEventChips(for dateKey: String, qualification: PilotQualification) -> [IPadCalendarEventChip] {
-        chipsCacheLock.lock()
-        defer { chipsCacheLock.unlock() }
-        if let table = chipsByDateKeyCache[qualification] {
-            return table[dateKey] ?? []
-        }
-        let table = buildChipsByDateKey(qualification: qualification)
-        chipsByDateKeyCache[qualification] = table
-        return table[dateKey] ?? []
-    }
-
-    private static func buildChipsByDateKey(qualification: PilotQualification) -> [String: [IPadCalendarEventChip]] {
-        var table: [String: [IPadCalendarEventChip]] = [:]
-
-        for (eventDate, bp) in bidPackageOutByBP {
-            table[eventDate, default: []].append(
-                bidChip(id: "bid-package-\(bp)", title: "Bid Package Out \(bp)", compactTitle: "BID PACKAGE OUT")
+        BidPeriodCalendarEventService.bidEvents(on: dateKey, qualification: qualification).map { event in
+            IPadCalendarEventChip(
+                id: event.id,
+                title: event.title,
+                compactTitle: event.compactTitle,
+                layer: .bid
             )
         }
-
-        for (caCloseDate, bp) in caBidCloseByBP {
-            for (offset, title, compactTitle, idPrefix) in derivedBidEvents(for: qualification) {
-                guard let date = dateKey(byAddingDays: offset, to: caCloseDate) else { continue }
-                table[date, default: []].append(bidChip(
-                    id: "\(idPrefix)-\(bp)",
-                    title: "\(title) \(bp)",
-                    compactTitle: compactTitle
-                ))
-            }
-        }
-
-        return table
-    }
-
-    private static func epochDay(from dateKey: String) -> Int? {
-        guard let date = date(from: dateKey) else { return nil }
-        return Int((date.timeIntervalSince1970 / 86_400).rounded(.down))
     }
 
     static func daysFromToday(to dateKey: String) -> Int? {
@@ -989,41 +927,6 @@ private enum IPadCalendarCycleData {
         if daysRemaining < 60 { return .orange }
         if daysRemaining <= 90 { return .yellow }
         return .normal
-    }
-
-    private static func derivedBidEvents(for qualification: PilotQualification) -> [(Int, String, String, String)] {
-        switch qualification {
-        case .captain:
-            return [
-                (0, "Schedule Bid Close", "SCHD BID CLOSE", "ca-bid-close"),
-                (10, "VTO Published", "VTO PUBLISHED", "ca-vto-published"),
-                (12, "VTO Bid Close", "VTO BID CLOSE", "ca-vto-close"),
-                (18, "LITT Accepted", "LITT ACCEPT", "ca-litt")
-            ]
-        case .firstOfficer:
-            return [
-                (4, "Schedule Bid Close", "SCHD BID CLOSE", "fo-bid-close"),
-                (11, "VTO Published", "VTO PUBLISHED", "fo-vto-published"),
-                (13, "VTO Bid Close", "VTO BID CLOSE", "fo-vto-close"),
-                (20, "LITT Accepted", "LITT ACCEPT", "fo-litt")
-            ]
-        }
-    }
-
-    private static func bidChip(id: String, title: String, compactTitle: String) -> IPadCalendarEventChip {
-        IPadCalendarEventChip(
-            id: id,
-            title: title,
-            compactTitle: compactTitle,
-            layer: .bid
-        )
-    }
-
-    private static func dateKey(byAddingDays days: Int, to baseKey: String) -> String? {
-        guard let base = date(from: baseKey),
-              let result = calendar.date(byAdding: .day, value: days, to: base)
-        else { return nil }
-        return dateFormatter.string(from: result)
     }
 
     private static func date(from key: String) -> Date? {
