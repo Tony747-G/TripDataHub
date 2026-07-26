@@ -14,6 +14,16 @@ This is the routing layer for AI sessions working on TripDataHub. It tells you w
 - `docs/ADR/ADR-003-crewaccess-file-cloudkit-sync.md`
 - Before reporting a CloudKit user issue as fixed, verify whether the running build is using Development or Production and check the relevant records in **both** environments. Development/Production drift is a known recurring source of Friend Sharing and schedule-sync bugs.
 
+## If Touching CrewAccess PDF Import or Share Handoff
+
+- `docs/INVARIANTS.md` — especially the import-file source-of-truth and cross-device rules
+- `docs/ADR/ADR-003-crewaccess-file-cloudkit-sync.md`
+- `TripDataHub/Services/AppGroupImportHandoff.swift`
+- `TripDataHub/Services/CrewAccessPDFImportService.swift`
+- `TripDataHubTests/AppGroupImportHandoffTests.swift`
+- `TripDataHubTests/CrewAccessParserRegressionTests.swift`
+- Keep the extension limited to PDF acceptance and App Group handoff. Text extraction, parsing, normalization, and persistence belong in the main app.
+
 ## If Touching Time / Timeline / Calendar / iPad Calendar
 
 - `docs/INVARIANTS.md`
