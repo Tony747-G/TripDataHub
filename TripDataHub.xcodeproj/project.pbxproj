@@ -10,6 +10,9 @@
 		014924D1545F5ED7E32BA50D /* NextReportWindowBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC24A3084F1CB77216493907 /* NextReportWindowBuilder.swift */; };
 		0286C7D60F7772DFCFDB8797 /* BrowserViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B42AD5BA433A2A0FD44B41D5 /* BrowserViewModel.swift */; };
 		060126BA99293293402CEC00 /* ViewShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FDA7EA4639BB0121DD6B803 /* ViewShared.swift */; };
+		09BA4F56343C6F6926670578 /* BidPeriodScheduleExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93674BAB2B69F8AA05472F56 /* BidPeriodScheduleExportService.swift */; };
+		09FC9D95BFF943CDA53AAD98 /* AppGroupImportHandoff.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBE459E3CF25ACF48E17077F /* AppGroupImportHandoff.swift */; };
+		0AC062156F5B1E3EC1375564 /* AppGroupImportHandoffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55FBAF3EBF639611F3A16452 /* AppGroupImportHandoffTests.swift */; };
 		0B16D7ED1D2710ED3D2B006E /* DeviceScheduleCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 679580A304D5D28CA5D2DB52 /* DeviceScheduleCloudKitService.swift */; };
 		0E0B9373BE80E5F6829F98D6 /* ScheduleCacheService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E5301B208661C3E2632FC7 /* ScheduleCacheService.swift */; };
 		0F605A8C9A8E2FF5A5CEC334 /* CrewAccessTripSummaryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D962E538C7E8E67240363969 /* CrewAccessTripSummaryStore.swift */; };
@@ -18,22 +21,22 @@
 		1212BF43E98EB31FB58E9A8F /* AppViewModelDeviceSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F704B25EFA9967FD3C609BE4 /* AppViewModelDeviceSyncTests.swift */; };
 		1322F51E683F63D579467CC2 /* BrowserTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEA20E261C3699D0271304A1 /* BrowserTabView.swift */; };
 		1413F694AAE3B23F47C3C436 /* FlightCountdownSharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58C18FF3A67E7E968B09F58E /* FlightCountdownSharedModels.swift */; };
-		1F77FF7A3E779E0AB3300001 /* TripJSONExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F77FF7A3E779E0AB3300002 /* TripJSONExportService.swift */; };
-		1F77FF7A3E779E0AB3300003 /* TripJSONExportServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F77FF7A3E779E0AB3300004 /* TripJSONExportServiceTests.swift */; };
-		1F77FF7A3E779E0AB3300011 /* BidPeriodCalendarEventService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F77FF7A3E779E0AB3300012 /* BidPeriodCalendarEventService.swift */; };
-		1F77FF7A3E779E0AB3300013 /* BidPeriodScheduleExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F77FF7A3E779E0AB3300014 /* BidPeriodScheduleExportService.swift */; };
-		1F77FF7A3E779E0AB3300015 /* BidPeriodScheduleExportServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F77FF7A3E779E0AB3300016 /* BidPeriodScheduleExportServiceTests.swift */; };
 		235EF66A04B56236E1DFB575 /* FriendScheduleCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA4B8F120FCBF73865EE520 /* FriendScheduleCloudKitService.swift */; };
+		247048D05968BBDA85B3D994 /* NextReportWindowBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 819FCF962E2F8C300B558BA2 /* NextReportWindowBuilderTests.swift */; };
 		27B924E6CA6484B9156032EC /* FlightCountdownCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F6C86491D2E927C2CEC60D5 /* FlightCountdownCoordinator.swift */; };
+		2FF701FE07E74A3FFE4242B0 /* FriendScheduleSyncHealth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C88DA509CD0B44A509CD2C8 /* FriendScheduleSyncHealth.swift */; };
 		32AB31ECA2C3DA85192193E3 /* TripLegDisplaySupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AA31B4F87A8944508CA4749 /* TripLegDisplaySupport.swift */; };
 		3922CFC31FEDE9EC3DFB97BC /* FriendsTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7530BA3F3B6E04AB959D36F4 /* FriendsTabView.swift */; };
 		3A2F50E0D4536F59A322FEAB /* OpenTimeTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AE25B19B246FF6370CE9E6F /* OpenTimeTabView.swift */; };
 		3B9167DA193C6012D96B3376 /* BrowserWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 915C9CB6A4D2781EE5230B0C /* BrowserWebView.swift */; };
 		4016A931F2EA6DCF07900791 /* SettingsSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8A9A31A957111B4F5C5479E /* SettingsSections.swift */; };
+		48DBB8907A99A66C0E9B3167 /* ManualEventDeletionSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79428C8D8714EE985D8FA26D /* ManualEventDeletionSyncTests.swift */; };
 		4B757DBC3E4BB412A6E0A4B4 /* NextReportNotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26F1CF972BCCEF2CFFA1D9B1 /* NextReportNotificationService.swift */; };
 		4C5EC0A3F2B851101A6DF46D /* IATATimeZoneResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FC85F3B696ED2DB2C56FC18 /* IATATimeZoneResolver.swift */; };
 		4F7808E425C3280304305CB3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 906799561E65DB1AF44B2DE4 /* Assets.xcassets */; };
+		52F153423BE24BC21C373229 /* AppReviewDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F929334CCF7A0EE79F93046 /* AppReviewDemo.swift */; };
 		560C6AC50CBE2C357746B607 /* TripScheduleSnapshotEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1682DE701661661F9C87C7D /* TripScheduleSnapshotEncoderTests.swift */; };
+		5A70473A2E93DD31CC462B37 /* SyncDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 183D9455703A069B1219B1E0 /* SyncDiagnosticsView.swift */; };
 		5C839E2F9397C27B75B962A9 /* BidPeriodService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B6FCCCA54583B5E8D70721D /* BidPeriodService.swift */; };
 		657CE0BD8328A988EB6D9DAF /* TripScheduleSnapshotEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A29DAE34FE231561964648C1 /* TripScheduleSnapshotEncoder.swift */; };
 		659F96191E8496BC418E8015 /* CrewAccessParserRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6525000DBE9BF9003668EC3 /* CrewAccessParserRegressionTests.swift */; };
@@ -48,13 +51,11 @@
 		770DDB243CCA709322ED76E2 /* FriendsSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DD141C17FE03A5610C7CD39 /* FriendsSupport.swift */; };
 		795CC2C27077F9EE6855A671 /* ProfileSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A5F829F752D306D7E225C9 /* ProfileSnapshot.swift */; };
 		7B628B2A32893468E96EAD80 /* DomicileSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DA89D2D4EE73D007B27D8F7 /* DomicileSupport.swift */; };
+		7B8EF03436B26E8924E1C44A /* FriendScheduleStatusDot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E245B85CBF5B6A4E6E03E66 /* FriendScheduleStatusDot.swift */; };
 		7C3AB2B9272B81AA8921086F /* MaterialIcons.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 5E0709AD7B1E41C090C2CDA2 /* MaterialIcons.ttf */; };
 		7D1704D2A316ADA1508A7A5E /* TripBoardSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A4FD2E096CBF54B7899BF9A /* TripBoardSyncService.swift */; };
 		7DCBF996FF525485AECDAF4C /* AdminSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24F3AE1A0D7CD7D7B5816484 /* AdminSections.swift */; };
 		8410F992AB2AB4380AE193D2 /* GEMSIDNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8490A3DF28BAEE6B4A7905D8 /* GEMSIDNormalizer.swift */; };
-		7E8F90A1B2C3D4E5F6071829 /* AppGroupImportHandoff.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D7E8F90A1B2C3D4E5F60718 /* AppGroupImportHandoff.swift */; };
-		8F90A1B2C3D4E5F607182930 /* AppGroupImportHandoff.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D7E8F90A1B2C3D4E5F60718 /* AppGroupImportHandoff.swift */; };
-		3C4D5E6F708192A3B4C5D6E7 /* AppReviewDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3C4D5E6F708192A3B4C5D6 /* AppReviewDemo.swift */; };
 		86F8A20621DA16666563F01C /* FriendScheduleMatching.swift in Sources */ = {isa = PBXBuildFile; fileRef = 890162126747FE986AEDD30B /* FriendScheduleMatching.swift */; };
 		87418240871BAEDE8B2124F2 /* iPadTripBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6D9C7C076517590A793657B /* iPadTripBarView.swift */; };
 		8A6763FD9E2EE3410248A68C /* DeviceScheduleCloudKitServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 947E8F6FB100BB0AED4967CD /* DeviceScheduleCloudKitServiceTests.swift */; };
@@ -62,33 +63,38 @@
 		9599AC8B5334199EAAC4FC49 /* FlightCountdownTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58EB09BC72A13BE9062573CC /* FlightCountdownTests.swift */; };
 		95B113CB364AA3060CA5D213 /* TimelineSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A53834B9B503F29F362404 /* TimelineSupport.swift */; };
 		95EA363B67369FCF2A615031 /* CrewAccessImportCloudKitServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41B93306AF0DF77C8A58D12F /* CrewAccessImportCloudKitServiceTests.swift */; };
+		9A440A2F395319BE8FFF8DDC /* ExpandableFloatingMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC2084526B8C403A2D265F80 /* ExpandableFloatingMenu.swift */; };
 		9CC4DBFF8DD7A807E39DE379 /* RosterParsingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0A40DFB2EF7B9A57798ECF9 /* RosterParsingModels.swift */; };
 		9D0A859BE373BD64930F62E3 /* ProfileCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E95348863D32C465BA74266C /* ProfileCard.swift */; };
 		A1D82A544C65FC9E6F2AB004 /* OpenTimeSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD991C2C233AF5AEE5AB9A42 /* OpenTimeSupport.swift */; };
 		A4ED9ABB8F67870FDF6DC827 /* PDFTripParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A472159ED43D1D3AE0B8922B /* PDFTripParser.swift */; };
 		A77C14C3F302B68419884766 /* ProfileModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABF8832C44179DC33693CE0E /* ProfileModels.swift */; };
 		A85729274D2C798221687F76 /* ProfileCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 883A25978F83383E8BB363A0 /* ProfileCloudKitService.swift */; };
+		AC0C1EB14B39044414BBBB08 /* BidPeriodScheduleExportServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C871AF9A775473A14C814EE6 /* BidPeriodScheduleExportServiceTests.swift */; };
+		B1E8034DF3D2935394F98567 /* SyncDiagnosticsLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27A6DE05081EABB2B72DF802 /* SyncDiagnosticsLog.swift */; };
 		B52957FE513ECC9639B99496 /* CrewAccessPDFImportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AF942899EBB7E90814E4995 /* CrewAccessPDFImportService.swift */; };
 		BCA4AE729D06B2ACB035CB39 /* CalendarSupportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30EA7A40210086623915E4DE /* CalendarSupportTests.swift */; };
 		BDB5E75E3F22104CE4F4E4BA /* iPadBidPeriodCalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D4D53F3DC79EADA851A73C6 /* iPadBidPeriodCalendarView.swift */; };
+		C1BE472B7026727E93A81105 /* CrewAccessDeletionOutboxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08FCE35D25E3208FFD755AF3 /* CrewAccessDeletionOutboxTests.swift */; };
 		C253B94D1BAE19FE0272F3F3 /* AdminPolicy.json in Resources */ = {isa = PBXBuildFile; fileRef = 98EDE30CF9675F9EFF5433AD /* AdminPolicy.json */; };
 		C5194577FDCCA8F6FD89109E /* CrewAccessImportCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3CE005F5518E5100BD8071A /* CrewAccessImportCloudKitService.swift */; };
 		C6DAD0A1BE825FB0BA256D13 /* SettingsTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B75C57D0E8EA97E45C283A7B /* SettingsTabView.swift */; };
 		C8D9B5BF0F2E0E10EFC1355F /* TripDataHubApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BDD762619119C64ED70F521 /* TripDataHubApp.swift */; };
+		CAAF487FE121E16E14A817A2 /* TripJSONExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC92941B770B36F5CA2CB758 /* TripJSONExportService.swift */; };
 		CABB746FF49354B5B9FB8445 /* MaterialIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9B6B161A74F14EA6BD7D4F1 /* MaterialIconView.swift */; };
 		CE0849FD7F7F3F22C65211EE /* ImportPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF695C0A628B417D70BF6664 /* ImportPreviewView.swift */; };
 		CE14183F65070B2295103E1C /* iPadTimelineSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F613274D8F1AD32132CC8601 /* iPadTimelineSidebarView.swift */; };
+		CEDCA270F7DC7D9A4FBA10CF /* TripJSONExportServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10B50A4E5115BBBBEFE5B8D8 /* TripJSONExportServiceTests.swift */; };
+		D09307D688FEFADEAB7D4E05 /* ManualEventStartupRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E58C37096DF95CCD2C96C0C /* ManualEventStartupRecoveryTests.swift */; };
 		D50EEB6012D9F93407B92FE0 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FA878543A7B3FFB0BC0D0E6 /* AppEnvironment.swift */; };
 		D62D823638EA9042B84575C1 /* RootTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABBFA59E2733EED76133B12E /* RootTabView.swift */; };
-		6B7C8D9E0F10213243546576 /* ExpandableFloatingMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A6B7C8D9E0F102132435465 /* ExpandableFloatingMenu.swift */; };
 		D699779CEC9D10066F5AF038 /* iPadWorkspaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA43A088DA6CC56787500853 /* iPadWorkspaceModels.swift */; };
 		D7CF5354C3F636A38CCA3C27 /* CalendarModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C935139ABDF9C6B5FE71310 /* CalendarModels.swift */; };
+		D8E4711976B4A538BB9C95B0 /* FriendScheduleStatusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FF7CB3CBD912159638B5C95 /* FriendScheduleStatusTests.swift */; };
 		DC8A5853601DC74925B4908E /* TripBoardLoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B56C7C114EB63B94E2C3ED4 /* TripBoardLoginView.swift */; };
 		DEA186B6F8256B4A0B01C291 /* AppViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 537DE7E0A39D9117D8B2DE33 /* AppViewModel.swift */; };
 		E1BDA32E3801BEDCB3C9A9E3 /* CrewAccessImportHelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C6A66B614D3A175C4E929D9 /* CrewAccessImportHelpView.swift */; };
 		E523CAFDE61554494FEF76A0 /* ProfileSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DC289F484BCC26A5FB3F491 /* ProfileSyncTests.swift */; };
-		0B1C2D3E4F50617283940516 /* AppGroupImportHandoffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A0B1C2D3E4F506172839405 /* AppGroupImportHandoffTests.swift */; };
-		5F2B8C3DA1E09F2345678901 /* NextReportWindowBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E1A7B2C9D0E8F1234567890 /* NextReportWindowBuilderTests.swift */; };
 		E60E5972A4C84425D3942CFD /* FriendScheduleMatchingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9148FEFD922511865B7B75D4 /* FriendScheduleMatchingTests.swift */; };
 		E72B7C0A1DA5134DAF4551D7 /* TripModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CD425A30028665C7AF3C26E /* TripModels.swift */; };
 		E9B2B40C2DFECBEBF71B41E9 /* ScheduleTimelineRendererView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 022B7246751D741B1792AE69 /* ScheduleTimelineRendererView.swift */; };
@@ -97,6 +103,7 @@
 		F4130D36B01FE4896582FC2F /* AppViewModel+PreviewData.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE4BC208606CA451400CC1BE /* AppViewModel+PreviewData.swift */; };
 		F6354A96AD43D1B5043CF4E3 /* FlightCountdownSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 725719445A236E76E849AF2F /* FlightCountdownSupport.swift */; };
 		F7B3BF9F00B694A47A128868 /* ImportFileSniffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EABE1DFB8EE6CCCF77FB5717 /* ImportFileSniffer.swift */; };
+		F83EC1F176764299F8E41337 /* BidPeriodCalendarEventService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FED69252B92554D1F811D23C /* BidPeriodCalendarEventService.swift */; };
 		FA08B0701796126497AB43BE /* LaunchBehaviorUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FF947013A4A08E8534AC00C /* LaunchBehaviorUITests.swift */; };
 		FA94D0C6D17D66FB42335FF5 /* GEMSVerificationCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA62E9D401CEECCAA308A707 /* GEMSVerificationCloudKitService.swift */; };
 		FCAF8CC3DA62D71F1FCBE6B8 /* TimelineTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5F00128A17C7CA217977EA7 /* TimelineTabView.swift */; };
@@ -137,24 +144,23 @@
 /* Begin PBXFileReference section */
 		022B7246751D741B1792AE69 /* ScheduleTimelineRendererView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleTimelineRendererView.swift; sourceTree = "<group>"; };
 		0280B0ED64CBF38F6C06B873 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		08FCE35D25E3208FFD755AF3 /* CrewAccessDeletionOutboxTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessDeletionOutboxTests.swift; sourceTree = "<group>"; };
 		0AF942899EBB7E90814E4995 /* CrewAccessPDFImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessPDFImportService.swift; sourceTree = "<group>"; };
-		13F6EFC17A823450FE7E3210 /* TripDataHubTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TripDataHubTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		1F77FF7A3E779E0AB3300002 /* TripJSONExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripJSONExportService.swift; sourceTree = "<group>"; };
-		1F77FF7A3E779E0AB3300004 /* TripJSONExportServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripJSONExportServiceTests.swift; sourceTree = "<group>"; };
-		1F77FF7A3E779E0AB3300012 /* BidPeriodCalendarEventService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BidPeriodCalendarEventService.swift; sourceTree = "<group>"; };
-		1F77FF7A3E779E0AB3300014 /* BidPeriodScheduleExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BidPeriodScheduleExportService.swift; sourceTree = "<group>"; };
-		1F77FF7A3E779E0AB3300016 /* BidPeriodScheduleExportServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BidPeriodScheduleExportServiceTests.swift; sourceTree = "<group>"; };
+		0E245B85CBF5B6A4E6E03E66 /* FriendScheduleStatusDot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendScheduleStatusDot.swift; sourceTree = "<group>"; };
+		0E58C37096DF95CCD2C96C0C /* ManualEventStartupRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualEventStartupRecoveryTests.swift; sourceTree = "<group>"; };
+		10B50A4E5115BBBBEFE5B8D8 /* TripJSONExportServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripJSONExportServiceTests.swift; sourceTree = "<group>"; };
+		13F6EFC17A823450FE7E3210 /* TripDataHubTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TripDataHubTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		183D9455703A069B1219B1E0 /* SyncDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncDiagnosticsView.swift; sourceTree = "<group>"; };
 		1FDA7EA4639BB0121DD6B803 /* ViewShared.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewShared.swift; sourceTree = "<group>"; };
 		24F3AE1A0D7CD7D7B5816484 /* AdminSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminSections.swift; sourceTree = "<group>"; };
 		26F1CF972BCCEF2CFFA1D9B1 /* NextReportNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextReportNotificationService.swift; sourceTree = "<group>"; };
-		2715723CFCA0583F75104EF1 /* TripDataCountdownWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TripDataCountdownWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		2715723CFCA0583F75104EF1 /* TripDataCountdownWidgetExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = TripDataCountdownWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		27A6DE05081EABB2B72DF802 /* SyncDiagnosticsLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncDiagnosticsLog.swift; sourceTree = "<group>"; };
 		27B3B19D320BB806C27D1D1C /* TripDataHub.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TripDataHub.entitlements; sourceTree = "<group>"; };
 		294D51ABEDC7BE8DE4F66EED /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		2C935139ABDF9C6B5FE71310 /* CalendarModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarModels.swift; sourceTree = "<group>"; };
 		2CA4B8F120FCBF73865EE520 /* FriendScheduleCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendScheduleCloudKitService.swift; sourceTree = "<group>"; };
 		2DC289F484BCC26A5FB3F491 /* ProfileSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileSyncTests.swift; sourceTree = "<group>"; };
-		9A0B1C2D3E4F506172839405 /* AppGroupImportHandoffTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroupImportHandoffTests.swift; sourceTree = "<group>"; };
-		4E1A7B2C9D0E8F1234567890 /* NextReportWindowBuilderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextReportWindowBuilderTests.swift; sourceTree = "<group>"; };
 		2FF947013A4A08E8534AC00C /* LaunchBehaviorUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchBehaviorUITests.swift; sourceTree = "<group>"; };
 		30EA7A40210086623915E4DE /* CalendarSupportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSupportTests.swift; sourceTree = "<group>"; };
 		3A4FD2E096CBF54B7899BF9A /* TripBoardSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripBoardSyncService.swift; sourceTree = "<group>"; };
@@ -170,40 +176,45 @@
 		537DE7E0A39D9117D8B2DE33 /* AppViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModel.swift; sourceTree = "<group>"; };
 		53D43B2FDA88585324115FF9 /* iPadOperationalWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadOperationalWorkspaceView.swift; sourceTree = "<group>"; };
 		55E5301B208661C3E2632FC7 /* ScheduleCacheService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleCacheService.swift; sourceTree = "<group>"; };
+		55FBAF3EBF639611F3A16452 /* AppGroupImportHandoffTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroupImportHandoffTests.swift; sourceTree = "<group>"; };
 		58C18FF3A67E7E968B09F58E /* FlightCountdownSharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightCountdownSharedModels.swift; sourceTree = "<group>"; };
 		58EB09BC72A13BE9062573CC /* FlightCountdownTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightCountdownTests.swift; sourceTree = "<group>"; };
 		5B56C7C114EB63B94E2C3ED4 /* TripBoardLoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripBoardLoginView.swift; sourceTree = "<group>"; };
 		5C08E1E529B18BA244811A48 /* TripDataCountdownWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripDataCountdownWidget.swift; sourceTree = "<group>"; };
 		5DA89D2D4EE73D007B27D8F7 /* DomicileSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomicileSupport.swift; sourceTree = "<group>"; };
 		5E0709AD7B1E41C090C2CDA2 /* MaterialIcons.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = MaterialIcons.ttf; sourceTree = "<group>"; };
+		5F929334CCF7A0EE79F93046 /* AppReviewDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppReviewDemo.swift; sourceTree = "<group>"; };
 		679580A304D5D28CA5D2DB52 /* DeviceScheduleCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScheduleCloudKitService.swift; sourceTree = "<group>"; };
-		6DB6247591FD18389FEA8F71 /* TripDataShareActionExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TripDataShareActionExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		6C88DA509CD0B44A509CD2C8 /* FriendScheduleSyncHealth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendScheduleSyncHealth.swift; sourceTree = "<group>"; };
+		6DB6247591FD18389FEA8F71 /* TripDataShareActionExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = TripDataShareActionExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		6DD141C17FE03A5610C7CD39 /* FriendsSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendsSupport.swift; sourceTree = "<group>"; };
 		6FA878543A7B3FFB0BC0D0E6 /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
 		725719445A236E76E849AF2F /* FlightCountdownSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightCountdownSupport.swift; sourceTree = "<group>"; };
 		7530BA3F3B6E04AB959D36F4 /* FriendsTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendsTabView.swift; sourceTree = "<group>"; };
+		79428C8D8714EE985D8FA26D /* ManualEventDeletionSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualEventDeletionSyncTests.swift; sourceTree = "<group>"; };
 		79E4DBC654459A337652E6EB /* OpenTimeTripDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenTimeTripDetailView.swift; sourceTree = "<group>"; };
 		7A4B044C3B3AC3CB75F18470 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		7B4DAB3D177949F363100BE8 /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
+		819FCF962E2F8C300B558BA2 /* NextReportWindowBuilderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextReportWindowBuilderTests.swift; sourceTree = "<group>"; };
 		8410083F38BBF0219A4F809B /* ExternalOpenImportCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalOpenImportCoordinatorTests.swift; sourceTree = "<group>"; };
 		8490A3DF28BAEE6B4A7905D8 /* GEMSIDNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GEMSIDNormalizer.swift; sourceTree = "<group>"; };
-		6D7E8F90A1B2C3D4E5F60718 /* AppGroupImportHandoff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroupImportHandoff.swift; sourceTree = "<group>"; };
-		2B3C4D5E6F708192A3B4C5D6 /* AppReviewDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppReviewDemo.swift; sourceTree = "<group>"; };
 		883A25978F83383E8BB363A0 /* ProfileCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileCloudKitService.swift; sourceTree = "<group>"; };
 		88B5E9932D4ED582BB71316D /* DeviceScheduleModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScheduleModels.swift; sourceTree = "<group>"; };
 		890162126747FE986AEDD30B /* FriendScheduleMatching.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendScheduleMatching.swift; sourceTree = "<group>"; };
-		8A71866D79BF8FF757543B80 /* TripDataHubUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TripDataHubUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		8A71866D79BF8FF757543B80 /* TripDataHubUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TripDataHubUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		8CD425A30028665C7AF3C26E /* TripModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripModels.swift; sourceTree = "<group>"; };
 		8D4D53F3DC79EADA851A73C6 /* iPadBidPeriodCalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadBidPeriodCalendarView.swift; sourceTree = "<group>"; };
 		906799561E65DB1AF44B2DE4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		9148FEFD922511865B7B75D4 /* FriendScheduleMatchingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendScheduleMatchingTests.swift; sourceTree = "<group>"; };
 		915C9CB6A4D2781EE5230B0C /* BrowserWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserWebView.swift; sourceTree = "<group>"; };
+		93674BAB2B69F8AA05472F56 /* BidPeriodScheduleExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BidPeriodScheduleExportService.swift; sourceTree = "<group>"; };
 		947E8F6FB100BB0AED4967CD /* DeviceScheduleCloudKitServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScheduleCloudKitServiceTests.swift; sourceTree = "<group>"; };
 		98EDE30CF9675F9EFF5433AD /* AdminPolicy.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = AdminPolicy.json; sourceTree = "<group>"; };
 		99864F714C5F48A6ECC8DFE3 /* TripDataCountdownWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TripDataCountdownWidgetExtension.entitlements; sourceTree = "<group>"; };
 		9B6FCCCA54583B5E8D70721D /* BidPeriodService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BidPeriodService.swift; sourceTree = "<group>"; };
 		9BDD762619119C64ED70F521 /* TripDataHubApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripDataHubApp.swift; sourceTree = "<group>"; };
 		9C6A66B614D3A175C4E929D9 /* CrewAccessImportHelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessImportHelpView.swift; sourceTree = "<group>"; };
+		9FF7CB3CBD912159638B5C95 /* FriendScheduleStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendScheduleStatusTests.swift; sourceTree = "<group>"; };
 		A1682DE701661661F9C87C7D /* TripScheduleSnapshotEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripScheduleSnapshotEncoderTests.swift; sourceTree = "<group>"; };
 		A29DAE34FE231561964648C1 /* TripScheduleSnapshotEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripScheduleSnapshotEncoder.swift; sourceTree = "<group>"; };
 		A3333297AB2139014598E2FD /* AppViewModelLogTenExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModelLogTenExportTests.swift; sourceTree = "<group>"; };
@@ -212,34 +223,38 @@
 		A6D9C7C076517590A793657B /* iPadTripBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadTripBarView.swift; sourceTree = "<group>"; };
 		A9A5F829F752D306D7E225C9 /* ProfileSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileSnapshot.swift; sourceTree = "<group>"; };
 		ABBFA59E2733EED76133B12E /* RootTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootTabView.swift; sourceTree = "<group>"; };
-		5A6B7C8D9E0F102132435465 /* ExpandableFloatingMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpandableFloatingMenu.swift; sourceTree = "<group>"; };
 		ABF8832C44179DC33693CE0E /* ProfileModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileModels.swift; sourceTree = "<group>"; };
 		B0A40DFB2EF7B9A57798ECF9 /* RosterParsingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RosterParsingModels.swift; sourceTree = "<group>"; };
 		B3CE005F5518E5100BD8071A /* CrewAccessImportCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessImportCloudKitService.swift; sourceTree = "<group>"; };
 		B42AD5BA433A2A0FD44B41D5 /* BrowserViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserViewModel.swift; sourceTree = "<group>"; };
 		B75C57D0E8EA97E45C283A7B /* SettingsTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTabView.swift; sourceTree = "<group>"; };
 		B9B6B161A74F14EA6BD7D4F1 /* MaterialIconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaterialIconView.swift; sourceTree = "<group>"; };
+		BBE459E3CF25ACF48E17077F /* AppGroupImportHandoff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroupImportHandoff.swift; sourceTree = "<group>"; };
 		BD7C5B32EE84F84B8DB788FD /* CalendarSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSupport.swift; sourceTree = "<group>"; };
 		BEA20E261C3699D0271304A1 /* BrowserTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserTabView.swift; sourceTree = "<group>"; };
 		C2C615E3B0D98F90EF0B9E71 /* GEMSVerificationCloudKitServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GEMSVerificationCloudKitServiceTests.swift; sourceTree = "<group>"; };
+		C871AF9A775473A14C814EE6 /* BidPeriodScheduleExportServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BidPeriodScheduleExportServiceTests.swift; sourceTree = "<group>"; };
 		CA43A088DA6CC56787500853 /* iPadWorkspaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadWorkspaceModels.swift; sourceTree = "<group>"; };
+		CC2084526B8C403A2D265F80 /* ExpandableFloatingMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpandableFloatingMenu.swift; sourceTree = "<group>"; };
 		CD991C2C233AF5AEE5AB9A42 /* OpenTimeSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenTimeSupport.swift; sourceTree = "<group>"; };
 		D1A53834B9B503F29F362404 /* TimelineSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineSupport.swift; sourceTree = "<group>"; };
 		D5F00128A17C7CA217977EA7 /* TimelineTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineTabView.swift; sourceTree = "<group>"; };
 		D8A9A31A957111B4F5C5479E /* SettingsSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSections.swift; sourceTree = "<group>"; };
 		D962E538C7E8E67240363969 /* CrewAccessTripSummaryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessTripSummaryStore.swift; sourceTree = "<group>"; };
 		D9ED434951F84971C73C60F7 /* TimelineRowViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineRowViews.swift; sourceTree = "<group>"; };
+		DC92941B770B36F5CA2CB758 /* TripJSONExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripJSONExportService.swift; sourceTree = "<group>"; };
 		DF695C0A628B417D70BF6664 /* ImportPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportPreviewView.swift; sourceTree = "<group>"; };
 		E95348863D32C465BA74266C /* ProfileCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileCard.swift; sourceTree = "<group>"; };
 		EABE1DFB8EE6CCCF77FB5717 /* ImportFileSniffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportFileSniffer.swift; sourceTree = "<group>"; };
 		EB93AA8DEFC3BFC3256EBA03 /* TripDataHubRelease.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TripDataHubRelease.entitlements; sourceTree = "<group>"; };
-		F518C211127FA260E6247ED8 /* TripDataHub.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TripDataHub.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F518C211127FA260E6247ED8 /* TripDataHub.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TripDataHub.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F613274D8F1AD32132CC8601 /* iPadTimelineSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadTimelineSidebarView.swift; sourceTree = "<group>"; };
 		F704B25EFA9967FD3C609BE4 /* AppViewModelDeviceSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModelDeviceSyncTests.swift; sourceTree = "<group>"; };
 		FA62E9D401CEECCAA308A707 /* GEMSVerificationCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GEMSVerificationCloudKitService.swift; sourceTree = "<group>"; };
 		FBD9F22BB2B42C27B598C918 /* TripDataShareActionExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TripDataShareActionExtension.entitlements; sourceTree = "<group>"; };
 		FC24A3084F1CB77216493907 /* NextReportWindowBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextReportWindowBuilder.swift; sourceTree = "<group>"; };
 		FE4BC208606CA451400CC1BE /* AppViewModel+PreviewData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppViewModel+PreviewData.swift"; sourceTree = "<group>"; };
+		FED69252B92554D1F811D23C /* BidPeriodCalendarEventService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BidPeriodCalendarEventService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -297,6 +312,8 @@
 				915C9CB6A4D2781EE5230B0C /* BrowserWebView.swift */,
 				BD7C5B32EE84F84B8DB788FD /* CalendarSupport.swift */,
 				9C6A66B614D3A175C4E929D9 /* CrewAccessImportHelpView.swift */,
+				CC2084526B8C403A2D265F80 /* ExpandableFloatingMenu.swift */,
+				0E245B85CBF5B6A4E6E03E66 /* FriendScheduleStatusDot.swift */,
 				6DD141C17FE03A5610C7CD39 /* FriendsSupport.swift */,
 				7530BA3F3B6E04AB959D36F4 /* FriendsTabView.swift */,
 				DF695C0A628B417D70BF6664 /* ImportPreviewView.swift */,
@@ -306,11 +323,11 @@
 				79E4DBC654459A337652E6EB /* OpenTimeTripDetailView.swift */,
 				E95348863D32C465BA74266C /* ProfileCard.swift */,
 				4C048E415E060F1266543CCE /* ProfileTabView.swift */,
-				5A6B7C8D9E0F102132435465 /* ExpandableFloatingMenu.swift */,
 				ABBFA59E2733EED76133B12E /* RootTabView.swift */,
 				022B7246751D741B1792AE69 /* ScheduleTimelineRendererView.swift */,
 				D8A9A31A957111B4F5C5479E /* SettingsSections.swift */,
 				B75C57D0E8EA97E45C283A7B /* SettingsTabView.swift */,
+				183D9455703A069B1219B1E0 /* SyncDiagnosticsView.swift */,
 				D9ED434951F84971C73C60F7 /* TimelineRowViews.swift */,
 				D1A53834B9B503F29F362404 /* TimelineSupport.swift */,
 				D5F00128A17C7CA217977EA7 /* TimelineTabView.swift */,
@@ -335,8 +352,10 @@
 			isa = PBXGroup;
 			children = (
 				6FA878543A7B3FFB0BC0D0E6 /* AppEnvironment.swift */,
-				1F77FF7A3E779E0AB3300012 /* BidPeriodCalendarEventService.swift */,
-				1F77FF7A3E779E0AB3300014 /* BidPeriodScheduleExportService.swift */,
+				BBE459E3CF25ACF48E17077F /* AppGroupImportHandoff.swift */,
+				5F929334CCF7A0EE79F93046 /* AppReviewDemo.swift */,
+				FED69252B92554D1F811D23C /* BidPeriodCalendarEventService.swift */,
+				93674BAB2B69F8AA05472F56 /* BidPeriodScheduleExportService.swift */,
 				9B6FCCCA54583B5E8D70721D /* BidPeriodService.swift */,
 				B3CE005F5518E5100BD8071A /* CrewAccessImportCloudKitService.swift */,
 				0AF942899EBB7E90814E4995 /* CrewAccessPDFImportService.swift */,
@@ -345,8 +364,6 @@
 				5DA89D2D4EE73D007B27D8F7 /* DomicileSupport.swift */,
 				4F6C86491D2E927C2CEC60D5 /* FlightCountdownCoordinator.swift */,
 				2CA4B8F120FCBF73865EE520 /* FriendScheduleCloudKitService.swift */,
-				2B3C4D5E6F708192A3B4C5D6 /* AppReviewDemo.swift */,
-				6D7E8F90A1B2C3D4E5F60718 /* AppGroupImportHandoff.swift */,
 				8490A3DF28BAEE6B4A7905D8 /* GEMSIDNormalizer.swift */,
 				FA62E9D401CEECCAA308A707 /* GEMSVerificationCloudKitService.swift */,
 				4FC85F3B696ED2DB2C56FC18 /* IATATimeZoneResolver.swift */,
@@ -357,10 +374,11 @@
 				A472159ED43D1D3AE0B8922B /* PDFTripParser.swift */,
 				883A25978F83383E8BB363A0 /* ProfileCloudKitService.swift */,
 				55E5301B208661C3E2632FC7 /* ScheduleCacheService.swift */,
+				27A6DE05081EABB2B72DF802 /* SyncDiagnosticsLog.swift */,
 				42BF7C6110CAC60779B38CC7 /* TripBoardAuthService.swift */,
 				3A4FD2E096CBF54B7899BF9A /* TripBoardSyncService.swift */,
+				DC92941B770B36F5CA2CB758 /* TripJSONExportService.swift */,
 				A29DAE34FE231561964648C1 /* TripScheduleSnapshotEncoder.swift */,
-				1F77FF7A3E779E0AB3300002 /* TripJSONExportService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -389,22 +407,26 @@
 		D101DDBB3D56809CEA7A0D66 /* TripDataHubTests */ = {
 			isa = PBXGroup;
 			children = (
+				55FBAF3EBF639611F3A16452 /* AppGroupImportHandoffTests.swift */,
 				F704B25EFA9967FD3C609BE4 /* AppViewModelDeviceSyncTests.swift */,
 				A3333297AB2139014598E2FD /* AppViewModelLogTenExportTests.swift */,
-				1F77FF7A3E779E0AB3300016 /* BidPeriodScheduleExportServiceTests.swift */,
+				C871AF9A775473A14C814EE6 /* BidPeriodScheduleExportServiceTests.swift */,
 				30EA7A40210086623915E4DE /* CalendarSupportTests.swift */,
+				08FCE35D25E3208FFD755AF3 /* CrewAccessDeletionOutboxTests.swift */,
 				41B93306AF0DF77C8A58D12F /* CrewAccessImportCloudKitServiceTests.swift */,
 				A6525000DBE9BF9003668EC3 /* CrewAccessParserRegressionTests.swift */,
 				947E8F6FB100BB0AED4967CD /* DeviceScheduleCloudKitServiceTests.swift */,
 				8410083F38BBF0219A4F809B /* ExternalOpenImportCoordinatorTests.swift */,
 				58EB09BC72A13BE9062573CC /* FlightCountdownTests.swift */,
 				9148FEFD922511865B7B75D4 /* FriendScheduleMatchingTests.swift */,
+				9FF7CB3CBD912159638B5C95 /* FriendScheduleStatusTests.swift */,
 				C2C615E3B0D98F90EF0B9E71 /* GEMSVerificationCloudKitServiceTests.swift */,
-				4E1A7B2C9D0E8F1234567890 /* NextReportWindowBuilderTests.swift */,
-				9A0B1C2D3E4F506172839405 /* AppGroupImportHandoffTests.swift */,
+				79428C8D8714EE985D8FA26D /* ManualEventDeletionSyncTests.swift */,
+				0E58C37096DF95CCD2C96C0C /* ManualEventStartupRecoveryTests.swift */,
+				819FCF962E2F8C300B558BA2 /* NextReportWindowBuilderTests.swift */,
 				2DC289F484BCC26A5FB3F491 /* ProfileSyncTests.swift */,
+				10B50A4E5115BBBBEFE5B8D8 /* TripJSONExportServiceTests.swift */,
 				A1682DE701661661F9C87C7D /* TripScheduleSnapshotEncoderTests.swift */,
-				1F77FF7A3E779E0AB3300004 /* TripJSONExportServiceTests.swift */,
 			);
 			path = TripDataHubTests;
 			sourceTree = "<group>";
@@ -449,6 +471,7 @@
 				58C18FF3A67E7E968B09F58E /* FlightCountdownSharedModels.swift */,
 				725719445A236E76E849AF2F /* FlightCountdownSupport.swift */,
 				890162126747FE986AEDD30B /* FriendScheduleMatching.swift */,
+				6C88DA509CD0B44A509CD2C8 /* FriendScheduleSyncHealth.swift */,
 				ABF8832C44179DC33693CE0E /* ProfileModels.swift */,
 				A9A5F829F752D306D7E225C9 /* ProfileSnapshot.swift */,
 				B0A40DFB2EF7B9A57798ECF9 /* RosterParsingModels.swift */,
@@ -558,7 +581,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 2650;
+				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					06F2AF4905B951E2C0FF528F = {
 						DevelopmentTeam = 54WZM2U9MK;
@@ -597,11 +620,11 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				629B3D6DDB789EA0AAE1A672 /* TripDataCountdownWidgetExtension */,
 				9CDD311DB999C310E3ADCC73 /* TripDataHub */,
+				DD875065125E525A79261256 /* TripDataShareActionExtension */,
+				629B3D6DDB789EA0AAE1A672 /* TripDataCountdownWidgetExtension */,
 				06F2AF4905B951E2C0FF528F /* TripDataHubTests */,
 				2E91B7925779B508EFEEB211 /* TripDataHubUITests */,
-				DD875065125E525A79261256 /* TripDataShareActionExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -633,22 +656,26 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0AC062156F5B1E3EC1375564 /* AppGroupImportHandoffTests.swift in Sources */,
 				1212BF43E98EB31FB58E9A8F /* AppViewModelDeviceSyncTests.swift in Sources */,
 				68AE24D4DC9200A316B42E55 /* AppViewModelLogTenExportTests.swift in Sources */,
-				1F77FF7A3E779E0AB3300015 /* BidPeriodScheduleExportServiceTests.swift in Sources */,
+				AC0C1EB14B39044414BBBB08 /* BidPeriodScheduleExportServiceTests.swift in Sources */,
 				BCA4AE729D06B2ACB035CB39 /* CalendarSupportTests.swift in Sources */,
+				C1BE472B7026727E93A81105 /* CrewAccessDeletionOutboxTests.swift in Sources */,
 				95EA363B67369FCF2A615031 /* CrewAccessImportCloudKitServiceTests.swift in Sources */,
 				659F96191E8496BC418E8015 /* CrewAccessParserRegressionTests.swift in Sources */,
 				8A6763FD9E2EE3410248A68C /* DeviceScheduleCloudKitServiceTests.swift in Sources */,
 				6B9506F2B4875F005E21D1A7 /* ExternalOpenImportCoordinatorTests.swift in Sources */,
 				9599AC8B5334199EAAC4FC49 /* FlightCountdownTests.swift in Sources */,
 				E60E5972A4C84425D3942CFD /* FriendScheduleMatchingTests.swift in Sources */,
+				D8E4711976B4A538BB9C95B0 /* FriendScheduleStatusTests.swift in Sources */,
 				10FDE18BDE05FE8F1C1CFBF1 /* GEMSVerificationCloudKitServiceTests.swift in Sources */,
-				5F2B8C3DA1E09F2345678901 /* NextReportWindowBuilderTests.swift in Sources */,
-				0B1C2D3E4F50617283940516 /* AppGroupImportHandoffTests.swift in Sources */,
+				48DBB8907A99A66C0E9B3167 /* ManualEventDeletionSyncTests.swift in Sources */,
+				D09307D688FEFADEAB7D4E05 /* ManualEventStartupRecoveryTests.swift in Sources */,
+				247048D05968BBDA85B3D994 /* NextReportWindowBuilderTests.swift in Sources */,
 				E523CAFDE61554494FEF76A0 /* ProfileSyncTests.swift in Sources */,
+				CEDCA270F7DC7D9A4FBA10CF /* TripJSONExportServiceTests.swift in Sources */,
 				560C6AC50CBE2C357746B607 /* TripScheduleSnapshotEncoderTests.swift in Sources */,
-				1F77FF7A3E779E0AB3300003 /* TripJSONExportServiceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -656,7 +683,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				8F90A1B2C3D4E5F607182930 /* AppGroupImportHandoff.swift in Sources */,
 				67D77849AA568A57737B8039 /* ShareViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -675,10 +701,12 @@
 			files = (
 				7DCBF996FF525485AECDAF4C /* AdminSections.swift in Sources */,
 				D50EEB6012D9F93407B92FE0 /* AppEnvironment.swift in Sources */,
+				09FC9D95BFF943CDA53AAD98 /* AppGroupImportHandoff.swift in Sources */,
+				52F153423BE24BC21C373229 /* AppReviewDemo.swift in Sources */,
 				F4130D36B01FE4896582FC2F /* AppViewModel+PreviewData.swift in Sources */,
 				DEA186B6F8256B4A0B01C291 /* AppViewModel.swift in Sources */,
-				1F77FF7A3E779E0AB3300011 /* BidPeriodCalendarEventService.swift in Sources */,
-				1F77FF7A3E779E0AB3300013 /* BidPeriodScheduleExportService.swift in Sources */,
+				F83EC1F176764299F8E41337 /* BidPeriodCalendarEventService.swift in Sources */,
+				09BA4F56343C6F6926670578 /* BidPeriodScheduleExportService.swift in Sources */,
 				5C839E2F9397C27B75B962A9 /* BidPeriodService.swift in Sources */,
 				1322F51E683F63D579467CC2 /* BrowserTabView.swift in Sources */,
 				0286C7D60F7772DFCFDB8797 /* BrowserViewModel.swift in Sources */,
@@ -692,15 +720,16 @@
 				0B16D7ED1D2710ED3D2B006E /* DeviceScheduleCloudKitService.swift in Sources */,
 				708D64ABB3483E4BB24A0E10 /* DeviceScheduleModels.swift in Sources */,
 				7B628B2A32893468E96EAD80 /* DomicileSupport.swift in Sources */,
+				9A440A2F395319BE8FFF8DDC /* ExpandableFloatingMenu.swift in Sources */,
 				27B924E6CA6484B9156032EC /* FlightCountdownCoordinator.swift in Sources */,
 				1413F694AAE3B23F47C3C436 /* FlightCountdownSharedModels.swift in Sources */,
 				F6354A96AD43D1B5043CF4E3 /* FlightCountdownSupport.swift in Sources */,
 				235EF66A04B56236E1DFB575 /* FriendScheduleCloudKitService.swift in Sources */,
 				86F8A20621DA16666563F01C /* FriendScheduleMatching.swift in Sources */,
+				7B8EF03436B26E8924E1C44A /* FriendScheduleStatusDot.swift in Sources */,
+				2FF701FE07E74A3FFE4242B0 /* FriendScheduleSyncHealth.swift in Sources */,
 				770DDB243CCA709322ED76E2 /* FriendsSupport.swift in Sources */,
 				3922CFC31FEDE9EC3DFB97BC /* FriendsTabView.swift in Sources */,
-				3C4D5E6F708192A3B4C5D6E7 /* AppReviewDemo.swift in Sources */,
-				7E8F90A1B2C3D4E5F6071829 /* AppGroupImportHandoff.swift in Sources */,
 				8410F992AB2AB4380AE193D2 /* GEMSIDNormalizer.swift in Sources */,
 				FA94D0C6D17D66FB42335FF5 /* GEMSVerificationCloudKitService.swift in Sources */,
 				4C5EC0A3F2B851101A6DF46D /* IATATimeZoneResolver.swift in Sources */,
@@ -719,13 +748,14 @@
 				A77C14C3F302B68419884766 /* ProfileModels.swift in Sources */,
 				795CC2C27077F9EE6855A671 /* ProfileSnapshot.swift in Sources */,
 				6FBA8ED28CB8938A91B7A9CE /* ProfileTabView.swift in Sources */,
-				6B7C8D9E0F10213243546576 /* ExpandableFloatingMenu.swift in Sources */,
 				D62D823638EA9042B84575C1 /* RootTabView.swift in Sources */,
 				9CC4DBFF8DD7A807E39DE379 /* RosterParsingModels.swift in Sources */,
 				0E0B9373BE80E5F6829F98D6 /* ScheduleCacheService.swift in Sources */,
 				E9B2B40C2DFECBEBF71B41E9 /* ScheduleTimelineRendererView.swift in Sources */,
 				4016A931F2EA6DCF07900791 /* SettingsSections.swift in Sources */,
 				C6DAD0A1BE825FB0BA256D13 /* SettingsTabView.swift in Sources */,
+				B1E8034DF3D2935394F98567 /* SyncDiagnosticsLog.swift in Sources */,
+				5A70473A2E93DD31CC462B37 /* SyncDiagnosticsView.swift in Sources */,
 				719410C44B68713EC3242D79 /* TimelineRowViews.swift in Sources */,
 				95B113CB364AA3060CA5D213 /* TimelineSupport.swift in Sources */,
 				FCAF8CC3DA62D71F1FCBE6B8 /* TimelineTabView.swift in Sources */,
@@ -733,11 +763,11 @@
 				DC8A5853601DC74925B4908E /* TripBoardLoginView.swift in Sources */,
 				7D1704D2A316ADA1508A7A5E /* TripBoardSyncService.swift in Sources */,
 				C8D9B5BF0F2E0E10EFC1355F /* TripDataHubApp.swift in Sources */,
+				CAAF487FE121E16E14A817A2 /* TripJSONExportService.swift in Sources */,
 				32AB31ECA2C3DA85192193E3 /* TripLegDisplaySupport.swift in Sources */,
 				E72B7C0A1DA5134DAF4551D7 /* TripModels.swift in Sources */,
 				657CE0BD8328A988EB6D9DAF /* TripScheduleSnapshotEncoder.swift in Sources */,
 				060126BA99293293402CEC00 /* ViewShared.swift in Sources */,
-				1F77FF7A3E779E0AB3300001 /* TripJSONExportService.swift in Sources */,
 				BDB5E75E3F22104CE4F4E4BA /* iPadBidPeriodCalendarView.swift in Sources */,
 				EBF81EC14EC47BBD406A4912 /* iPadOperationalWorkspaceView.swift in Sources */,
 				CE14183F65070B2295103E1C /* iPadTimelineSidebarView.swift in Sources */,
@@ -777,14 +807,15 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = TripDataCountdownWidgetExtension/TripDataCountdownWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 72;
+				CURRENT_PROJECT_VERSION = 83;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				INFOPLIST_FILE = TripDataCountdownWidgetExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.2.4;
+				MARKETING_VERSION = 1.2.25;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule.CountdownWidget;
 				PRODUCT_NAME = TripDataCountdownWidgetExtension;
 				SDKROOT = iphoneos;
@@ -798,14 +829,15 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = TripDataShareActionExtension/TripDataShareActionExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 72;
+				CURRENT_PROJECT_VERSION = 83;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				INFOPLIST_FILE = TripDataShareActionExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.2.4;
+				MARKETING_VERSION = 1.2.25;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule.ShareAction;
 				PRODUCT_NAME = TripDataShareActionExtension;
 				SDKROOT = iphoneos;
@@ -819,14 +851,15 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = TripDataShareActionExtension/TripDataShareActionExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 72;
+				CURRENT_PROJECT_VERSION = 83;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				INFOPLIST_FILE = TripDataShareActionExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.2.4;
+				MARKETING_VERSION = 1.2.25;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule.ShareAction;
 				PRODUCT_NAME = TripDataShareActionExtension;
 				SDKROOT = iphoneos;
@@ -870,10 +903,8 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -887,7 +918,6 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.9;
@@ -899,14 +929,15 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = TripDataCountdownWidgetExtension/TripDataCountdownWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 72;
+				CURRENT_PROJECT_VERSION = 83;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				INFOPLIST_FILE = TripDataCountdownWidgetExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.2.4;
+				MARKETING_VERSION = 1.2.25;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule.CountdownWidget;
 				PRODUCT_NAME = TripDataCountdownWidgetExtension;
 				SDKROOT = iphoneos;
@@ -920,6 +951,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -941,25 +973,35 @@
 				CODE_SIGN_ENTITLEMENTS = TripDataHub/TripDataHub.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 72;
+				CURRENT_PROJECT_VERSION = 83;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TripDataHub/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "TripData Hub";
 				INFOPLIST_KEY_CFBundleIconName = AppIcon;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
-				INFOPLIST_KEY_UIAppFonts = Resources/Fonts/MaterialIcons.ttf;
+				INFOPLIST_KEY_UIAppFonts = (
+					Resources/Fonts/MaterialIcons.ttf,
+				);
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = (
+					UIInterfaceOrientationPortrait,
+					UIInterfaceOrientationPortraitUpsideDown,
+					UIInterfaceOrientationLandscapeLeft,
+					UIInterfaceOrientationLandscapeRight,
+				);
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = (
+					UIInterfaceOrientationLandscapeLeft,
+					UIInterfaceOrientationLandscapeRight,
+				);
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.4;
+				MARKETING_VERSION = 1.2.25;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule;
 				PRODUCT_NAME = TripDataHub;
 				SDKROOT = iphoneos;
@@ -972,6 +1014,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1020,10 +1063,8 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -1044,7 +1085,6 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.9;
@@ -1059,25 +1099,35 @@
 				CODE_SIGN_ENTITLEMENTS = TripDataHub/TripDataHub.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 72;
+				CURRENT_PROJECT_VERSION = 83;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TripDataHub/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "TripData Hub";
 				INFOPLIST_KEY_CFBundleIconName = AppIcon;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
-				INFOPLIST_KEY_UIAppFonts = Resources/Fonts/MaterialIcons.ttf;
+				INFOPLIST_KEY_UIAppFonts = (
+					Resources/Fonts/MaterialIcons.ttf,
+				);
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = (
+					UIInterfaceOrientationPortrait,
+					UIInterfaceOrientationPortraitUpsideDown,
+					UIInterfaceOrientationLandscapeLeft,
+					UIInterfaceOrientationLandscapeRight,
+				);
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = (
+					UIInterfaceOrientationLandscapeLeft,
+					UIInterfaceOrientationLandscapeRight,
+				);
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.4;
+				MARKETING_VERSION = 1.2.25;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sfune.BidProSchedule;
 				PRODUCT_NAME = TripDataHub;
 				SDKROOT = iphoneos;
@@ -1090,6 +1140,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1108,6 +1159,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 54WZM2U9MK;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

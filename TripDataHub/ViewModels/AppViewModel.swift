@@ -235,6 +235,10 @@ final class AppViewModel: ObservableObject {
     @Published var friendCloudKitSyncMessage: String?
     @Published var isScheduleSharingEnabled = false
     @Published private(set) var isSyncingFriendCloudKit = false
+
+    /// Outcome of the last refresh, per normalized GEMS ID. Held here rather than on
+    /// `FriendConnection` so the persisted Codable shape is untouched and 1.2.4 caches still decode.
+    @Published private(set) var friendScheduleSyncOutcomes: [String: FriendScheduleSyncOutcome] = [:]
     @Published var isAdmin = false
     @Published var currentCloudKitRecordName: String?
     @Published var seniorityRecords: [PilotSeniorityRecord] = []
@@ -293,7 +297,40 @@ final class AppViewModel: ObservableObject {
     private(set) var crewAccessLegImportReferenceTimes: [String: Date] = [:]
     private var logTenExportBacklog: [LogTenExportBacklogRecord] = []
     private var logTenExportedFingerprints: [String: String] = [:]
+    /// Trip key → when this device decided the trip was deleted. Durable across launches.
     private var deletedCrewAccessTripIntents: [String: Date] = [:]
+
+    /// Trip keys for which a later fetch has *observed* every CloudKit import record carrying a
+    /// `deletedAt`. Membership means the deletion is done; absence means it is still outstanding and
+    /// `flushCrewAccessDeletionOutbox` re-sends it on the next sync.
+    ///
+    /// Deliberately set from an observation, never from a save returning success — a save can
+    /// succeed against one of several records for the same trip (legacy plus current file name), so
+    /// only a subsequent fetch proves the whole trip is tombstoned.
+    ///
+    /// Stored under its own key rather than by changing the shape of
+    /// `deleted_crewaccess_trip_intents_v2`, so 1.2.4 can still read that dictionary and this build
+    /// can still read 1.2.4's.
+    private var observedCrewAccessTombstoneKeys: Set<String> = []
+
+    /// Canonical fingerprints of every payload generation that was live in CloudKit when this
+    /// device's deletion was still outstanding.
+    ///
+    /// This is the clock-free discriminator the whole design rests on. `CrewAccessTripJSON` carries
+    /// `generatedAt`, re-stamped by the parser on every import, so the fingerprint of a payload is
+    /// an import generation id — even re-importing the identical PDF yields a new one. A live
+    /// record whose fingerprint is in this set is therefore the deleted generation coming back from
+    /// a device that never saw the tombstone; anything else is a genuine new import.
+    private var deletedCrewAccessPayloadFingerprints: [String: Set<String>] = [:]
+
+    /// Narrow purpose: the user explicitly re-imported a trip on *this* device after deleting it,
+    /// but before the tombstone was observed complete. In that window a new-looking fingerprint is
+    /// ambiguous, so this local, unambiguous signal is needed to accept it.
+    ///
+    /// It is **not** part of the normal receive path — a device receiving someone else's re-import
+    /// has no such flag, and decides on fingerprint generation alone. Written only by
+    /// `mergeImportedCrewAccessSchedule`; automatic paths never set it.
+    private var reimportedCrewAccessTripKeys: Set<String> = []
     private var isUploadingSharedSchedule = false
     private var needsSharedScheduleUpload = false
     private var pendingSharedScheduleUploadReason: String?
@@ -315,7 +352,14 @@ final class AppViewModel: ObservableObject {
     private var foregroundObserver: NSObjectProtocol?
     private var iCloudKVObserver: NSObjectProtocol?
     private var lastDeviceScheduleFetchAt: Date?
-    private var lastManualEventFetchAt: Date?
+    /// The `modificationDate` of the most recent manual-event CloudKit record this device accepted.
+    ///
+    /// **Server clock only.** It is compared against `ManualEventCloudKitSnapshot.updatedAt`, which
+    /// is the record's server-assigned modification date. Writing a local `Date()` here — as the
+    /// delete paths used to — makes this device ignore every remote update until the server clock
+    /// passes the local one, which silently breaks delete propagation in both directions. Local
+    /// edits and deletes must never touch it; they are durable in `manualEventStore` instead.
+    private var lastAcceptedManualEventRecordModifiedAt: Date?
     private var cachedDeviceID: String?
     private var isFetchingCrewAccessImports = false
     private var needsCrewAccessImportFetch = false
@@ -339,11 +383,26 @@ final class AppViewModel: ObservableObject {
     private let crewAccessLegImportReferenceTimesKey = "crewaccess_leg_import_reference_times_v1"
     private let deletedCrewAccessTripKeysKey = "deleted_crewaccess_trip_keys_v1"
     private let deletedCrewAccessTripIntentsKey = "deleted_crewaccess_trip_intents_v2"
+    private let observedCrewAccessTombstoneKeysKey = "crewaccess_tombstone_observed_v1"
+    private let deletedCrewAccessPayloadFingerprintsKey = "crewaccess_deleted_payload_fingerprints_v1"
+    private let reimportedCrewAccessTripKeysKey = "crewaccess_reimported_trip_keys_v1"
     private let logTenExportBacklogKey = "logten_export_backlog_v1"
     private let logTenExportedFingerprintsKey = "logten_exported_fingerprints_v1"
     private let seniorityFileName = "pilot_seniority_records_v1.json"
     private let legacySeniorityFileName = "pilot_roster_records_v1.json"
     private let localIdentityRecordNameKey = "local_identity_record_name_v1"
+    /// Where this device keeps its CrewAccess import JSON. Injectable so a test can stand up two
+    /// AppViewModels with genuinely separate local file state; production uses the shared default.
+    private let crewAccessImportsDirectory: URL?
+
+    /// On-device diagnostics ring buffer. Records only; never influences sync behaviour.
+    let diagnostics: SyncDiagnosticsLog
+
+    /// Backing store for per-device sync bookkeeping (watermarks, upload fingerprints, device id).
+    /// Injectable so a test can stand up two AppViewModels in one process that behave as two
+    /// genuinely separate devices; production always passes `.standard`.
+    private let syncStateDefaults: UserDefaults
+
     private let deviceScheduleUploadFingerprintKey = "device_schedule_last_upload_fingerprint_v1"
     private let deviceScheduleFetchAtKey = "device_schedule_last_fetch_at_v1"
     private let manualEventUploadFingerprintKey = "manual_event_last_upload_fingerprint_v1"
@@ -390,7 +449,10 @@ final class AppViewModel: ObservableObject {
         ),
         tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared,
         keychainService: KeychainServiceProtocol = KeychainService(),
-        manualEventStore: ManualEventStoring = ManualEventStore()
+        manualEventStore: ManualEventStoring = ManualEventStore(),
+        syncStateDefaults: UserDefaults = .standard,
+        crewAccessImportsDirectory: URL? = AppViewModel.defaultCrewAccessImportsDirectory(),
+        diagnostics: SyncDiagnosticsLog? = nil
     ) {
         self.syncService = syncService
         self.authService = authService
@@ -407,6 +469,10 @@ final class AppViewModel: ObservableObject {
         self.tzResolver = tzResolver
         self.keychainService = keychainService
         self.manualEventStore = manualEventStore
+        self.syncStateDefaults = syncStateDefaults
+        self.crewAccessImportsDirectory = crewAccessImportsDirectory
+        let resolvedDiagnostics = diagnostics ?? SyncDiagnosticsLog.shared
+        self.diagnostics = resolvedDiagnostics
         self.externalOpenCoordinator = ExternalOpenImportCoordinator.shared
         let loadedAdminPolicy = Self.loadAdminPolicy()
         self.adminPolicy = loadedAdminPolicy
@@ -427,13 +493,26 @@ final class AppViewModel: ObservableObject {
             key: crewAccessLegImportReferenceTimesKey
         )
         self.deletedCrewAccessTripIntents = Self.loadDeletedCrewAccessTripIntents(
-            from: UserDefaults.standard,
+            from: syncStateDefaults,
             key: deletedCrewAccessTripIntentsKey,
             legacyKey: deletedCrewAccessTripKeysKey
         )
+        // Absent on upgrade from 1.2.4, so every pre-existing deletion intent starts unobserved and
+        // gets re-tombstoned on the first sync. That heals trips those builds deleted locally while
+        // still holding an intent; it cannot heal ones whose intent 1.2.4 already cleared.
+        self.observedCrewAccessTombstoneKeys = Set(
+            syncStateDefaults.stringArray(forKey: observedCrewAccessTombstoneKeysKey) ?? []
+        )
+        let storedDeletedFingerprints = syncStateDefaults
+            .dictionary(forKey: deletedCrewAccessPayloadFingerprintsKey) ?? [:]
+        self.deletedCrewAccessPayloadFingerprints = storedDeletedFingerprints
+            .compactMapValues { ($0 as? [String]).map(Set.init) }
+        self.reimportedCrewAccessTripKeys = Set(
+            syncStateDefaults.stringArray(forKey: reimportedCrewAccessTripKeysKey) ?? []
+        )
         Self.saveDeletedCrewAccessTripIntents(
             self.deletedCrewAccessTripIntents,
-            to: UserDefaults.standard,
+            to: syncStateDefaults,
             key: deletedCrewAccessTripIntentsKey,
             legacyKey: deletedCrewAccessTripKeysKey
         )
@@ -469,11 +548,11 @@ final class AppViewModel: ObservableObject {
         }
         backfillCrewAccessLegImportReferenceTimesIfNeeded()
         pruneCrewAccessLegImportReferenceTimes()
-        self.lastDeviceScheduleUploadFingerprint = UserDefaults.standard.string(forKey: deviceScheduleUploadFingerprintKey)
-        self.lastDeviceScheduleFetchAt = UserDefaults.standard.object(forKey: deviceScheduleFetchAtKey) as? Date
-        self.lastManualEventUploadFingerprint = UserDefaults.standard.string(forKey: manualEventUploadFingerprintKey)
-        self.lastManualEventFetchAt = UserDefaults.standard.object(forKey: manualEventFetchAtKey) as? Date
-        self.cachedDeviceID = UserDefaults.standard.string(forKey: deviceIDKey)
+        self.lastDeviceScheduleUploadFingerprint = syncStateDefaults.string(forKey: deviceScheduleUploadFingerprintKey)
+        self.lastDeviceScheduleFetchAt = syncStateDefaults.object(forKey: deviceScheduleFetchAtKey) as? Date
+        self.lastManualEventUploadFingerprint = syncStateDefaults.string(forKey: manualEventUploadFingerprintKey)
+        self.lastAcceptedManualEventRecordModifiedAt = syncStateDefaults.object(forKey: manualEventFetchAtKey) as? Date
+        self.cachedDeviceID = syncStateDefaults.string(forKey: deviceIDKey)
         if !useCloudKitIdentity {
             self.currentCloudKitRecordName = localIdentityRecordName()
         }
@@ -515,7 +594,8 @@ final class AppViewModel: ObservableObject {
             object: nil,
             queue: nil
         ) { [weak self] _ in
-            Task {
+            Task { @MainActor in
+                self?.diagnostics.record(.appForegrounded, [:])
                 await self?.recoverCloudSyncAfterIdentityAvailable(reason: "foreground")
                 await self?.syncProfileWithCloudKit()
             }
@@ -533,6 +613,19 @@ final class AppViewModel: ObservableObject {
 #if DEBUG
         logNonFatal("Cache restore (v2): crew=\(cachedCrewAccessSchedules.count) bidpro=\(cachedBidproSchedules.count)")
 #endif
+        self.diagnostics.record(.appLaunched, [
+            "localPersonal": String(self.manualPersonalEvents.count),
+            "localOperational": String(self.manualOperationalEvents.count),
+            "localTombstones": String(self.manualEventTombstones.count),
+            "hasVerifiedIdentity": String(self.verifiedIdentity != nil),
+            "hasRecordName": String(self.currentCloudKitRecordName != nil),
+            "storedFingerprint": SyncDiagnosticsLog.shortFingerprint(self.lastManualEventUploadFingerprint)
+        ])
+        self.diagnostics.record(.localSnapshotLoaded, [
+            "personal": String(self.manualPersonalEvents.count),
+            "operational": String(self.manualOperationalEvents.count),
+            "tombstones": String(self.manualEventTombstones.count)
+        ])
         logger.info("[VM] init vm=\(String(describing: ObjectIdentifier(self)), privacy: .public)")
     }
 
@@ -572,7 +665,12 @@ final class AppViewModel: ObservableObject {
         try upsertManualOperationalEvent(event)
     }
 
-    private func upsertManualOperationalEvent(_ event: ManualOperationalEvent) throws {
+    private func upsertManualOperationalEvent(_ rawEvent: ManualOperationalEvent) throws {
+        // Dropping the tombstone locally is not enough: other devices still hold it, and the merge
+        // would discard this event again unless it is newer than that tombstone.
+        let event = try rawEvent.withUpdatedAt(
+            bumpedUpdatedAtIfTombstoned(id: rawEvent.id, updatedAt: rawEvent.updatedAt)
+        )
         var snapshot = ManualEventStoreSnapshot(
             operationalEvents: manualOperationalEvents,
             personalEvents: manualPersonalEvents,
@@ -587,22 +685,33 @@ final class AppViewModel: ObservableObject {
         try manualEventStore.save(snapshot)
         manualOperationalEvents = snapshot.operationalEvents
         manualEventTombstones = snapshot.tombstones
+        diagnostics.record(.manualEventSaved, [
+            "layer": "operational",
+            "event": SyncDiagnosticsLog.tag(event.id),
+            "operational": String(snapshot.operationalEvents.count),
+            "tombstones": String(snapshot.tombstones.count)
+        ])
         Task { [weak self] in await self?.uploadManualEventsIfNeeded(reason: "manual operational event saved") }
     }
 
     func deleteManualOperationalEvent(id: UUID) throws {
-        let deletedAt = Date()
         var snapshot = ManualEventStoreSnapshot(
             operationalEvents: manualOperationalEvents,
             personalEvents: manualPersonalEvents,
-            tombstones: replacingTombstone(id: id, deletedAt: deletedAt)
+            tombstones: replacingTombstone(id: id, deletedAt: Date())
         )
         snapshot.operationalEvents.removeAll { $0.id == id }
+        // Same contract as deleteManualPersonalEvent: persist the tombstone, leave the CloudKit
+        // watermark alone.
         try manualEventStore.save(snapshot)
         manualOperationalEvents = snapshot.operationalEvents
         manualEventTombstones = snapshot.tombstones
-        lastManualEventFetchAt = deletedAt
-        UserDefaults.standard.set(deletedAt, forKey: manualEventFetchAtKey)
+        diagnostics.record(.manualEventDeleted, [
+            "layer": "operational",
+            "event": SyncDiagnosticsLog.tag(id),
+            "operational": String(snapshot.operationalEvents.count),
+            "tombstones": String(snapshot.tombstones.count)
+        ])
         Task { [weak self] in await self?.uploadManualEventsIfNeeded(reason: "manual operational event deleted") }
     }
 
@@ -614,7 +723,12 @@ final class AppViewModel: ObservableObject {
         try upsertManualPersonalEvent(event)
     }
 
-    private func upsertManualPersonalEvent(_ event: ManualPersonalEvent) throws {
+    private func upsertManualPersonalEvent(_ rawEvent: ManualPersonalEvent) throws {
+        // See upsertManualOperationalEvent: the re-created event must outrank any tombstone that
+        // other devices still hold for this id.
+        let event = try rawEvent.withUpdatedAt(
+            bumpedUpdatedAtIfTombstoned(id: rawEvent.id, updatedAt: rawEvent.updatedAt)
+        )
         var snapshot = ManualEventStoreSnapshot(
             operationalEvents: manualOperationalEvents,
             personalEvents: manualPersonalEvents,
@@ -629,29 +743,80 @@ final class AppViewModel: ObservableObject {
         try manualEventStore.save(snapshot)
         manualPersonalEvents = snapshot.personalEvents
         manualEventTombstones = snapshot.tombstones
+        diagnostics.record(.manualEventSaved, [
+            "layer": "personal",
+            "event": SyncDiagnosticsLog.tag(event.id),
+            "personal": String(snapshot.personalEvents.count),
+            "tombstones": String(snapshot.tombstones.count)
+        ])
         Task { [weak self] in await self?.uploadManualEventsIfNeeded(reason: "manual personal event saved") }
     }
 
     func deleteManualPersonalEvent(id: UUID) throws {
-        let deletedAt = Date()
         var snapshot = ManualEventStoreSnapshot(
             operationalEvents: manualOperationalEvents,
             personalEvents: manualPersonalEvents,
-            tombstones: replacingTombstone(id: id, deletedAt: deletedAt)
+            tombstones: replacingTombstone(id: id, deletedAt: Date())
         )
         snapshot.personalEvents.removeAll { $0.id == id }
+        // The tombstone lives in the persisted snapshot, so the delete survives termination and
+        // is replayed by the next upload. Deliberately does NOT touch
+        // lastAcceptedManualEventRecordModifiedAt — see the note on that property.
         try manualEventStore.save(snapshot)
         manualPersonalEvents = snapshot.personalEvents
         manualEventTombstones = snapshot.tombstones
-        lastManualEventFetchAt = deletedAt
-        UserDefaults.standard.set(deletedAt, forKey: manualEventFetchAtKey)
+        diagnostics.record(.manualEventDeleted, [
+            "layer": "personal",
+            "event": SyncDiagnosticsLog.tag(id),
+            "personal": String(snapshot.personalEvents.count),
+            "tombstones": String(snapshot.tombstones.count)
+        ])
         Task { [weak self] in await self?.uploadManualEventsIfNeeded(reason: "manual personal event deleted") }
     }
 
     private func replacingTombstone(id: UUID, deletedAt: Date) -> [ManualEventTombstone] {
         var tombstones = manualEventTombstones.filter { $0.id != id }
-        tombstones.append(ManualEventTombstone(id: id, deletedAt: deletedAt))
+        tombstones.append(ManualEventTombstone(id: id, deletedAt: tombstoneDate(for: id, notBefore: deletedAt)))
         return tombstones
+    }
+
+    /// Picks a `deletedAt` that beats the copy of the event this device can see.
+    ///
+    /// `mergeManualEventSnapshots` keeps an event when `tombstone.deletedAt < event.updatedAt`.
+    /// Both timestamps are client clocks, so a device running behind could otherwise produce a
+    /// tombstone that loses to the very event it is deleting. Anchoring just past the local copy
+    /// fixes that case.
+    ///
+    /// **Limits.** This does not make deletion safe against arbitrary clock skew, and the scheme
+    /// does not converge on CloudKit's server ordering:
+    /// - The tombstone only outranks the revision of the event this device has. A device holding a
+    ///   *newer* revision it has not yet published can still win the merge.
+    /// - Deleting an event that a badly future-dated device created pushes the tombstone into the
+    ///   future too, so a normally-clocked device cannot re-create that id until real time catches
+    ///   up. `bumpedUpdatedAtIfTombstoned(...)` covers re-creation made through this app, but not a
+    ///   re-creation arriving from another device that has not seen the tombstone.
+    ///
+    /// Closing these properly needs a server-assigned timestamp or a logical version counter per
+    /// event id, which is a `TDHManualEventSnapshot` schema change — deliberately out of scope here.
+    private func tombstoneDate(for id: UUID, notBefore proposed: Date) -> Date {
+        let existingUpdatedAt = manualOperationalEvents.first { $0.id == id }?.updatedAt
+            ?? manualPersonalEvents.first { $0.id == id }?.updatedAt
+        guard let existingUpdatedAt, existingUpdatedAt >= proposed else { return proposed }
+        return existingUpdatedAt.addingTimeInterval(0.001)
+    }
+
+    /// Re-creating a deleted id must win over the tombstone that removed it.
+    ///
+    /// The merge drops an event whose `updatedAt` is not newer than a tombstone for the same id, so
+    /// re-adding an event with a plain `Date()` silently fails whenever the tombstone was anchored
+    /// into the future by `tombstoneDate(for:notBefore:)`. Nudging past the tombstone keeps
+    /// re-creation working within this app.
+    private func bumpedUpdatedAtIfTombstoned(id: UUID, updatedAt: Date) -> Date {
+        guard let tombstone = manualEventTombstones.first(where: { $0.id == id }),
+              tombstone.deletedAt >= updatedAt else {
+            return updatedAt
+        }
+        return tombstone.deletedAt.addingTimeInterval(0.001)
     }
 
     func handleIncomingAppDeepLink(_ url: URL) {
@@ -1109,6 +1274,38 @@ final class AppViewModel: ObservableObject {
         await friendLinkNotificationService.notifyFriendRequestReceived(friend)
     }
 
+    /// The dot shown next to a friend's name. The single decision point shared by the iPhone and
+    /// iPad friend lists — neither view is allowed to derive this itself.
+    ///
+    /// A friend whose account deletion has been confirmed is red. A friend we could not fetch is
+    /// red. A friend fetched cleanly is green or amber depending only on whether they have
+    /// anything operating tomorrow or later — an empty-but-fetched schedule is amber, never red.
+    /// Seeds per-friend outcomes without going through a refresh. Used by tests to exercise each
+    /// Green/Amber/Red branch directly; production only ever sets this from `refreshConnections`.
+    func applyFriendScheduleSyncOutcomesForTesting(_ outcomes: [String: FriendScheduleSyncOutcome]) {
+        friendScheduleSyncOutcomes = Dictionary(
+            uniqueKeysWithValues: outcomes.map { (GEMSIDNormalizer.normalize($0.key), $0.value) }
+        )
+    }
+
+    /// Deliberately does **not** branch on `friend.status`. Both friend lists iterate
+    /// `acceptedFriendConnections`, which filters to `.accepted`, so a cancelled or unaccepted
+    /// connection has already been removed from the list and any red condition keyed on status
+    /// would be unreachable. The reachable red is a per-friend fetch failure: `refreshConnections`
+    /// returns that friend's cached connection (still accepted, so the row stays on screen) plus a
+    /// `.failed` outcome, which is what turns the dot red.
+    func scheduleSyncHealth(for friend: FriendConnection, now: Date = Date()) -> FriendScheduleSyncHealth {
+        let key = GEMSIDNormalizer.normalize(friend.employeeID)
+        // No recorded outcome means this friend has not been through a refresh in this session;
+        // treat the cached data as trustworthy rather than flagging a failure that did not happen.
+        let outcome = friendScheduleSyncOutcomes[key] ?? .succeeded
+        return FriendScheduleHealthEvaluator.health(
+            outcome: outcome,
+            schedules: friend.sharedSchedules,
+            now: now
+        )
+    }
+
     func handleSchedulesChangedForSharing() {
         guard !AppEnvironment.isAppStoreReviewMode else { return }
         guard !isAppReviewMockVerifiedIdentity else { return }
@@ -1203,12 +1400,15 @@ final class AppViewModel: ObservableObject {
             friendCloudKitSyncMessage = "Verify GEMS and iCloud before sharing schedules."
             return
         }
+        let importsDirectory = crewAccessImportsDirectory
         let shareableSchedules = schedules.isEmpty ? crewAccessSchedules : schedules
-        let crewAccessTrips = await Self.loadCrewAccessTripJSONPayloadsFromImportFiles()
+        let crewAccessTrips = await Self.loadCrewAccessTripJSONPayloadsFromImportFiles(
+            directory: crewAccessImportsDirectory
+        )
         // Enrich schedules with hotel names from local JSON before uploading —
         // friends see hotel names without needing to re-import PDFs.
         let enrichedSchedules = await Task.detached(priority: .utility) {
-            Self.enrichSchedulesWithHotelNames(shareableSchedules)
+            Self.enrichSchedulesWithHotelNames(shareableSchedules, directory: importsDirectory)
         }.value
 
         async let sharedScheduleUpload: Void = friendScheduleCloudKitService.uploadSchedule(
@@ -1251,12 +1451,13 @@ final class AppViewModel: ObservableObject {
             let previouslyPending = Set(friendConnections.filter { $0.status == .pending }.map(\.employeeID))
             let previouslyIncoming = Set(friendConnections.filter { $0.isIncomingRequest }.map(\.employeeID))
             let currentConnections = currentFriendConnections(friendConnections)
-            let refreshedConnections = try await friendScheduleCloudKitService.refreshConnections(
+            let refreshResult = try await friendScheduleCloudKitService.refreshConnections(
                 myGEMSID: verifiedIdentity.gemsID,
                 connections: currentConnections,
                 friendResetAt: friendConnectionsResetAt()
             )
-            let nextConnections = currentFriendConnections(refreshedConnections)
+            friendScheduleSyncOutcomes = refreshResult.outcomes
+            let nextConnections = currentFriendConnections(refreshResult.connections)
             if nextConnections != friendConnections {
                 friendConnections = nextConnections
             }
@@ -1339,8 +1540,7 @@ final class AppViewModel: ObservableObject {
 
         let schedules = crewAccessSchedules
         // Upload even if empty: an empty snapshot signals "all trips deleted" to other devices.
-        guard let data = try? JSONEncoder().encode(schedules) else { return false }
-        let fingerprint = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        guard let fingerprint = Self.canonicalFingerprint(schedules) else { return false }
         guard fingerprint != lastDeviceScheduleUploadFingerprint else { return true }
 
         let myDeviceID = getOrCreateDeviceID()
@@ -1355,7 +1555,7 @@ final class AppViewModel: ObservableObject {
                 source: source
             )
             lastDeviceScheduleUploadFingerprint = fingerprint
-            UserDefaults.standard.set(fingerprint, forKey: deviceScheduleUploadFingerprintKey)
+            syncStateDefaults.set(fingerprint, forKey: deviceScheduleUploadFingerprintKey)
             deviceSyncStatusMessage = "Device schedule synced."
             logNonFatal("Device schedule uploaded: \(reason) tripCount=\(schedules.count)")
             return true
@@ -1422,7 +1622,7 @@ final class AppViewModel: ObservableObject {
             schedules = mergeAndSortSchedules(crew: remoteSchedules, bidpro: bidproSchedules)
             handleSchedulesChangedForSharing()
             lastDeviceScheduleFetchAt = snapshot.updatedAt
-            UserDefaults.standard.set(snapshot.updatedAt, forKey: deviceScheduleFetchAtKey)
+            syncStateDefaults.set(snapshot.updatedAt, forKey: deviceScheduleFetchAtKey)
 
             await rescheduleNotificationsIfAuthorized()
             deviceSyncStatusMessage = "Schedule updated from device sync."
@@ -1435,10 +1635,234 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    /// Re-sends every deletion this device has decided on but not yet seen tombstoned in CloudKit.
+    ///
+    /// Replaces the old behaviour of tombstoning only the files that happened to be deleted from
+    /// this device's Documents directory. That derived the CloudKit work from local disk state, so
+    /// a trip whose JSON was already pruned by the retention policy, or was never downloaded here,
+    /// produced no tombstone at all — and the caller still reported success. Matching on trip key
+    /// against the records actually in CloudKit covers those cases, and covers a trip stored under
+    /// both a legacy and a current file name (every matching record is tombstoned, not just one).
+    ///
+    /// A key is only marked confirmed once no live record for it remains, so a failed tombstone
+    /// upload, a background/terminated app, or an offline device all simply retry on the next sync.
+    @discardableResult
+    private func flushCrewAccessDeletionOutbox(
+        records: [CrewAccessImportCloudKitRecord],
+        domicile: String
+    ) async -> Bool {
+        guard !deletedCrewAccessTripIntents.isEmpty else { return true }
+
+        // Group this account's records by trip key, keeping only keys we have a deletion for.
+        var recordsByTripKey: [String: [CrewAccessImportCloudKitRecord]] = [:]
+        for record in records {
+            guard let tripKey = Self.crewAccessTripKey(fromCloudKitRecord: record, domicile: domicile),
+                  deletedCrewAccessTripIntents[tripKey] != nil else { continue }
+            recordsByTripKey[tripKey, default: []].append(record)
+        }
+
+        var allSucceeded = true
+
+        for (tripKey, tripRecords) in recordsByTripKey {
+            let live = tripRecords.filter { $0.deletedAt == nil }
+            let hasObservedTombstone = observedCrewAccessTombstoneKeys.contains(tripKey)
+
+            if !hasObservedTombstone {
+                // State 1 — deletion not yet observed as complete.
+                //
+                // Everything live right now belongs to the generation being deleted, including
+                // legacy or duplicate file names this device never held locally. Recording their
+                // fingerprints is what lets state 2 recognise them later as stale re-uploads. A
+                // fingerprint that merely looks new is NOT treated as a re-import here: at this
+                // point the deletion has not finished propagating and "new-looking" is ambiguous.
+                //
+                // The one exception is an explicit re-import performed on *this* device between
+                // the delete and the first observation — that intent is unambiguous and local.
+                let explicitLocalReimport = reimportedCrewAccessTripKeys.contains(tripKey)
+                if explicitLocalReimport,
+                   live.contains(where: { record in
+                       guard let fingerprint = Self.canonicalPayloadFingerprint(record.jsonData) else { return false }
+                       return !(deletedCrewAccessPayloadFingerprints[tripKey]?.contains(fingerprint) ?? false)
+                   }) {
+                    cancelCrewAccessDeletion(tripKey: tripKey, reason: "explicit re-import on this device")
+                    continue
+                }
+
+                for record in live {
+                    // A payload that will not decode is never assumed to be a new generation;
+                    // it stays a deletion target.
+                    if let fingerprint = Self.canonicalPayloadFingerprint(record.jsonData) {
+                        deletedCrewAccessPayloadFingerprints[tripKey, default: []].insert(fingerprint)
+                    }
+                }
+
+                if live.isEmpty {
+                    observedCrewAccessTombstoneKeys.insert(tripKey)
+                    logNonFatal("CrewAccess deletion observed complete: \(tripKey)")
+                } else {
+                    // Every record for the trip must be tombstoned; a trip can exist under both a
+                    // legacy and a current file name and tombstoning one leaves the other to
+                    // resurrect it. Observation is deferred to the next fetch.
+                    let tombstoned = await tombstoneCrewAccessImportFiles(fileNames: live.map(\.fileName))
+                    if tombstoned {
+                        logNonFatal("CrewAccess deletion outbox tombstoned \(live.count) record(s) for \(tripKey)")
+                    } else {
+                        allSucceeded = false
+                        logNonFatal("CrewAccess deletion outbox retry pending for \(tripKey)")
+                    }
+                }
+                continue
+            }
+
+            // State 2 — the deletion was observed complete, so any live record is new information.
+            // Decided purely by payload generation: no device clock, no record.updatedAt, no mtime.
+            guard !live.isEmpty else { continue }
+            let deletedGenerations = deletedCrewAccessPayloadFingerprints[tripKey] ?? []
+            let staleRecords = live.filter { record in
+                guard let fingerprint = Self.canonicalPayloadFingerprint(record.jsonData) else {
+                    return true // undecodable → safe side → still a deletion target
+                }
+                return deletedGenerations.contains(fingerprint)
+            }
+
+            if staleRecords.count == live.count {
+                let tombstoned = await tombstoneCrewAccessImportFiles(fileNames: staleRecords.map(\.fileName))
+                if !tombstoned { allSucceeded = false }
+                logNonFatal("CrewAccess stale re-upload re-tombstoned: \(tripKey)")
+            } else {
+                // At least one record carries a generation that was never deleted — a genuine new
+                // import, wherever it came from. `generatedAt` is re-stamped by the parser on every
+                // import, so even the same PDF produces a new fingerprint.
+                cancelCrewAccessDeletion(tripKey: tripKey, reason: "new import generation received")
+            }
+        }
+
+        saveDeletedCrewAccessTripIntents()
+        saveCrewAccessDeletionOutboxState()
+        return allSucceeded
+    }
+
+    /// Records that the user explicitly confirmed an import for these trips.
+    ///
+    /// The **only** path allowed to cancel a deletion. Automatic sync, launch recovery and local
+    /// file scans must never call it. The re-import outbox is persisted, so a failed upload of the
+    /// new generation is retried on the next sync rather than being forgotten.
+    func recordExplicitCrewAccessReimport(tripKeys: Set<String>) {
+        guard !tripKeys.isEmpty else { return }
+        for tripKey in tripKeys {
+            deletedCrewAccessTripIntents.removeValue(forKey: tripKey)
+            reimportedCrewAccessTripKeys.insert(tripKey)
+        }
+        saveDeletedCrewAccessTripIntents()
+        syncStateDefaults.set(Array(reimportedCrewAccessTripKeys), forKey: reimportedCrewAccessTripKeysKey)
+    }
+
+    /// Trip key for a CrewAccess trip id and information date, using this device's domicile.
+    /// Exposed so callers (and tests) can address the outbox without duplicating the key format.
+    func crewAccessTripKey(tripID: String, tripInformationDate: String?) -> String? {
+        Self.crewAccessTripKey(
+            tripID: tripID,
+            tripInformationDate: tripInformationDate,
+            fallbackDate: nil
+        )
+    }
+
+    private func cancelCrewAccessDeletion(tripKey: String, reason: String) {
+        deletedCrewAccessTripIntents.removeValue(forKey: tripKey)
+        deletedCrewAccessPayloadFingerprints.removeValue(forKey: tripKey)
+        observedCrewAccessTombstoneKeys.remove(tripKey)
+        reimportedCrewAccessTripKeys.remove(tripKey)
+        logNonFatal("CrewAccess deletion cancelled (\(reason)): \(tripKey)")
+    }
+
+    /// Clock-free identity for an import payload, used to tell one generation of a trip from
+    /// another. Uses the shared canonical encoder so the value is stable across launches.
+    private nonisolated static func canonicalPayloadFingerprint(_ jsonData: Data) -> String? {
+        guard let payload = try? JSONDecoder().decode(CrewAccessTripJSON.self, from: jsonData) else {
+            return nil
+        }
+        return canonicalFingerprint(payload)
+    }
+
+    /// Fingerprints of specific import files, keyed by trip key. Read before a delete removes them.
+    private nonisolated static func crewAccessPayloadFingerprints(at urls: [URL]) -> [String: Set<String>] {
+        var result: [String: Set<String>] = [:]
+        for url in urls {
+            guard let data = try? Data(contentsOf: url),
+                  let payload = try? JSONDecoder().decode(CrewAccessTripJSON.self, from: data),
+                  let tripKey = crewAccessTripKey(
+                    tripID: payload.tripId,
+                    tripInformationDate: payload.tripInformationDate,
+                    fallbackDate: nil
+                  ),
+                  let fingerprint = canonicalFingerprint(payload) else { continue }
+            result[tripKey, default: []].insert(fingerprint)
+        }
+        return result
+    }
+
+    /// Fingerprints of the local import files currently representing each trip key. Read before a
+    /// delete removes them.
+    private nonisolated static func crewAccessPayloadFingerprintsByTripKey(
+        for tripKeys: [String],
+        directory: URL?
+    ) -> [String: Set<String>] {
+        guard !tripKeys.isEmpty else { return [:] }
+        let wanted = Set(tripKeys)
+        var result: [String: Set<String>] = [:]
+        for (payload, _) in loadCrewAccessTripJSONPayloadsFromImportFilesSync(directory: directory) {
+            guard let tripKey = crewAccessTripKey(
+                tripID: payload.tripId,
+                tripInformationDate: payload.tripInformationDate,
+                fallbackDate: nil
+            ), wanted.contains(tripKey) else { continue }
+            if let fingerprint = canonicalFingerprint(payload) {
+                result[tripKey, default: []].insert(fingerprint)
+            }
+        }
+        return result
+    }
+
+    private func saveCrewAccessDeletionOutboxState() {
+        // The observation set and the deleted-payload fingerprints annotate deletion intents, so
+        // they are pruned with them. The re-import outbox is a *separate* outbox — it exists
+        // precisely for keys whose deletion intent has been cleared — and must never be pruned
+        // against the deletion outbox.
+        let liveKeys = Set(deletedCrewAccessTripIntents.keys)
+        observedCrewAccessTombstoneKeys.formIntersection(liveKeys)
+        deletedCrewAccessPayloadFingerprints = deletedCrewAccessPayloadFingerprints
+            .filter { liveKeys.contains($0.key) }
+
+        syncStateDefaults.set(Array(observedCrewAccessTombstoneKeys), forKey: observedCrewAccessTombstoneKeysKey)
+        syncStateDefaults.set(
+            deletedCrewAccessPayloadFingerprints.mapValues(Array.init),
+            forKey: deletedCrewAccessPayloadFingerprintsKey
+        )
+        syncStateDefaults.set(Array(reimportedCrewAccessTripKeys), forKey: reimportedCrewAccessTripKeysKey)
+    }
+
+
+    /// Records a deletion in the outbox. Every delete entry point funnels through here so the same
+    /// convergence guarantee applies whether the user deleted from the trip list or the file
+    /// manager screen.
+    private func enqueueCrewAccessDeletion(tripKeys: [String], deletedAt: Date, payloads: [String: Set<String>]) {
+        guard !tripKeys.isEmpty else { return }
+        for tripKey in tripKeys {
+            deletedCrewAccessTripIntents[tripKey] = deletedAt
+            observedCrewAccessTombstoneKeys.remove(tripKey)
+            reimportedCrewAccessTripKeys.remove(tripKey)
+            if let fingerprints = payloads[tripKey] {
+                deletedCrewAccessPayloadFingerprints[tripKey, default: []].formUnion(fingerprints)
+            }
+        }
+        saveDeletedCrewAccessTripIntents()
+        saveCrewAccessDeletionOutboxState()
+    }
+
     private func saveDeletedCrewAccessTripIntents() {
         Self.saveDeletedCrewAccessTripIntents(
             deletedCrewAccessTripIntents,
-            to: UserDefaults.standard,
+            to: syncStateDefaults,
             key: deletedCrewAccessTripIntentsKey,
             legacyKey: deletedCrewAccessTripKeysKey
         )
@@ -1450,6 +1874,8 @@ final class AppViewModel: ObservableObject {
         if isUploadingManualEvents {
             needsManualEventUpload = true
             pendingManualEventUploadReason = reason
+            diagnostics.record(.uploadAlreadyActive, ["reason": reason])
+            diagnostics.record(.uploadCoalesced, ["reason": reason])
             logNonFatal("Manual event upload coalesced: \(reason)")
             return
         }
@@ -1476,32 +1902,101 @@ final class AppViewModel: ObservableObject {
     }
 
     private func performManualEventUpload(reason: String) async {
+        // Diagnostics only — the guards below are unchanged. Each early exit gets its own code so a
+        // silent return can be told apart from an attempted upload on a device we cannot attach to.
+        let snapshotForDiagnostics = currentManualEventSnapshot()
+        diagnostics.record(.uploadRequested, [
+            "reason": reason,
+            "personal": String(snapshotForDiagnostics.personalEvents.count),
+            "operational": String(snapshotForDiagnostics.operationalEvents.count),
+            "tombstones": String(snapshotForDiagnostics.tombstones.count),
+            "identityVerified": String(isIdentityVerified),
+            "hasVerifiedIdentity": String(verifiedIdentity != nil),
+            "hasRecordName": String(currentCloudKitRecordName != nil)
+        ])
+        if verifiedIdentity == nil {
+            diagnostics.record(.verifiedIdentityMissing, ["reason": reason])
+        }
+        if currentCloudKitRecordName == nil {
+            diagnostics.record(.recordNameMissing, ["reason": reason])
+        }
+        if !isIdentityVerified {
+            diagnostics.record(.identityNotVerified, [
+                "reason": reason,
+                "hasVerifiedIdentity": String(verifiedIdentity != nil),
+                "hasRecordName": String(currentCloudKitRecordName != nil)
+            ])
+        }
+
         guard isIdentityVerified,
               let verifiedIdentity,
               let currentCloudKitRecordName else { return }
 
         let snapshot = currentManualEventSnapshot()
-        guard let data = try? JSONEncoder().encode(snapshot) else { return }
-        let fingerprint = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        guard let fingerprint = Self.canonicalFingerprint(snapshot) else { return }
+        if fingerprint == lastManualEventUploadFingerprint {
+            diagnostics.record(.fingerprintUnchanged, [
+                "reason": reason,
+                "current": SyncDiagnosticsLog.shortFingerprint(fingerprint),
+                "stored": SyncDiagnosticsLog.shortFingerprint(lastManualEventUploadFingerprint),
+                "personal": String(snapshot.personalEvents.count),
+                "tombstones": String(snapshot.tombstones.count)
+            ])
+        }
         guard fingerprint != lastManualEventUploadFingerprint else { return }
+
+        diagnostics.record(.uploadStarted, [
+            "reason": reason,
+            "gems": SyncDiagnosticsLog.tag(verifiedIdentity.gemsID),
+            "fingerprint": SyncDiagnosticsLog.shortFingerprint(fingerprint),
+            "personal": String(snapshot.personalEvents.count),
+            "tombstones": String(snapshot.tombstones.count)
+        ])
 
         let myDeviceID = getOrCreateDeviceID()
         let source: DeviceScheduleSyncSource = UIDevice.current.userInterfaceIdiom == .pad ? .ipad : .iphone
 
         do {
-            try await manualEventCloudKitService.uploadManualEvents(
+            let published = try await manualEventCloudKitService.uploadManualEvents(
                 gemsID: verifiedIdentity.gemsID,
                 cloudKitRecordName: currentCloudKitRecordName,
                 snapshot: snapshot,
                 deviceID: myDeviceID,
                 source: source
             )
-            lastManualEventUploadFingerprint = fingerprint
-            UserDefaults.standard.set(fingerprint, forKey: manualEventUploadFingerprintKey)
+
+            // The service merges any concurrent write from another device into what it saves, so
+            // `published` — not `snapshot` — is the state that now exists in CloudKit. Adopt it
+            // locally and fingerprint that, otherwise the fingerprint would mark a pre-merge
+            // snapshot as published and suppress the upload that would have re-sent our tombstones.
+            if published != snapshot {
+                try manualEventStore.save(published)
+                manualOperationalEvents = published.operationalEvents
+                manualPersonalEvents = published.personalEvents
+                manualEventTombstones = published.tombstones
+                logNonFatal("Manual events merged with concurrent remote write during upload: \(reason)")
+            }
+            let publishedFingerprint = Self.canonicalFingerprint(published) ?? fingerprint
+            lastManualEventUploadFingerprint = publishedFingerprint
+            syncStateDefaults.set(publishedFingerprint, forKey: manualEventUploadFingerprintKey)
             deviceSyncStatusMessage = "Manual events synced."
-            logNonFatal("Manual events uploaded: \(reason) operational=\(snapshot.operationalEvents.count) personal=\(snapshot.personalEvents.count) tombstones=\(snapshot.tombstones.count)")
+            diagnostics.record(.uploadSucceeded, [
+                "reason": reason,
+                "personal": String(published.personalEvents.count),
+                "operational": String(published.operationalEvents.count),
+                "tombstones": String(published.tombstones.count),
+                "mergedRemote": String(published != snapshot),
+                "fingerprint": SyncDiagnosticsLog.shortFingerprint(publishedFingerprint)
+            ])
+            logNonFatal("Manual events uploaded: \(reason) operational=\(published.operationalEvents.count) personal=\(published.personalEvents.count) tombstones=\(published.tombstones.count)")
         } catch {
+            // Leave the fingerprint untouched so the next sync retries this exact state.
             deviceSyncStatusMessage = "Manual event sync upload failed."
+            diagnostics.record(.uploadFailed, [
+                "reason": reason,
+                "error": Self.diagnosticErrorCode(error),
+                "fingerprintUnchanged": SyncDiagnosticsLog.shortFingerprint(lastManualEventUploadFingerprint)
+            ])
             logNonFatal("Manual event upload failed: \(error.localizedDescription) reason=\(reason)")
         }
     }
@@ -1512,28 +2007,66 @@ final class AppViewModel: ObservableObject {
         beginDeviceSyncActivity()
         defer { endDeviceSyncActivity() }
 
+        let localBeforeFetch = currentManualEventSnapshot()
+        diagnostics.record(.fetchStarted, [
+            "reason": reason,
+            "localPersonal": String(localBeforeFetch.personalEvents.count),
+            "localTombstones": String(localBeforeFetch.tombstones.count)
+        ])
+
         do {
             guard let remote = try await manualEventCloudKitService.fetchManualEvents(
                 gemsID: verifiedIdentity.gemsID
-            ) else { return }
+            ) else {
+                diagnostics.record(.fetchNoRemoteRecord, ["reason": reason])
+                return
+            }
 
-            if let lastFetch = lastManualEventFetchAt, remote.updatedAt <= lastFetch { return }
+            diagnostics.record(.fetchSucceeded, [
+                "reason": reason,
+                "remotePersonal": String(remote.manualEvents.personalEvents.count),
+                "remoteOperational": String(remote.manualEvents.operationalEvents.count),
+                "remoteTombstones": String(remote.manualEvents.tombstones.count),
+                "remoteDevice": SyncDiagnosticsLog.tag(remote.deviceID),
+                "myDevice": SyncDiagnosticsLog.tag(getOrCreateDeviceID())
+            ])
+
+            if let lastAccepted = lastAcceptedManualEventRecordModifiedAt, remote.updatedAt <= lastAccepted {
+                diagnostics.record(.fetchSkippedWatermark, ["reason": reason])
+                return
+            }
 
             let myDeviceID = getOrCreateDeviceID()
             let localSnapshot = currentManualEventSnapshot()
             let merged = mergeManualEventSnapshots(local: localSnapshot, remote: remote.manualEvents)
+            diagnostics.record(.snapshotsMerged, [
+                "reason": reason,
+                "beforePersonal": String(localSnapshot.personalEvents.count),
+                "afterPersonal": String(merged.personalEvents.count),
+                "beforeTombstones": String(localSnapshot.tombstones.count),
+                "afterTombstones": String(merged.tombstones.count),
+                // A local event present before the merge but absent after it was outranked by a
+                // tombstone — the case that would silently drop an unsent event.
+                "localDropped": Self.diagnosticDroppedTags(before: localSnapshot, after: merged)
+            ])
             guard merged != localSnapshot else {
-                lastManualEventFetchAt = remote.updatedAt
-                UserDefaults.standard.set(remote.updatedAt, forKey: manualEventFetchAtKey)
+                lastAcceptedManualEventRecordModifiedAt = remote.updatedAt
+                syncStateDefaults.set(remote.updatedAt, forKey: manualEventFetchAtKey)
+                diagnostics.record(.mergeNoChange, ["reason": reason])
                 return
             }
 
             try manualEventStore.save(merged)
+            diagnostics.record(.mergedSnapshotPersisted, [
+                "reason": reason,
+                "personal": String(merged.personalEvents.count),
+                "tombstones": String(merged.tombstones.count)
+            ])
             manualOperationalEvents = merged.operationalEvents
             manualPersonalEvents = merged.personalEvents
             manualEventTombstones = merged.tombstones
-            lastManualEventFetchAt = remote.updatedAt
-            UserDefaults.standard.set(remote.updatedAt, forKey: manualEventFetchAtKey)
+            lastAcceptedManualEventRecordModifiedAt = remote.updatedAt
+            syncStateDefaults.set(remote.updatedAt, forKey: manualEventFetchAtKey)
             deviceSyncStatusMessage = "Manual events updated from device sync."
             logNonFatal("Manual events fetched: \(reason) source=\(remote.source.rawValue) operational=\(merged.operationalEvents.count) personal=\(merged.personalEvents.count) tombstones=\(merged.tombstones.count)")
 
@@ -1541,8 +2074,56 @@ final class AppViewModel: ObservableObject {
                 await uploadManualEventsIfNeeded(reason: "manual event merge")
             }
         } catch {
+            diagnostics.record(.fetchFailed, [
+                "reason": reason,
+                "error": Self.diagnosticErrorCode(error)
+            ])
             logNonFatal("Manual event fetch failed: \(error.localizedDescription) reason=\(reason)")
         }
+    }
+
+    /// CloudKit error code without any user data, for the diagnostics buffer.
+    private nonisolated static func diagnosticErrorCode(_ error: Error) -> String {
+        if let ckError = error as? CKError {
+            return "CKError.\(ckError.code.rawValue)"
+        }
+        let nsError = error as NSError
+        return "\(nsError.domain).\(nsError.code)"
+    }
+
+    /// Tags of manual events that existed locally before a merge and were dropped by it.
+    private nonisolated static func diagnosticDroppedTags(
+        before: ManualEventStoreSnapshot,
+        after: ManualEventStoreSnapshot
+    ) -> String {
+        let afterIDs = Set(after.personalEvents.map(\.id) + after.operationalEvents.map(\.id))
+        let dropped = (before.personalEvents.map(\.id) + before.operationalEvents.map(\.id))
+            .filter { !afterIDs.contains($0) }
+        guard !dropped.isEmpty else { return "none" }
+        return dropped.map { SyncDiagnosticsLog.tag($0) }.joined(separator: ",")
+    }
+
+    /// The shared on-device location for CrewAccess import JSON.
+    nonisolated static func defaultCrewAccessImportsDirectory() -> URL? {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("CrewAccessImports", isDirectory: true)
+    }
+
+    /// The single place upload fingerprints are produced.
+    ///
+    /// Fingerprints are persisted and compared across launches, so the encoding must be stable for
+    /// the same value — a bare `JSONEncoder()` gives no key-order guarantee, which would make a
+    /// re-encode of identical content look like a change (or, worse, make a real change look
+    /// unchanged is impossible, but the false-change case defeats the whole point of the gate and
+    /// republishes on every launch). `.sortedKeys` pins the ordering; the default date strategy
+    /// writes a `Double` that round-trips exactly.
+    ///
+    /// Both operands of any fingerprint comparison must come from this function.
+    private nonisolated static func canonicalFingerprint<T: Encodable>(_ value: T) -> String? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(value) else { return nil }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     private func currentManualEventSnapshot() -> ManualEventStoreSnapshot {
@@ -1591,8 +2172,7 @@ final class AppViewModel: ObservableObject {
         guard isIdentityVerified, let verifiedIdentity else { return false }
 
         let fm = FileManager.default
-        guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return false }
-        let dir = documents.appendingPathComponent("CrewAccessImports", isDirectory: true)
+        guard let dir = crewAccessImportsDirectory else { return false }
 
         do {
             let records = try await crewAccessImportCloudKitService.fetchImportFiles(gemsID: verifiedIdentity.gemsID)
@@ -1602,8 +2182,14 @@ final class AppViewModel: ObservableObject {
                     candidate.updatedAt > current.updatedAt ? candidate : current
                 }
             )
+            // Resolve deletion intents before applying records. In the observed state, a live
+            // payload with a new generation cancels the deletion; the record loop below must see
+            // that cancellation so it can persist the re-import during this same sync.
+            var recoveryUploadsSucceeded = await flushCrewAccessDeletionOutbox(
+                records: records,
+                domicile: verifiedIdentity.domicile
+            )
             var writtenCount = 0
-            var recoveryUploadsSucceeded = true
             for record in records {
                 let url = dir.appendingPathComponent(record.fileName)
                 let localModifiedAt = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
@@ -1611,36 +2197,19 @@ final class AppViewModel: ObservableObject {
                     fromCloudKitRecord: record,
                     domicile: verifiedIdentity.domicile
                 )
-                if let deletedAt = record.deletedAt {
-                    // Tombstoned remotely: remove local file only when the tombstone is
-                    // newer than the local JSON. A re-import can recreate the same file
-                    // name after an older tombstone; in that case local import wins.
-                    if fm.fileExists(atPath: url.path), let localModifiedAt, localModifiedAt > deletedAt {
-                        if let tripKey, deletedCrewAccessTripIntents.removeValue(forKey: tripKey) != nil {
-                            saveDeletedCrewAccessTripIntents()
-                        }
-                    } else {
-                        if let tripKey,
-                           deletedAt > (deletedCrewAccessTripIntents[tripKey] ?? .distantPast) {
-                            deletedCrewAccessTripIntents[tripKey] = deletedAt
-                            saveDeletedCrewAccessTripIntents()
-                        }
-                        try? fm.removeItem(at: url)
-                    }
+                if record.deletedAt != nil {
+                    // Tombstoned remotely: the local copy always goes. No mtime comparison —
+                    // a sync-down rewrites files, so a "newer" local file proves nothing about a
+                    // re-import. Deletion intents are owned by the outbox below and are never
+                    // adjusted from here.
+                    try? fm.removeItem(at: url)
                     continue
                 }
-                if let tripKey, let locallyDeletedAt = deletedCrewAccessTripIntents[tripKey] {
-                    if record.updatedAt > locallyDeletedAt {
-                        // A later re-import on another device wins over this device's stale
-                        // deletion intent. Clear it before rebuilding Timeline/Calendar.
-                        deletedCrewAccessTripIntents.removeValue(forKey: tripKey)
-                        saveDeletedCrewAccessTripIntents()
-                    } else {
-                        if fm.fileExists(atPath: url.path) { try? fm.removeItem(at: url) }
-                        let tombstoned = await tombstoneCrewAccessImportFiles(fileNames: [record.fileName])
-                        recoveryUploadsSucceeded = recoveryUploadsSucceeded && tombstoned
-                        continue
-                    }
+                // A live record for a trip this device deleted is left to the outbox, which decides
+                // by payload generation whether it is a stale re-upload or a new import.
+                if let tripKey, deletedCrewAccessTripIntents[tripKey] != nil {
+                    if fm.fileExists(atPath: url.path) { try? fm.removeItem(at: url) }
+                    continue
                 }
                 try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
                 let fileURL = url
@@ -1662,6 +2231,24 @@ final class AppViewModel: ObservableObject {
                           let json = try? JSONDecoder().decode(CrewAccessTripJSON.self, from: data)
                     else { continue }
                     let remote = recordsByFileName[url.lastPathComponent]
+
+                    // Never re-upload over another device's tombstone. This loop used to fall
+                    // through whenever `remote.deletedAt != nil`, which cleared the tombstone and
+                    // resurrected the trip — and because a sync-down rewrites local files, their
+                    // mtime is always fresh, so the device would resurrect it again every sync.
+                    // A genuine re-import is represented by a deletion intent that is older than
+                    // this file, not by the file simply existing.
+                    // A tombstoned record is never republished by this automatic path. This loop
+                    // used to fall through whenever `remote.deletedAt != nil`, which cleared the
+                    // tombstone and resurrected the trip on every sync. No filesystem timestamp is
+                    // consulted: mtime is refreshed by sync-down, and creation date is refreshed by
+                    // download, restore, copy and reinstall, so neither proves a user re-imported.
+                    // Only `confirmPendingImport` may cancel a deletion, via the re-import outbox.
+                    if remote?.deletedAt != nil {
+                        try? fm.removeItem(at: url)
+                        continue
+                    }
+
                     if remote?.deletedAt == nil, remote?.jsonData == data {
                         continue
                     }
@@ -1745,19 +2332,19 @@ final class AppViewModel: ObservableObject {
     private func getOrCreateDeviceID() -> String {
         if let vendorID = UIDevice.current.identifierForVendor?.uuidString {
             if cachedDeviceID != vendorID {
-                UserDefaults.standard.set(vendorID, forKey: deviceIDKey)
+                syncStateDefaults.set(vendorID, forKey: deviceIDKey)
                 cachedDeviceID = vendorID
             }
             return vendorID
         }
         if let existing = cachedDeviceID { return existing }
-        let stored = UserDefaults.standard.string(forKey: deviceIDKey)
+        let stored = syncStateDefaults.string(forKey: deviceIDKey)
         if let stored {
             cachedDeviceID = stored
             return stored
         }
         let newID = UUID().uuidString
-        UserDefaults.standard.set(newID, forKey: deviceIDKey)
+        syncStateDefaults.set(newID, forKey: deviceIDKey)
         cachedDeviceID = newID
         return newID
     }
@@ -1884,12 +2471,39 @@ final class AppViewModel: ObservableObject {
         updateAdminStatus()
     }
 
-    private func recoverCloudSyncAfterIdentityAvailable(reason: String) async {
-        guard isIdentityVerified else { return }
+    /// Drives the exact startup-recovery sequence a relaunch performs. Exposed so tests can model a
+    /// relaunch without depending on the init-time background Task, which is skipped under XCTest.
+    func recoverCloudSyncForTesting(reason: String) async {
+        await recoverCloudSyncAfterIdentityAvailable(reason: reason)
+    }
 
+    private func recoverCloudSyncAfterIdentityAvailable(reason: String) async {
+        guard isIdentityVerified else {
+            diagnostics.record(.identityUnavailable, [
+                "reason": reason,
+                "hasVerifiedIdentity": String(verifiedIdentity != nil),
+                "hasRecordName": String(currentCloudKitRecordName != nil)
+            ])
+            return
+        }
+
+        let local = currentManualEventSnapshot()
+        diagnostics.record(.startupRecoveryBegan, [
+            "reason": reason,
+            "localPersonal": String(local.personalEvents.count),
+            "localTombstones": String(local.tombstones.count),
+            "storedFingerprint": SyncDiagnosticsLog.shortFingerprint(lastManualEventUploadFingerprint)
+        ])
         await syncCrewAccessDeviceData(reason: reason)
         await fetchManualEventsIfNeeded(reason: reason)
         await uploadManualEventsIfNeeded(reason: "\(reason) recovery")
+        let after = currentManualEventSnapshot()
+        diagnostics.record(.startupRecoveryEnded, [
+            "reason": reason,
+            "localPersonal": String(after.personalEvents.count),
+            "localTombstones": String(after.tombstones.count),
+            "storedFingerprint": SyncDiagnosticsLog.shortFingerprint(lastManualEventUploadFingerprint)
+        ])
     }
 
     func syncCrewAccessDeviceData(reason: String) async {
@@ -2264,12 +2878,14 @@ final class AppViewModel: ObservableObject {
                     await deleteCrewAccessTrips(ids: resolvedOverlapIDs)
                 }
                 let overlapTripIDs = overlapPairings.map(Self.normalizedCrewAccessTripID)
+                let importsDirectory = crewAccessImportsDirectory
                 if !overlapTripIDs.isEmpty {
                     _ = await Task.detached(priority: .utility) {
                         Self.deleteCrewAccessImportFilesBestEffort(
                             scheduleIDs: Array(resolvedOverlapIDs),
                             tripIDs: overlapTripIDs,
-                            tripKeys: []
+                            tripKeys: [],
+                            directory: importsDirectory
                         )
                     }.value
                 }
@@ -2506,10 +3122,10 @@ final class AppViewModel: ObservableObject {
                 )
             )
         }
+        let directory = crewAccessImportsDirectory
         return await Task.detached(priority: .utility) { () -> [CrewAccessImportFile] in
             let fm = FileManager.default
-            guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return [] }
-            let dir = documents.appendingPathComponent("CrewAccessImports", isDirectory: true)
+            guard let dir = directory else { return [] }
             guard fm.fileExists(atPath: dir.path) else { return [] }
 
             do {
@@ -2571,10 +3187,14 @@ final class AppViewModel: ObservableObject {
     }
 
     func applyCrewAccessRetentionPolicy() async {
+        let directory = crewAccessImportsDirectory
         let deletedFileCount: Int
         if let retainedOrders = retainedCrewAccessBidPeriodOrders() {
             deletedFileCount = await Task.detached(priority: .utility) {
-                Self.deleteCrewAccessImportFilesOutsideRetainedBidPeriods(retainedOrders: retainedOrders)
+                Self.deleteCrewAccessImportFilesOutsideRetainedBidPeriods(
+                    retainedOrders: retainedOrders,
+                    directory: directory
+                )
             }.value
             if deletedFileCount > 0 {
                 logger.info("[CrewAccessRetention] keptPeriods=\(retainedOrders.map(String.init).sorted().joined(separator: ","), privacy: .public) deletedFiles=\(deletedFileCount, privacy: .public)")
@@ -2587,10 +3207,11 @@ final class AppViewModel: ObservableObject {
     }
 
     func reconcileCrewAccessSchedulesWithImportFiles() async {
+        let directory = crewAccessImportsDirectory
         let deletedKeys = Set(deletedCrewAccessTripIntents.keys)
         let domicile = verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
         var rebuiltSchedules = await Task.detached(priority: .utility) {
-            Self.loadCrewAccessSchedulesFromImportFiles().filter { schedule in
+            Self.loadCrewAccessSchedulesFromImportFiles(directory: directory).filter { schedule in
                 Self.crewAccessTripKeys(for: schedule, domicile: domicile).isDisjoint(with: deletedKeys)
             }
         }.value
@@ -2675,6 +3296,11 @@ final class AppViewModel: ObservableObject {
             )
         }
 
+        // Read the payload generations about to be removed, while the files still exist.
+        let deletedPayloadFingerprints = await Task.detached(priority: .utility) {
+            Self.crewAccessPayloadFingerprints(at: urls)
+        }.value
+
         let deletionResults = await Task.detached(priority: .utility) {
             Self.deleteCrewAccessImportFilesAndCollectMatches(
                 targetURLs: urls,
@@ -2749,20 +3375,33 @@ final class AppViewModel: ObservableObject {
             crewAccessDeleteMessage = (crewAccessDeleteMessage ?? "") + " Cache save failed."
         }
 
-        // Tombstone deleted files in CloudKit so other devices remove them.
+        // Same convergence guarantee as deleting from the trip list: record the deletion in the
+        // shared trip-key outbox, then let a full sync tombstone every matching CloudKit record.
+        // Deleting from the file manager used to tombstone only the file names it happened to
+        // remove, from an unstructured Task, with no durable retry.
+        let deletedTripKeys = Array(Set(deletionResults.compactMap { result -> String? in
+            guard let tripId = result.tripId else { return nil }
+            return Self.crewAccessTripKey(
+                tripID: tripId,
+                tripInformationDate: result.tripInformationDate,
+                fallbackDate: nil
+            )
+        }))
+        if !deletedTripKeys.isEmpty {
+            enqueueCrewAccessDeletion(
+                tripKeys: deletedTripKeys,
+                deletedAt: Date(),
+                payloads: deletedPayloadFingerprints
+            )
+        }
+
         let deletedFileNames = zip(urls, deletionResults)
             .filter { $0.1.deleted }
             .map { $0.0.lastPathComponent }
         if !deletedFileNames.isEmpty {
-            Task { [weak self] in
-                guard let self else { return }
-                let tombstoned = await self.tombstoneCrewAccessImportFiles(fileNames: deletedFileNames)
-                let uploaded = await self.uploadDeviceScheduleIfNeeded(reason: "import file deleted")
-                if tombstoned && uploaded {
-                    self.markTripSyncCompleted()
-                }
-            }
+            _ = await tombstoneCrewAccessImportFiles(fileNames: deletedFileNames)
         }
+        await syncCrewAccessDeviceData(reason: "import file deleted")
     }
 
     func deleteCrewAccessImportFiles(fileIDs: [CrewAccessImportFile.ID]) async {
@@ -2819,17 +3458,25 @@ final class AppViewModel: ObservableObject {
         let domicile = verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
         let tripKeysToDelete = Array(Set(toDelete.flatMap { Self.crewAccessTripKeys(for: $0, domicile: domicile) }))
         let deletionTime = Date()
-        if !tripKeysToDelete.isEmpty {
-            for tripKey in tripKeysToDelete {
-                deletedCrewAccessTripIntents[tripKey] = deletionTime
-            }
-            saveDeletedCrewAccessTripIntents()
-        }
+        // Capture which payload generation is being deleted *before* the files are removed, so the
+        // outbox can recognise that same generation coming back from a device that never saw the
+        // tombstone. Both delete entry points funnel through enqueueCrewAccessDeletion.
+        let deletedPayloads = Self.crewAccessPayloadFingerprintsByTripKey(
+            for: tripKeysToDelete,
+            directory: crewAccessImportsDirectory
+        )
+        enqueueCrewAccessDeletion(
+            tripKeys: tripKeysToDelete,
+            deletedAt: deletionTime,
+            payloads: deletedPayloads
+        )
+        let importsDirectory = crewAccessImportsDirectory
         let fileDeleteResult = await Task.detached(priority: .utility) {
             Self.deleteCrewAccessImportFilesBestEffort(
                 scheduleIDs: scheduleIDsToDelete,
                 tripIDs: Array(Set(toDelete.flatMap { $0.legs.map(\.pairing) })),
-                tripKeys: tripKeysToDelete
+                tripKeys: tripKeysToDelete,
+                directory: importsDirectory
             )
         }.value
         logger.info("[CrewAccessDelete] detached file delete complete deleted=\(fileDeleteResult.deleted, privacy: .public) failures=\(fileDeleteResult.failures, privacy: .public)")
@@ -2838,23 +3485,25 @@ final class AppViewModel: ObservableObject {
         } else {
             crewAccessDeleteMessage = "Deleted \(toDelete.count) trip(s). Some JSON files could not be removed."
         }
-        lastDeviceScheduleFetchAt = deletionTime
-        UserDefaults.standard.set(deletionTime, forKey: deviceScheduleFetchAtKey)
-        var tombstoned = true
+        // Deliberately does NOT stamp lastDeviceScheduleFetchAt with `deletionTime`. That watermark
+        // is compared against the snapshot record's server modification date; writing a client
+        // Date() into it made this device ignore later remote snapshots.
+
+        // Best effort immediate tombstone of what we could see locally. Success is not required and
+        // is not treated as completion — the outbox below is the guarantee.
         if !fileDeleteResult.deletedFileNames.isEmpty {
-            tombstoned = await tombstoneCrewAccessImportFiles(fileNames: fileDeleteResult.deletedFileNames)
+            _ = await tombstoneCrewAccessImportFiles(fileNames: fileDeleteResult.deletedFileNames)
         }
         await rescheduleNotificationsIfAuthorized()
-        Task { [weak self] in
-            guard let self else { return }
-            let uploaded = await self.uploadDeviceScheduleIfNeeded(reason: "trip deleted")
-            if tombstoned && uploaded {
-                self.markTripSyncCompleted()
-            }
-        }
+
+        // Structured, not a detached Task: a full sync reconciles the outbox against the records
+        // actually in CloudKit, tombstones every remaining one, and only then reports completion.
+        // Anything still outstanding stays in the outbox and is retried on the next sync.
+        await syncCrewAccessDeviceData(reason: "trip deleted")
     }
 
     func prepareCrewAccessTripJSONExport(for schedule: PayPeriodSchedule) async throws -> TripJSONExportOutput {
+        let directory = crewAccessImportsDirectory
         let profile = ProfileSnapshot.loadFromLocalStorage()
         let identity = verifiedIdentity
         let ownerSource = TripJSONExportOwnerSource(
@@ -2874,7 +3523,9 @@ final class AppViewModel: ObservableObject {
         let generator = TripJSONExportService.generator()
         do {
             let result = try await Task.detached(priority: .userInitiated) {
-                let candidates = Self.loadCrewAccessTripJSONPayloadsFromImportFilesSync().map(\.payload)
+                let candidates = Self.loadCrewAccessTripJSONPayloadsFromImportFilesSync(
+                    directory: directory
+                ).map(\.payload)
                 guard let payload = TripJSONExportService.payload(for: schedule, candidates: candidates) else {
                     throw TripJSONExportError.tripDataUnavailable
                 }
@@ -2948,8 +3599,9 @@ final class AppViewModel: ObservableObject {
         let operationalEvents = manualOperationalEvents
         let personalEvents = manualPersonalEvents
         let generator = TripJSONExportService.generator()
+        let directory = crewAccessImportsDirectory
         let payloads = await Task.detached(priority: .userInitiated) {
-            Self.loadCrewAccessTripJSONPayloadsFromImportFilesSync().map(\.payload)
+            Self.loadCrewAccessTripJSONPayloadsFromImportFilesSync(directory: directory).map(\.payload)
         }.value
 
         let input = BidPeriodScheduleExportInput(
@@ -3172,12 +3824,9 @@ final class AppViewModel: ObservableObject {
 
         let domicile = verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
         let importedTripKeys = Self.crewAccessTripKeys(for: imported, domicile: domicile)
-        if !importedTripKeys.isEmpty {
-            for tripKey in importedTripKeys {
-                deletedCrewAccessTripIntents.removeValue(forKey: tripKey)
-            }
-            saveDeletedCrewAccessTripIntents()
-        }
+        // Reached only after persistCrewAccessJSON succeeded in confirmPendingImport, so the new
+        // generation is already durable on disk before the deletion is cancelled.
+        recordExplicitCrewAccessReimport(tripKeys: importedTripKeys)
         updatedCrewAccess = updatedCrewAccess.compactMap { schedule in
             let remainingLegs = schedule.legs.filter { leg in
                 guard let key = Self.crewAccessTripKey(for: leg, domicile: domicile) else {
@@ -4161,12 +4810,14 @@ final class AppViewModel: ObservableObject {
         Set(schedule.legs.compactMap { crewAccessTripKey(for: $0, domicile: domicile) })
     }
 
-    private nonisolated static func deleteCrewAccessImportFilesOutsideRetainedBidPeriods(retainedOrders: Set<Int>) -> Int {
+    private nonisolated static func deleteCrewAccessImportFilesOutsideRetainedBidPeriods(
+        retainedOrders: Set<Int>,
+        directory: URL?
+    ) -> Int {
         let fm = FileManager.default
-        guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
+        guard let dir = directory else {
             return 0
         }
-        let dir = documents.appendingPathComponent("CrewAccessImports", isDirectory: true)
         guard let urls = try? fm.contentsOfDirectory(
             at: dir,
             includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
@@ -4202,8 +4853,10 @@ final class AppViewModel: ObservableObject {
         return deletedCount
     }
 
-    private nonisolated static func loadCrewAccessSchedulesFromImportFiles() -> [PayPeriodSchedule] {
-        let payloads = loadCrewAccessTripJSONPayloadsFromImportFilesSync()
+    private nonisolated static func loadCrewAccessSchedulesFromImportFiles(
+        directory: URL?
+    ) -> [PayPeriodSchedule] {
+        let payloads = loadCrewAccessTripJSONPayloadsFromImportFilesSync(directory: directory)
         return payloads.compactMap { payload, modifiedAt in
             buildCrewAccessSchedule(from: payload, modifiedAt: modifiedAt)
         }.sorted { lhs, rhs in
@@ -4216,18 +4869,21 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    private nonisolated static func loadCrewAccessTripJSONPayloadsFromImportFiles() async -> [CrewAccessTripJSON] {
+    private nonisolated static func loadCrewAccessTripJSONPayloadsFromImportFiles(
+        directory: URL?
+    ) async -> [CrewAccessTripJSON] {
         await Task.detached(priority: .utility) {
-            loadCrewAccessTripJSONPayloadsFromImportFilesSync().map(\.payload)
+            loadCrewAccessTripJSONPayloadsFromImportFilesSync(directory: directory).map(\.payload)
         }.value
     }
 
-    private nonisolated static func loadCrewAccessTripJSONPayloadsFromImportFilesSync() -> [(payload: CrewAccessTripJSON, modifiedAt: Date)] {
+    private nonisolated static func loadCrewAccessTripJSONPayloadsFromImportFilesSync(
+        directory: URL?
+    ) -> [(payload: CrewAccessTripJSON, modifiedAt: Date)] {
         let fm = FileManager.default
-        guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
+        guard let dir = directory else {
             return []
         }
-        let dir = documents.appendingPathComponent("CrewAccessImports", isDirectory: true)
         guard let urls = try? fm.contentsOfDirectory(
             at: dir,
             includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
@@ -4262,9 +4918,10 @@ final class AppViewModel: ObservableObject {
     /// uploading to CloudKit. The local model is NOT mutated — only the upload payload
     /// gets hotel names filled in, so friends see hotel names without requiring re-import.
     private nonisolated static func enrichSchedulesWithHotelNames(
-        _ schedules: [PayPeriodSchedule]
+        _ schedules: [PayPeriodSchedule],
+        directory: URL?
     ) -> [PayPeriodSchedule] {
-        let hotelMap = hotelMapFromCrewAccessImports()
+        let hotelMap = hotelMapFromCrewAccessImports(directory: directory)
         guard !hotelMap.isEmpty else { return schedules }
         return schedules.map { schedule in
             let enrichedLegs = schedule.legs.map { leg -> TripLeg in
@@ -4289,8 +4946,10 @@ final class AppViewModel: ObservableObject {
 
     /// Builds a [tripID: [station: hotelName]] map from local CrewAccess JSON files.
     /// Handles both modern ("AAA: Hotel Name ...") and legacy ("Hotel details ...") formats.
-    private nonisolated static func hotelMapFromCrewAccessImports() -> [String: [String: String]] {
-        let payloads = loadCrewAccessTripJSONPayloadsFromImportFilesSync()
+    private nonisolated static func hotelMapFromCrewAccessImports(
+        directory: URL?
+    ) -> [String: [String: String]] {
+        let payloads = loadCrewAccessTripJSONPayloadsFromImportFilesSync(directory: directory)
         var result: [String: [String: String]] = [:]
         for (payload, _) in payloads {
             // Normalize tripId the same way buildCrewAccessSchedule does,
@@ -4606,7 +5265,8 @@ final class AppViewModel: ObservableObject {
     private nonisolated static func deleteCrewAccessImportFilesBestEffort(
         scheduleIDs: [String],
         tripIDs: [String] = [],
-        tripKeys: [String]
+        tripKeys: [String],
+        directory: URL?
     ) -> (deleted: Int, failures: Int, deletedFileNames: [String]) {
         struct ImportFileHeader {
             let url: URL
@@ -4616,10 +5276,9 @@ final class AppViewModel: ObservableObject {
         }
 
         let fm = FileManager.default
-        guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
+        guard let dir = directory else {
             return (0, 0, [])
         }
-        let dir = documents.appendingPathComponent("CrewAccessImports", isDirectory: true)
         guard fm.fileExists(atPath: dir.path) else {
             return (0, 0, [])
         }
@@ -4701,7 +5360,7 @@ final class AppViewModel: ObservableObject {
     private func persistCrewAccessJSON(_ payload: CrewAccessTripJSON) throws -> CrewAccessJSONWriteContext {
         let data = try JSONEncoder().encode(payload)
         let fm = FileManager.default
-        guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
+        guard let dir = crewAccessImportsDirectory else {
             throw NSError(
                 domain: "CrewAccessImport",
                 code: 1001,
@@ -4709,7 +5368,6 @@ final class AppViewModel: ObservableObject {
             )
         }
 
-        let dir = documents.appendingPathComponent("CrewAccessImports", isDirectory: true)
         if !fm.fileExists(atPath: dir.path) {
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }

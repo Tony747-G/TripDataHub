@@ -7,6 +7,22 @@ import XCTest
 @MainActor
 final class AppViewModelDeviceSyncTests: XCTestCase {
 
+    private let crewAccessOutboxStateKeys = [
+        "crewaccess_tombstone_observed_v1",
+        "crewaccess_deleted_payload_fingerprints_v1",
+        "crewaccess_reimported_trip_keys_v1"
+    ]
+
+    override func setUp() {
+        super.setUp()
+        clearCrewAccessOutboxState()
+    }
+
+    override func tearDown() {
+        clearCrewAccessOutboxState()
+        super.tearDown()
+    }
+
     func test_uploadDeviceSchedule_differentSchedules_uploadsAgain() async throws {
         let deviceService = FakeDeviceScheduleCloudKitService()
         let vm = makeViewModel(deviceService: deviceService)
@@ -118,12 +134,12 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             source: .iphone
         ))
 
-        let vm = makeViewModel(deviceService: deviceService)
-        setVerifiedIdentity(on: vm)
-        vm.crewAccessSchedules = []
         let fetchKey = "device_schedule_last_fetch_at_v1"
         UserDefaults.standard.set(newerDate, forKey: fetchKey)
         defer { UserDefaults.standard.removeObject(forKey: fetchKey) }
+        let vm = makeViewModel(deviceService: deviceService)
+        setVerifiedIdentity(on: vm)
+        vm.crewAccessSchedules = []
 
         await vm.fetchLegacyDeviceScheduleFallbackIfNeeded(reason: "test")
 
@@ -272,7 +288,7 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         XCTAssertEqual(uploadedFileNames, [fileName])
     }
 
-    func test_fetchCrewAccessImports_newerRemoteReimportClearsLegacyDeletionIntentOnOtherDevice() async throws {
+    func test_fetchCrewAccessImports_legacyDeletionIntentTombstonesLiveRemoteOnFirstSync() async throws {
         try removeCrewAccessImportDirectory()
         defer { try? removeCrewAccessImportDirectory() }
 
@@ -329,16 +345,16 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         XCTAssertTrue(fetched)
         XCTAssertEqual(
             Set(vm.crewAccessSchedules.flatMap { $0.legs.map(\.pairing) }),
-            ["40303", "A70606"]
+            ["A70606"]
         )
         let tombstonedAfterReimport = await importCloudKitService.tombstonedFileNames
-        XCTAssertEqual(tombstonedAfterReimport, [])
+        XCTAssertEqual(tombstonedAfterReimport, ["2026-07-12_40303.json"])
         let storedIntents = UserDefaults.standard.dictionary(forKey: deletionIntentsKey) ?? [:]
-        XCTAssertNil(storedIntents["2605:40303"])
+        XCTAssertNotNil(storedIntents["2605:40303"])
         XCTAssertNil(UserDefaults.standard.object(forKey: legacyDeletionKey))
     }
 
-    func test_fetchCrewAccessImports_newerLocalDeletionIntentStillTombstonesOlderRemote() async throws {
+    func test_fetchCrewAccessImports_deletionIntentTombstonesLiveRemoteWithoutClockComparison() async throws {
         try removeCrewAccessImportDirectory()
         defer { try? removeCrewAccessImportDirectory() }
 
@@ -385,7 +401,7 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         XCTAssertEqual(tombstonedAfterDelete, ["2026-07-12_40303.json"])
     }
 
-    func test_fetchCrewAccessImports_localReimportNewerThanRemoteTombstoneRestoresCloudRecord() async throws {
+    func test_fetchCrewAccessImports_automaticLocalFileDoesNotOverrideRemoteTombstone() async throws {
         try removeCrewAccessImportDirectory()
         defer { try? removeCrewAccessImportDirectory() }
 
@@ -430,11 +446,11 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         await vm.reconcileCrewAccessSchedulesWithImportFiles()
 
         XCTAssertTrue(fetched)
-        XCTAssertEqual(Set(vm.crewAccessSchedules.flatMap { $0.legs.map(\.pairing) }), ["40303"])
+        XCTAssertTrue(vm.crewAccessSchedules.isEmpty)
         let uploadedAfterRecovery = await importCloudKitService.uploadedFileNames
-        XCTAssertEqual(uploadedAfterRecovery, [fileName])
+        XCTAssertTrue(uploadedAfterRecovery.isEmpty)
         let storedIntents = UserDefaults.standard.dictionary(forKey: deletionIntentsKey) ?? [:]
-        XCTAssertNil(storedIntents["2605:40303"])
+        XCTAssertNotNil(storedIntents["2605:40303"])
     }
 
     // MARK: - LogTen backlog survival
@@ -966,6 +982,12 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
 
     // MARK: - Helpers
 
+    private func clearCrewAccessOutboxState() {
+        for key in crewAccessOutboxStateKeys {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+
     private func makeViewModel(
         deviceService: DeviceScheduleCloudKitServicing,
         importCloudKitService: CrewAccessImportCloudKitServicing = NoopCrewAccessImportCloudKitService()
@@ -1279,7 +1301,7 @@ private struct NoopFriendCloudKitService: FriendScheduleCloudKitServicing {
     func cancelFriendRequest(myGEMSID: String, friendGEMSID: String) async throws {}
     func deleteSharedScheduleData(gemsID: String) async throws {}
     func deleteFriendSharingData(gemsID: String) async throws {}
-    func refreshConnections(myGEMSID: String, connections: [FriendConnection], friendResetAt: Date?) async throws -> [FriendConnection] { connections }
+    func refreshConnections(myGEMSID: String, connections: [FriendConnection], friendResetAt: Date?) async throws -> FriendConnectionRefreshResult { FriendConnectionRefreshResult(connections: connections) }
 }
 
 private struct NoopGEMSVerificationService: GEMSVerificationCloudKitServicing {

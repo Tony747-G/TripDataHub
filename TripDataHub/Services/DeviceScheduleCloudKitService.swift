@@ -165,13 +165,17 @@ enum DeviceScheduleDecodeError: Error {
 // MARK: - Manual Event Sync
 
 protocol ManualEventCloudKitServicing: Sendable {
+    /// Returns the snapshot that actually landed in CloudKit, which may include events merged in
+    /// from a concurrent write by another device. Callers must treat the return value — not the
+    /// snapshot they passed in — as the published state.
+    @discardableResult
     func uploadManualEvents(
         gemsID: String,
         cloudKitRecordName: String,
         snapshot: ManualEventStoreSnapshot,
         deviceID: String,
         source: DeviceScheduleSyncSource
-    ) async throws
+    ) async throws -> ManualEventStoreSnapshot
 
     func fetchManualEvents(gemsID: String) async throws -> ManualEventCloudKitSnapshot?
 }
@@ -215,13 +219,14 @@ final class ManualEventCloudKitService: ManualEventCloudKitServicing, @unchecked
     /// (per-ID last-writer-wins plus tombstones) on every attempt, so a concurrent write
     /// from another device is preserved rather than overwritten. The merge is idempotent,
     /// so accumulating it across retries is safe.
+    @discardableResult
     func uploadManualEvents(
         gemsID: String,
         cloudKitRecordName: String,
         snapshot: ManualEventStoreSnapshot,
         deviceID: String,
         source: DeviceScheduleSyncSource
-    ) async throws {
+    ) async throws -> ManualEventStoreSnapshot {
         let database = databaseProvider()
         let normalizedGEMSID = GEMSIDNormalizer.normalize(gemsID)
         let recordID = CKRecord.ID(recordName: Self.recordName(for: normalizedGEMSID))
@@ -250,7 +255,7 @@ final class ManualEventCloudKitService: ManualEventCloudKitServicing, @unchecked
             record[Field.source] = source.rawValue as CKRecordValue
             do {
                 _ = try await database.save(record)
-                return
+                return snapshotToSave
             } catch let error as CKError where error.code == .serverRecordChanged {
                 // Re-fetch so the next attempt merges the newly written server state.
                 lastConflict = error

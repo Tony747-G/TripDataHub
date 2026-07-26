@@ -89,6 +89,16 @@ struct SettingsTabView: View {
                 }
             }
 
+            // Temporary: added to diagnose the Personal Event sync asymmetry reported on managed
+            // iPads, which cannot be attached to `log stream`. Remove once that is resolved.
+            Section {
+                NavigationLink("Sync Diagnostics") {
+                    SyncDiagnosticsView()
+                }
+            } footer: {
+                Text("Records sync activity on this device for troubleshooting. No event content is stored.")
+            }
+
             logTenExportSection
 
             if viewModel.canAccessAdminTools {

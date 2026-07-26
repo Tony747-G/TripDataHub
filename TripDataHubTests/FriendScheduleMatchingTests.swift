@@ -367,7 +367,7 @@ final class FriendScheduleMatchingTests: XCTestCase {
         _ = try await service.requestFriend(myGEMSID: "222222", friendGEMSID: "111111")
         _ = try await service.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
 
-        let refreshed = try await service.refreshConnections(myGEMSID: "222222", connections: [])
+        let refreshed = try await service.refreshConnections(myGEMSID: "222222", connections: []).connections
 
         XCTAssertEqual(refreshed.count, 1)
         XCTAssertEqual(refreshed.first?.employeeID, "0111111")
@@ -449,7 +449,7 @@ final class FriendScheduleMatchingTests: XCTestCase {
         let refreshed = try await service.refreshConnections(
             myGEMSID: "111111",
             connections: []
-        )
+        ).connections
 
         XCTAssertEqual(refreshed.count, 1)
         XCTAssertEqual(refreshed.first?.status, .pending)
@@ -471,7 +471,7 @@ final class FriendScheduleMatchingTests: XCTestCase {
         let refreshed = try await service.refreshConnections(
             myGEMSID: "111111",
             connections: [local]
-        )
+        ).connections
 
         XCTAssertEqual(refreshed.count, 1)
         XCTAssertEqual(refreshed.first?.status, .accepted)
@@ -503,7 +503,7 @@ final class FriendScheduleMatchingTests: XCTestCase {
         let refreshed = try await service.refreshConnections(
             myGEMSID: "111111",
             connections: [local]
-        )
+        ).connections
 
         XCTAssertEqual(refreshed.count, 1)
         XCTAssertEqual(refreshed.first?.status, .pending)
@@ -725,7 +725,7 @@ final class FriendScheduleMatchingTests: XCTestCase {
             myGEMSID: "111111",
             connections: [],
             friendResetAt: resetAt
-        )
+        ).connections
 
         XCTAssertEqual(refreshed.map(\.employeeID), ["0333333"])
         XCTAssertEqual(refreshed.first?.status, .pending)
@@ -780,7 +780,7 @@ final class FriendScheduleMatchingTests: XCTestCase {
             myGEMSID: "111111",
             connections: [],
             friendResetAt: resetAt
-        )
+        ).connections
 
         XCTAssertTrue(refreshed.isEmpty)
     }
@@ -799,7 +799,7 @@ final class FriendScheduleMatchingTests: XCTestCase {
         let refreshed = try await service.refreshConnections(
             myGEMSID: "111111",
             connections: [local]
-        )
+        ).connections
 
         XCTAssertEqual(refreshed.count, 1)
         XCTAssertEqual(refreshed.first?.status, .accepted)
@@ -830,7 +830,7 @@ final class FriendScheduleMatchingTests: XCTestCase {
             myGEMSID: "111111",
             connections: [local],
             friendResetAt: Date(timeIntervalSince1970: 3)
-        )
+        ).connections
 
         XCTAssertEqual(refreshed.first?.status, .accepted)
         let migratedRecord = await database.recordSnapshot(named: "tdh_friend_0111111_0222222")
@@ -868,7 +868,7 @@ final class FriendScheduleMatchingTests: XCTestCase {
         let refreshed = try await service.refreshConnections(
             myGEMSID: "111111",
             connections: [FriendConnection(employeeID: "0222222", status: .pending)]
-        )
+        ).connections
 
         XCTAssertEqual(refreshed.count, 1)
         XCTAssertEqual(
@@ -906,7 +906,7 @@ final class FriendScheduleMatchingTests: XCTestCase {
         let refreshed = try await service.refreshConnections(
             myGEMSID: "111111",
             connections: [failed, succeeds]
-        )
+        ).connections
 
         XCTAssertEqual(refreshed.first(where: { $0.employeeID == "0222222" })?.status, .accepted)
         XCTAssertEqual(refreshed.first(where: { $0.employeeID == "0333333" })?.status, .pending)
@@ -934,7 +934,7 @@ final class FriendScheduleMatchingTests: XCTestCase {
         let refreshed = try await service.refreshConnections(
             myGEMSID: "111111",
             connections: [local]
-        )
+        ).connections
 
         XCTAssertEqual(refreshed.count, 1)
         XCTAssertEqual(refreshed.first?.status, .pending)
@@ -1375,7 +1375,7 @@ final class FriendScheduleMatchingTests: XCTestCase {
         let refreshed = try await service.refreshConnections(
             myGEMSID: "111111",
             connections: []
-        )
+        ).connections
 
         XCTAssertEqual(refreshed.count, 1)
         XCTAssertEqual(refreshed.first?.employeeID, "0222222")
@@ -1398,7 +1398,7 @@ final class FriendScheduleMatchingTests: XCTestCase {
         let refreshed = try await service.refreshConnections(
             myGEMSID: "111111",
             connections: []
-        )
+        ).connections
 
         XCTAssertEqual(refreshed.count, 1)
         XCTAssertEqual(refreshed.first?.employeeID, "0222222")
@@ -1428,7 +1428,7 @@ final class FriendScheduleMatchingTests: XCTestCase {
         let refreshed = try await service.refreshConnections(
             myGEMSID: "111111",
             connections: [local]
-        )
+        ).connections
 
         XCTAssertEqual(refreshed.count, 1)
         XCTAssertEqual(refreshed.first?.employeeID, "0222222")
@@ -1633,12 +1633,19 @@ private final class CapturingFriendCloudKitService: FriendScheduleCloudKitServic
         lastDeletedFriendSharingGEMSID = gemsID
     }
 
-    func refreshConnections(myGEMSID: String, connections: [FriendConnection], friendResetAt: Date?) async throws -> [FriendConnection] {
+    /// Per-friend outcomes a test can dictate, so Green/Amber/Red can be exercised directly.
+    var refreshOutcomes: [String: FriendScheduleSyncOutcome] = [:]
+
+    func refreshConnections(myGEMSID: String, connections: [FriendConnection], friendResetAt: Date?) async throws -> FriendConnectionRefreshResult {
         refreshCallCount += 1
         if refreshDelayNanoseconds > 0 {
             try await Task.sleep(nanoseconds: refreshDelayNanoseconds)
         }
-        return refreshedConnections ?? connections
+        let resolved = refreshedConnections ?? connections
+        let outcomes = refreshOutcomes.isEmpty
+            ? Dictionary(uniqueKeysWithValues: resolved.map { (GEMSIDNormalizer.normalize($0.employeeID), FriendScheduleSyncOutcome.succeeded) })
+            : refreshOutcomes
+        return FriendConnectionRefreshResult(connections: resolved, outcomes: outcomes)
     }
 }
 

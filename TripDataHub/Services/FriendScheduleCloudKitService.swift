@@ -26,6 +26,19 @@ struct FriendScheduleCloudKitLink: Sendable {
     }
 }
 
+/// Connections plus, per normalized GEMS ID, whether that friend's refresh actually succeeded.
+/// Failures return the cached connection so nothing is lost, which is precisely why the outcome
+/// has to be reported separately — otherwise the UI cannot distinguish stale data from fresh.
+struct FriendConnectionRefreshResult: Sendable {
+    let connections: [FriendConnection]
+    let outcomes: [String: FriendScheduleSyncOutcome]
+
+    init(connections: [FriendConnection], outcomes: [String: FriendScheduleSyncOutcome] = [:]) {
+        self.connections = connections
+        self.outcomes = outcomes
+    }
+}
+
 protocol FriendScheduleCloudKitServicing: Sendable {
     func uploadSchedule(gemsID: String, cloudKitRecordName: String, schedules: [PayPeriodSchedule]) async throws
     func uploadScheduleSnapshot(gemsID: String, ownerDisplayName: String, crewAccessTrips: [CrewAccessTripJSON]) async throws
@@ -33,7 +46,7 @@ protocol FriendScheduleCloudKitServicing: Sendable {
     func cancelFriendRequest(myGEMSID: String, friendGEMSID: String) async throws
     func deleteSharedScheduleData(gemsID: String) async throws
     func deleteFriendSharingData(gemsID: String) async throws
-    func refreshConnections(myGEMSID: String, connections: [FriendConnection], friendResetAt: Date?) async throws -> [FriendConnection]
+    func refreshConnections(myGEMSID: String, connections: [FriendConnection], friendResetAt: Date?) async throws -> FriendConnectionRefreshResult
 }
 
 protocol FriendScheduleCloudKitDatabase {
@@ -412,7 +425,7 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         try await deleteSharedScheduleData(gemsID: normalizedGEMSID)
     }
 
-    func refreshConnections(myGEMSID: String, connections: [FriendConnection], friendResetAt: Date? = nil) async throws -> [FriendConnection] {
+    func refreshConnections(myGEMSID: String, connections: [FriendConnection], friendResetAt: Date? = nil) async throws -> FriendConnectionRefreshResult {
         let my = GEMSIDNormalizer.normalize(myGEMSID)
         let database = databaseProvider()
 
@@ -439,7 +452,12 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         let mergedConnections = mergeConnections(connections + discoveredConnections)
         var refreshed = Array(repeating: FriendConnection(employeeID: "", status: .pending), count: mergedConnections.count)
 
-        await withTaskGroup(of: (Int, FriendConnection).self) { group in
+        // Per-friend outcomes are reported alongside the connections. Returning only the cached
+        // connection on failure made a failed refresh indistinguishable from a successful one, so
+        // the Friends list could not tell "synced, nothing upcoming" from "could not sync".
+        var outcomes: [String: FriendScheduleSyncOutcome] = [:]
+
+        await withTaskGroup(of: (Int, FriendConnection, FriendScheduleSyncOutcome).self) { group in
             for (index, connection) in mergedConnections.enumerated() {
                 group.addTask {
                     do {
@@ -449,22 +467,23 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
                             friendResetAt: friendResetAt,
                             database: database
                         )
-                        return (index, updated)
+                        return (index, updated, .succeeded)
                     } catch {
                         logger.error(
                             "[TDHFriendLink] refreshConnection failed; preserving cached friend: \(error.localizedDescription, privacy: .public)"
                         )
-                        return (index, connection)
+                        return (index, connection, .failed(.fetchError))
                     }
                 }
             }
 
-            for await (index, connection) in group {
+            for await (index, connection, outcome) in group {
                 refreshed[index] = connection
+                outcomes[GEMSIDNormalizer.normalize(connection.employeeID)] = outcome
             }
         }
 
-        return refreshed
+        return FriendConnectionRefreshResult(connections: refreshed, outcomes: outcomes)
     }
 
     private func cloudConnections(
