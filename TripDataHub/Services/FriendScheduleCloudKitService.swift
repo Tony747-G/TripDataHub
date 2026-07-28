@@ -59,6 +59,15 @@ protocol FriendScheduleCloudKitDatabase {
 extension CKDatabase: FriendScheduleCloudKitDatabase {}
 
 final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unchecked Sendable {
+    private struct ScheduleFetchFailure: LocalizedError {
+        let connection: FriendConnection
+        let underlying: Error
+
+        var errorDescription: String? {
+            underlying.localizedDescription
+        }
+    }
+
     private enum RecordType {
         static let sharedSchedule = "TDHSharedSchedule"
         static let friendLink = "TDHFriendLink"
@@ -468,6 +477,11 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
                             database: database
                         )
                         return (index, updated, .succeeded)
+                    } catch let failure as ScheduleFetchFailure {
+                        logger.error(
+                            "[TDHFriendLink] schedule fetch failed; preserving refreshed link state and cached schedule: \(failure.localizedDescription, privacy: .public)"
+                        )
+                        return (index, failure.connection, .failed(.fetchError))
                     } catch {
                         logger.error(
                             "[TDHFriendLink] refreshConnection failed; preserving cached friend: \(error.localizedDescription, privacy: .public)"
@@ -611,10 +625,12 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
             updated.linkedAt = link.linkedAt ?? updated.linkedAt ?? Date()
             updated.acceptedAt = updated.acceptedAt ?? updated.linkedAt ?? Date()
             do {
-                updated.sharedSchedules = try await fetchSchedule(gemsID: friend, database: database)
+                updated.sharedSchedules = try await fetchSchedule(
+                    gemsID: friend,
+                    database: database
+                ) ?? connection.sharedSchedules
             } catch {
-                logger.error("[TDHFriendLink] refreshConnection: fetchSchedule failed (accepted): \(error.localizedDescription, privacy: .public)")
-                updated.sharedSchedules = connection.sharedSchedules
+                throw ScheduleFetchFailure(connection: updated, underlying: error)
             }
         } else {
             let isExplicitlyCanceled = (record[Field.status] as? String) == LinkStatus.canceled
@@ -649,10 +665,12 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
                         updated.linkedAt = healedLink?.linkedAt ?? updated.linkedAt ?? Date()
                         updated.acceptedAt = updated.acceptedAt ?? updated.linkedAt ?? Date()
                         do {
-                            updated.sharedSchedules = try await fetchSchedule(gemsID: friend, database: database)
+                            updated.sharedSchedules = try await fetchSchedule(
+                                gemsID: friend,
+                                database: database
+                            ) ?? connection.sharedSchedules
                         } catch {
-                            logger.error("[TDHFriendLink] refreshConnection: fetchSchedule failed (healed): \(error.localizedDescription, privacy: .public)")
-                            updated.sharedSchedules = connection.sharedSchedules
+                            throw ScheduleFetchFailure(connection: updated, underlying: error)
                         }
                     } else {
                         updated.status = .pending
@@ -768,16 +786,21 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         restored.linkedAt = link.linkedAt ?? acceptedAt
         restored.acceptedAt = acceptedAt
         do {
-            restored.sharedSchedules = try await fetchSchedule(gemsID: friend, database: database)
+            restored.sharedSchedules = try await fetchSchedule(
+                gemsID: friend,
+                database: database
+            ) ?? connection.sharedSchedules
         } catch {
-            logger.error("[TDHFriendLink] refreshConnection: fetchSchedule failed (accepted-restore): \(error.localizedDescription, privacy: .public)")
-            restored.sharedSchedules = connection.sharedSchedules
+            throw ScheduleFetchFailure(connection: restored, underlying: error)
         }
         logger.info("[TDHFriendLink] restored accepted friend link from local acceptedAt proof")
         return restored
     }
 
-    private func fetchSchedule(gemsID: String, database: FriendScheduleCloudKitDatabase) async throws -> [PayPeriodSchedule] {
+    private func fetchSchedule(
+        gemsID: String,
+        database: FriendScheduleCloudKitDatabase
+    ) async throws -> [PayPeriodSchedule]? {
         let recordID = CKRecord.ID(recordName: Self.scheduleRecordName(for: gemsID))
         logger.info("[TDHSchedule] fetchSchedule: attempting recordName=\(recordID.recordName, privacy: .private)")
         do {
@@ -803,6 +826,11 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
             }
             logger.info("[TDHSchedule] fetchSchedule: success, \(schedules.count, privacy: .public) schedules")
             return serverDatedSchedules
+        } catch let error as CKError where error.code == .unknownItem {
+            // A mutually accepted link can legitimately exist before the friend has published
+            // any schedule. That is a successful empty fetch (amber), not a sync failure (red).
+            logger.info("[TDHSchedule] fetchSchedule: no published schedule")
+            return nil
         } catch {
             logger.error("[TDHSchedule] fetchSchedule: FAILED error=\(error.localizedDescription, privacy: .public)")
             throw error

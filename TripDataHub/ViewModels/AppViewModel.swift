@@ -1294,7 +1294,11 @@ final class AppViewModel: ObservableObject {
     /// would be unreachable. The reachable red is a per-friend fetch failure: `refreshConnections`
     /// returns that friend's cached connection (still accepted, so the row stays on screen) plus a
     /// `.failed` outcome, which is what turns the dot red.
-    func scheduleSyncHealth(for friend: FriendConnection, now: Date = Date()) -> FriendScheduleSyncHealth {
+    func scheduleSyncHealth(
+        for friend: FriendConnection,
+        now: Date = Date(),
+        calendar: Calendar = .autoupdatingCurrent
+    ) -> FriendScheduleSyncHealth {
         let key = GEMSIDNormalizer.normalize(friend.employeeID)
         // No recorded outcome means this friend has not been through a refresh in this session;
         // treat the cached data as trustworthy rather than flagging a failure that did not happen.
@@ -1302,7 +1306,8 @@ final class AppViewModel: ObservableObject {
         return FriendScheduleHealthEvaluator.health(
             outcome: outcome,
             schedules: friend.sharedSchedules,
-            now: now
+            now: now,
+            calendar: calendar
         )
     }
 
@@ -3572,6 +3577,32 @@ final class AppViewModel: ObservableObject {
             throw BidPeriodScheduleExportError.assignedBidPeriodUnavailable
         }
 
+        return try await prepareBidPeriodScheduleJSONExport(
+            for: resolvedBidPeriod,
+            domicile: domicile
+        )
+    }
+
+    func prepareBidPeriodScheduleJSONExport(
+        bidPeriodID: String
+    ) async throws -> TripJSONExportOutput {
+        let domicile = OperationalSettings.selectedCrewBase().rawValue
+        guard let resolvedBidPeriod = bidPeriod(
+            identifier: bidPeriodID,
+            domicile: domicile
+        ) else {
+            throw BidPeriodScheduleExportError.assignedBidPeriodUnavailable
+        }
+        return try await prepareBidPeriodScheduleJSONExport(
+            for: resolvedBidPeriod,
+            domicile: domicile
+        )
+    }
+
+    private func prepareBidPeriodScheduleJSONExport(
+        for resolvedBidPeriod: CalendarBidPeriod,
+        domicile: String
+    ) async throws -> TripJSONExportOutput {
         let profile = ProfileSnapshot.loadFromLocalStorage()
         let identity = verifiedIdentity
         let canonicalGEMS = GEMSIDNormalizer.normalize(

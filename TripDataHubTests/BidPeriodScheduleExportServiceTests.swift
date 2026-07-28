@@ -131,6 +131,44 @@ final class BidPeriodScheduleExportServiceTests: XCTestCase {
         XCTAssertTrue(export.diagnostics.partial)
     }
 
+    func test_emptyMatchingRichPayloadFallsBackWithDiagnostics() throws {
+        let displayed = schedule(
+            id: "empty-rich",
+            pairing: "T4005",
+            departure: "2026-06-01T12:00:00Z",
+            arrival: "2026-06-01T16:00:00Z"
+        )
+        let emptyRich = CrewAccessTripJSON(
+            schemaVersion: 1,
+            source: "fictional-test",
+            sourceVersion: "1",
+            mappingVersion: "test",
+            generatedAt: "2026-06-01T00:00:00Z",
+            tripId: "T4005",
+            tripInformationDate: "2026-06-01",
+            creditTime: nil,
+            tripDays: nil,
+            tafb: nil,
+            dutyTotals: [],
+            hotelDetails: [],
+            crew: [],
+            items: []
+        )
+
+        let export = BidPeriodScheduleExportService.makeExport(input: try input(
+            schedules: [displayed],
+            crewAccessPayloads: [emptyRich]
+        ))
+
+        let trip = try XCTUnwrap(export.trips.first)
+        XCTAssertEqual(trip.source, .displayedScheduleFallback)
+        XCTAssertEqual(trip.events.count, 1)
+        XCTAssertTrue(trip.diagnostics.issues.contains {
+            $0.code == "richCrewAccessPayloadInvalid"
+        })
+        XCTAssertTrue(export.diagnostics.partial)
+    }
+
     func test_mapsAvailableRichTripSummaryToStructuredValues() throws {
         let richSchedule = schedule(
             id: "rich-summary",
@@ -205,6 +243,114 @@ final class BidPeriodScheduleExportServiceTests: XCTestCase {
         XCTAssertEqual(trip.events[1].hotel?.name, "Example Airport Hotel")
     }
 
+    func test_fallbackSkipsGroundTransportWithoutDroppingLayover() throws {
+        let first = leg(
+            id: "ground-bridge-first",
+            pairing: "T4115",
+            legNumber: 1,
+            departure: "2026-06-01T12:00:00Z",
+            arrival: "2026-06-01T16:00:00Z",
+            origin: "ANC",
+            destination: "SDF",
+            layoverStation: "SDF",
+            layoverHotelName: "Example Airport Hotel",
+            layoverDuration: "22:00"
+        )
+        let ground = leg(
+            id: "ground-bridge-middle",
+            pairing: "T4115",
+            legNumber: 2,
+            departure: "2026-06-02T10:00:00Z",
+            arrival: "2026-06-02T12:00:00Z",
+            origin: "SDF",
+            destination: "MEM",
+            status: "GND"
+        )
+        let final = leg(
+            id: "ground-bridge-final",
+            pairing: "T4115",
+            legNumber: 3,
+            departure: "2026-06-02T14:00:00Z",
+            arrival: "2026-06-02T18:00:00Z",
+            origin: "MEM",
+            destination: "ANC"
+        )
+        let export = BidPeriodScheduleExportService.makeExport(input: try input(schedules: [
+            schedule(id: "ground-bridge", legs: [final, ground, first])
+        ]))
+
+        let trip = try XCTUnwrap(export.trips.first)
+        XCTAssertEqual(trip.events.map(\.type), [.flight, .layover, .flight])
+        XCTAssertEqual(trip.events.map(\.sequence), [1, 2, 3])
+        XCTAssertFalse(trip.events.contains { $0.flightNumber == "GND" })
+        XCTAssertEqual(trip.events[1].station, "SDF")
+        XCTAssertEqual(trip.events[1].hotel?.name, "Example Airport Hotel")
+        XCTAssertEqual(trip.events[1].previousSegmentID, trip.events[0].id)
+        XCTAssertEqual(trip.events[1].nextSegmentID, trip.events[2].id)
+    }
+
+    func test_groundTransportOnlyRichPayloadIsDeferredWithoutInvalidPayloadDiagnostic() throws {
+        let groundLeg = leg(
+            id: "ground-only",
+            pairing: "T4116",
+            legNumber: 1,
+            departure: "2026-06-01T12:00:00Z",
+            arrival: "2026-06-01T14:00:00Z",
+            origin: "SDF",
+            destination: "MEM",
+            status: "GND"
+        )
+        let groundPayload = CrewAccessTripJSON(
+            schemaVersion: 1,
+            source: "fictional-test",
+            sourceVersion: "1",
+            mappingVersion: "test",
+            generatedAt: "2026-06-01T00:00:00Z",
+            tripId: "T4116",
+            tripInformationDate: "2026-06-01",
+            creditTime: nil,
+            tripDays: "1",
+            tafb: nil,
+            dutyTotals: [],
+            hotelDetails: [],
+            crew: [],
+            items: [
+                CrewAccessTripItemJSON(
+                    sequence: 1,
+                    depAirport: "SDF",
+                    arrAirport: "MEM",
+                    deadhead: false,
+                    flight: "GND",
+                    startUtc: "2026-06-01T12:00:00Z",
+                    endUtc: "2026-06-01T14:00:00Z",
+                    startLocalDisplay: "ignored",
+                    endLocalDisplay: "ignored",
+                    originTz: "America/Kentucky/Louisville",
+                    destinationTz: "America/Chicago",
+                    timeDerivation: "from_utc",
+                    aircraft: "",
+                    block: "",
+                    stdUtc: "2026-06-01T12:00:00Z",
+                    staUtc: "2026-06-01T14:00:00Z",
+                    atdUtc: nil,
+                    ataUtc: nil,
+                    tailNumber: nil
+                )
+            ]
+        )
+        let export = BidPeriodScheduleExportService.makeExport(input: try input(
+            schedules: [schedule(id: "ground-only", legs: [groundLeg])],
+            crewAccessPayloads: [groundPayload]
+        ))
+
+        let trip = try XCTUnwrap(export.trips.first)
+        XCTAssertEqual(trip.source, .crewAccessRich)
+        XCTAssertTrue(trip.events.isEmpty)
+        XCTAssertTrue(trip.diagnostics.unavailableFieldGroups.contains("groundTransport"))
+        XCTAssertTrue(trip.diagnostics.issues.contains { $0.code == "publicEventTypesDeferred" })
+        XCTAssertFalse(trip.diagnostics.issues.contains { $0.code == "richCrewAccessPayloadInvalid" })
+    }
+
     func test_exportsAllCalendarCategoriesWithCategoryAndSource() throws {
         let operational = try ManualOperationalEvent(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000101")!,
@@ -269,6 +415,25 @@ final class BidPeriodScheduleExportServiceTests: XCTestCase {
             Set(export.diagnostics.issues.filter { $0.scope == "owner" }.compactMap(\.fieldGroup)),
             Set(["name", "gems", "fleet", "position", "seniorityNumber", "dateOfHire"])
         )
+    }
+
+    func test_ownerNameCollapsesWhitespace() throws {
+        let owner = BidPeriodExportOwnerInput(
+            profileName: "  Avery \n Example  ",
+            profileGEMS: "0000001",
+            profileFleet: "747",
+            profilePosition: "FO",
+            verifiedName: "",
+            verifiedGEMS: "",
+            verifiedEquipment: "747",
+            verifiedSeat: "FO",
+            verifiedDateOfHire: "2020-01-01",
+            seniorityNumber: "99999"
+        )
+
+        let export = BidPeriodScheduleExportService.makeExport(input: try input(owner: owner))
+
+        XCTAssertEqual(export.owner.name, "AVERY EXAMPLE")
     }
 
     func test_orderingIsDeterministicForTripsLegsAndCalendarEvents() throws {
@@ -444,6 +609,7 @@ final class BidPeriodScheduleExportServiceTests: XCTestCase {
         arrival: String,
         origin: String,
         destination: String,
+        status: String = "",
         layoverStation: String? = nil,
         layoverHotelName: String? = nil,
         layoverDuration: String? = nil
@@ -460,7 +626,7 @@ final class BidPeriodScheduleExportServiceTests: XCTestCase {
             arrLocal: arrival,
             depUTC: departure,
             arrUTC: arrival,
-            status: "",
+            status: status,
             block: "04:00",
             layoverStation: layoverStation,
             layoverHotelName: layoverHotelName,

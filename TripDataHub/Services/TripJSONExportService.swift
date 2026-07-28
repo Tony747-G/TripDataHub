@@ -291,14 +291,14 @@ enum TripJSONExportService {
     }
 
     static func normalizedGEMS(_ source: String) throws -> String {
-        let digits = source
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .compactMap { character -> String? in
-                guard let value = character.wholeNumberValue, (0...9).contains(value) else { return nil }
-                return String(value)
-            }
-            .joined()
-        guard !digits.isEmpty else { throw TripJSONExportError.invalidOwnerGEMS }
+        let digits = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !digits.isEmpty,
+              digits.allSatisfy({ character in
+                  guard let value = character.wholeNumberValue else { return false }
+                  return (0...9).contains(value)
+              }) else {
+            throw TripJSONExportError.invalidOwnerGEMS
+        }
         if digits.count < GEMSIDNormalizer.canonicalLength {
             return String(repeating: "0", count: GEMSIDNormalizer.canonicalLength - digits.count) + digits
         }
@@ -366,17 +366,17 @@ enum TripJSONExportService {
             guard !canonicalGEMS.isEmpty else { return false }
             return crewGEMS(crew.crewID, matchesCanonical: canonicalGEMS)
         }
-        let fallbackCrew = matchingCrew ?? (payload.crew.count == 1 ? payload.crew.first : nil)
 
-        let rawGEMS = firstNonempty(source.profileGEMS, source.verifiedGEMS, fallbackCrew?.crewID ?? "")
+        // Never infer the owner from an arbitrary sole crew member. Crew data may be used only
+        // after its GEMS ID matches the canonical Profile/verified identity.
+        let rawGEMS = firstNonempty(source.profileGEMS, source.verifiedGEMS)
         let gems = try normalizedGEMS(rawGEMS)
         let name = resolvedOwnerName(
             profileDisplayName: source.profileName,
             profileGivenName: source.profileGivenName,
             profileFamilyName: source.profileFamilyName,
             verifiedName: source.verifiedName,
-            matchingCrewName: matchingCrew?.name ?? "",
-            fallbackCrewName: fallbackCrew?.name ?? ""
+            matchingCrewName: matchingCrew?.name ?? ""
         )
         let base = firstNonempty(source.profileBase, source.verifiedBase).uppercased()
         let fleet = firstNonempty(
@@ -387,9 +387,8 @@ enum TripJSONExportService {
         let position = normalizedPosition(firstNonempty(
             source.profilePosition,
             matchingCrew?.position ?? "",
-            source.verifiedPosition,
-            fallbackCrew?.position ?? ""
-        ))
+            source.verifiedPosition
+        )) ?? ""
 
         guard !name.isEmpty else { throw TripJSONExportError.missingOwnerField("name") }
         guard !base.isEmpty else { throw TripJSONExportError.missingOwnerField("base") }
@@ -402,15 +401,9 @@ enum TripJSONExportService {
     private static func flightEvent(
         _ item: CrewAccessTripItemJSON,
         tripID: String,
-        sequence: Int,
-        includeGroundTransport: Bool = false
+        sequence: Int
     ) throws -> ExportEvent {
-        let type: ExportEventType
-        if includeGroundTransport, item.flight.caseInsensitiveCompare("GND") == .orderedSame {
-            type = .groundTransport
-        } else {
-            type = item.deadhead ? .deadhead : .flight
-        }
+        let type: ExportEventType = item.deadhead ? .deadhead : .flight
         let origin = normalizedIdentifier(item.depAirport)
         let destination = normalizedIdentifier(item.arrAirport)
         let start = try exportTimestamp(item.startUtc, timeZoneID: item.originTz)
@@ -432,9 +425,11 @@ enum TripJSONExportService {
     static func publicEvents(
         payload: CrewAccessTripJSON,
         schedule: PayPeriodSchedule,
-        tripID: String,
-        includeGroundTransport: Bool = false
+        tripID: String
     ) throws -> [ExportEvent] {
+        // Ground transportation remains a deferred schema type. The parser does not retain
+        // reliable structured transport details, so a GND row must not be mislabeled as a
+        // flight or emitted as a partially invented groundTransport event.
         let items = payload.items.sorted { lhs, rhs in
             (lhs.startUtc, lhs.sequence, lhs.flight) < (rhs.startUtc, rhs.sequence, rhs.flight)
         }
@@ -449,30 +444,33 @@ enum TripJSONExportService {
 
         for index in items.indices {
             let item = items[index]
+            guard !isGroundTransport(item) else {
+                continue
+            }
             let flight = try flightEvent(
                 item,
                 tripID: tripID,
-                sequence: nextSequence,
-                includeGroundTransport: includeGroundTransport
+                sequence: nextSequence
             )
             events.append(flight)
             nextSequence += 1
 
-            guard items.indices.contains(index + 1) else { continue }
-            let nextItem = items[index + 1]
-            guard normalizedIdentifier(item.arrAirport) == normalizedIdentifier(nextItem.depAirport),
+            let remainingItems = items.suffix(from: index + 1)
+            guard let nextIndex = remainingItems.firstIndex(where: {
+                !isGroundTransport($0)
+            }) else { continue }
+            let nextItem = items[nextIndex]
+            guard hasContinuousStationChain(
+                from: item,
+                through: items[(index + 1)..<nextIndex],
+                to: nextItem
+            ),
                   let blockIn = parseInstant(item.endUtc),
                   let nextBlockOut = parseInstant(nextItem.startUtc),
                   nextBlockOut > blockIn
             else { continue }
 
-            let nextType: ExportEventType
-            if includeGroundTransport,
-               nextItem.flight.caseInsensitiveCompare("GND") == .orderedSame {
-                nextType = .groundTransport
-            } else {
-                nextType = nextItem.deadhead ? .deadhead : .flight
-            }
+            let nextType: ExportEventType = nextItem.deadhead ? .deadhead : .flight
             let nextSegmentID = "event-\(tripID)-\(nextType.rawValue)-\(nextSequence + 1)"
             let station = normalizedIdentifier(item.arrAirport)
             let start = try exportTimestamp(item.endUtc, timeZoneID: item.destinationTz)
@@ -525,6 +523,28 @@ enum TripJSONExportService {
             nextSequence += 1
         }
         return events
+    }
+
+    private static func isGroundTransport(_ item: CrewAccessTripItemJSON) -> Bool {
+        item.flight.caseInsensitiveCompare("GND") == .orderedSame
+    }
+
+    private static func hasContinuousStationChain(
+        from item: CrewAccessTripItemJSON,
+        through intermediateItems: ArraySlice<CrewAccessTripItemJSON>,
+        to nextItem: CrewAccessTripItemJSON
+    ) -> Bool {
+        var station = normalizedIdentifier(item.arrAirport)
+        guard !station.isEmpty else { return false }
+
+        for intermediate in intermediateItems {
+            guard isGroundTransport(intermediate),
+                  station == normalizedIdentifier(intermediate.depAirport) else {
+                return false
+            }
+            station = normalizedIdentifier(intermediate.arrAirport)
+        }
+        return station == normalizedIdentifier(nextItem.depAirport)
     }
 
     static func scheduledRest(
@@ -705,10 +725,6 @@ enum TripJSONExportService {
         return formatter.string(from: date)
     }
 
-    private static func eventSort(_ lhs: ExportEvent, _ rhs: ExportEvent) -> Bool {
-        (lhs.start.instant, lhs.sequence, lhs.id) < (rhs.start.instant, rhs.sequence, rhs.id)
-    }
-
     private static func normalizedOwnerName(_ value: String) -> String {
         value.split(whereSeparator: \Character.isWhitespace).joined(separator: " ").uppercased()
     }
@@ -718,8 +734,7 @@ enum TripJSONExportService {
         profileGivenName: String,
         profileFamilyName: String,
         verifiedName: String,
-        matchingCrewName: String,
-        fallbackCrewName: String
+        matchingCrewName: String
     ) -> String {
         let canonicalDisplayName = normalizedOwnerName(profileDisplayName)
         let combinedProfileName = normalizedOwnerName(
@@ -735,11 +750,6 @@ enum TripJSONExportService {
             normalizedOwnerName(matchingCrewName),
             givenNameHint: givenNameHint
         )
-        let normalizedFallbackCrewName = publicOrderCrewName(
-            normalizedOwnerName(fallbackCrewName),
-            givenNameHint: givenNameHint
-        )
-
         return [
             canonicalDisplayName,
             combinedProfileName,
@@ -750,8 +760,7 @@ enum TripJSONExportService {
                 canonicalDisplayName,
                 combinedProfileName,
                 normalizedVerifiedName,
-                normalizedMatchingCrewName,
-                normalizedFallbackCrewName
+                normalizedMatchingCrewName
             )
     }
 
@@ -784,7 +793,8 @@ enum TripJSONExportService {
         return ordered.joined(separator: " ")
     }
 
-    private static func normalizedPosition(_ value: String) -> String {
+    static func normalizedPosition(_ value: String?) -> String? {
+        guard let value else { return nil }
         let compact = value
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .uppercased()
@@ -795,7 +805,7 @@ enum TripJSONExportService {
         case "CAPTAIN", "CAPT", "CPT", "CA": return "CA"
         case "FIRSTOFFICER", "FO": return "FO"
         case "SECOND OFFICER", "SECONDOFFICER", "SO": return "SO"
-        default: return compact
+        default: return compact.isEmpty ? nil : compact
         }
     }
 
@@ -841,7 +851,7 @@ enum TripJSONExportService {
         return String(value[range])
     }
 
-    private static func stableIDComponent(_ value: String) -> String {
+    static func stableIDComponent(_ value: String) -> String {
         sanitizedFilenameComponent(value.lowercased(), fallback: "trip")
     }
 

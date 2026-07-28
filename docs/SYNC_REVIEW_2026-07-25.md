@@ -36,6 +36,7 @@
 | 友達アップロードが端末同期と順序保証なしに走る | ✅ | `handleSchedulesChangedForSharing` が sharing 無効時に変更を保留し、`enableScheduleSharingForFriends` で replay |
 | アップロード内容を検証するテストが皆無 | ✅ | fake に `uploadedSchedulesHistory` を追加し、内容ベースのテストを6件追加 |
 | 友達リンク CKQuery 失敗が refresh 全体を中断 | ✅ | `cloudConnections` の失敗を捕捉し、既知の友達は record ID 取得で更新を継続 |
+| 友達スケジュール取得失敗が成功表示になる | ✅ | レコード未作成だけを正常な空予定として扱い、実エラーはキャッシュを維持したまま `.failed` として返す |
 
 `Last Updated` の根本原因は「サーバ更新時刻を UI に流用したこと」ではなく、
 **`uploadSchedule` が無条件書き込みだったこと**。fingerprint を入れたことで
@@ -315,6 +316,7 @@ iPhone 2台や iPad 2台は deviceID でしか区別できず、それで十分�
 - `test_friendUpload_republishesScheduleChangeDeferredWhileSharingWasDisabled` — sharing 無効中の変更が捨てられない
 - `test_friendUpload_publishesMergedSchedulesNotOnlyCrewAccess` — 公開されるのは merge 済み `schedules`
 - `test_refreshConnections_degradesToRecordIDFetchWhenLinkQueryFails` — index 未デプロイでも既知の友達は更新される
+- `test_refreshConnections_reportsScheduleFetchFailureAndPreservesCachedFriend` — 取得失敗時はキャッシュを維持しつつ赤ステータスになる
 
 ---
 

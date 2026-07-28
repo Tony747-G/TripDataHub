@@ -11,6 +11,11 @@ final class FriendScheduleStatusTests: XCTestCase {
 
     /// Fixed "now" so "tomorrow" is unambiguous: 2026-07-25 12:00 UTC.
     private let now = Date(timeIntervalSince1970: 1_784_980_800)
+    private var utcCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        return calendar
+    }
 
     // MARK: - Green
 
@@ -20,7 +25,7 @@ final class FriendScheduleStatusTests: XCTestCase {
         ])])
         let vm = makeViewModel(friends: [friend], outcomes: [friend.employeeID: .succeeded])
 
-        XCTAssertEqual(vm.scheduleSyncHealth(for: friend, now: now), .synchronizedWithUpcomingSchedule)
+        XCTAssertEqual(vm.scheduleSyncHealth(for: friend, now: now, calendar: utcCalendar), .synchronizedWithUpcomingSchedule)
     }
 
     /// Departs today, lands tomorrow: still operating when tomorrow begins, so green.
@@ -30,7 +35,7 @@ final class FriendScheduleStatusTests: XCTestCase {
         ])])
         let vm = makeViewModel(friends: [friend], outcomes: [friend.employeeID: .succeeded])
 
-        XCTAssertEqual(vm.scheduleSyncHealth(for: friend, now: now), .synchronizedWithUpcomingSchedule)
+        XCTAssertEqual(vm.scheduleSyncHealth(for: friend, now: now, calendar: utcCalendar), .synchronizedWithUpcomingSchedule)
     }
 
     func test_tripStartingAndEndingTomorrow_isGreen() {
@@ -39,7 +44,7 @@ final class FriendScheduleStatusTests: XCTestCase {
         ])])
         let vm = makeViewModel(friends: [friend], outcomes: [friend.employeeID: .succeeded])
 
-        XCTAssertEqual(vm.scheduleSyncHealth(for: friend, now: now), .synchronizedWithUpcomingSchedule)
+        XCTAssertEqual(vm.scheduleSyncHealth(for: friend, now: now, calendar: utcCalendar), .synchronizedWithUpcomingSchedule)
     }
 
     // MARK: - Amber
@@ -49,7 +54,7 @@ final class FriendScheduleStatusTests: XCTestCase {
         let friend = acceptedFriend(schedules: [])
         let vm = makeViewModel(friends: [friend], outcomes: [friend.employeeID: .succeeded])
 
-        XCTAssertEqual(vm.scheduleSyncHealth(for: friend, now: now), .synchronizedWithoutUpcomingSchedule)
+        XCTAssertEqual(vm.scheduleSyncHealth(for: friend, now: now, calendar: utcCalendar), .synchronizedWithoutUpcomingSchedule)
     }
 
     /// A friend with an active link but no schedule record is a successful fetch of nothing.
@@ -57,7 +62,7 @@ final class FriendScheduleStatusTests: XCTestCase {
         let friend = acceptedFriend(schedules: [schedule(legs: [])])
         let vm = makeViewModel(friends: [friend], outcomes: [friend.employeeID: .succeeded])
 
-        XCTAssertEqual(vm.scheduleSyncHealth(for: friend, now: now), .synchronizedWithoutUpcomingSchedule)
+        XCTAssertEqual(vm.scheduleSyncHealth(for: friend, now: now, calendar: utcCalendar), .synchronizedWithoutUpcomingSchedule)
     }
 
     func test_tripFinishingToday_isAmber() {
@@ -66,7 +71,7 @@ final class FriendScheduleStatusTests: XCTestCase {
         ])])
         let vm = makeViewModel(friends: [friend], outcomes: [friend.employeeID: .succeeded])
 
-        XCTAssertEqual(vm.scheduleSyncHealth(for: friend, now: now), .synchronizedWithoutUpcomingSchedule)
+        XCTAssertEqual(vm.scheduleSyncHealth(for: friend, now: now, calendar: utcCalendar), .synchronizedWithoutUpcomingSchedule)
     }
 
     func test_tripEntirelyInThePast_isAmber() {
@@ -75,7 +80,7 @@ final class FriendScheduleStatusTests: XCTestCase {
         ])])
         let vm = makeViewModel(friends: [friend], outcomes: [friend.employeeID: .succeeded])
 
-        XCTAssertEqual(vm.scheduleSyncHealth(for: friend, now: now), .synchronizedWithoutUpcomingSchedule)
+        XCTAssertEqual(vm.scheduleSyncHealth(for: friend, now: now, calendar: utcCalendar), .synchronizedWithoutUpcomingSchedule)
     }
 
     // MARK: - Red, and that the red row is actually on screen
@@ -92,7 +97,7 @@ final class FriendScheduleStatusTests: XCTestCase {
             [friend.employeeID],
             "a failed fetch must keep the cached row visible, otherwise red is unreachable"
         )
-        XCTAssertEqual(vm.scheduleSyncHealth(for: friend, now: now), .failed)
+        XCTAssertEqual(vm.scheduleSyncHealth(for: friend, now: now, calendar: utcCalendar), .failed)
     }
 
     /// Both friend lists render `acceptedFriendConnections`; this is the value each row receives.
@@ -113,7 +118,9 @@ final class FriendScheduleStatusTests: XCTestCase {
         XCTAssertEqual(Set(rendered.map(\.employeeID)), ["0222222", "0333333"])
 
         let healths = Dictionary(
-            uniqueKeysWithValues: rendered.map { ($0.employeeID, vm.scheduleSyncHealth(for: $0, now: now)) }
+            uniqueKeysWithValues: rendered.map {
+                ($0.employeeID, vm.scheduleSyncHealth(for: $0, now: now, calendar: utcCalendar))
+            }
         )
         XCTAssertEqual(healths["0222222"], .failed)
         XCTAssertEqual(healths["0333333"], .synchronizedWithUpcomingSchedule)
@@ -135,9 +142,9 @@ final class FriendScheduleStatusTests: XCTestCase {
             ]
         )
 
-        XCTAssertEqual(vm.scheduleSyncHealth(for: failing, now: now), .failed)
-        XCTAssertEqual(vm.scheduleSyncHealth(for: green, now: now), .synchronizedWithUpcomingSchedule)
-        XCTAssertEqual(vm.scheduleSyncHealth(for: amber, now: now), .synchronizedWithoutUpcomingSchedule)
+        XCTAssertEqual(vm.scheduleSyncHealth(for: failing, now: now, calendar: utcCalendar), .failed)
+        XCTAssertEqual(vm.scheduleSyncHealth(for: green, now: now, calendar: utcCalendar), .synchronizedWithUpcomingSchedule)
+        XCTAssertEqual(vm.scheduleSyncHealth(for: amber, now: now, calendar: utcCalendar), .synchronizedWithoutUpcomingSchedule)
     }
 
     /// A CloudKit link-query failure degrades to per-friend record fetches, so each friend still
@@ -164,7 +171,7 @@ final class FriendScheduleStatusTests: XCTestCase {
 
         let byID = Dictionary(
             uniqueKeysWithValues: vm.acceptedFriendConnections.map {
-                ($0.employeeID, vm.scheduleSyncHealth(for: $0, now: now))
+                ($0.employeeID, vm.scheduleSyncHealth(for: $0, now: now, calendar: utcCalendar))
             }
         )
         XCTAssertEqual(byID["0222222"], .failed)
@@ -178,7 +185,7 @@ final class FriendScheduleStatusTests: XCTestCase {
         ])])
         let vm = makeViewModel(friends: [friend], outcomes: [:])
 
-        XCTAssertEqual(vm.scheduleSyncHealth(for: friend, now: now), .synchronizedWithUpcomingSchedule)
+        XCTAssertEqual(vm.scheduleSyncHealth(for: friend, now: now, calendar: utcCalendar), .synchronizedWithUpcomingSchedule)
     }
 
     // MARK: - Accessibility
@@ -226,7 +233,10 @@ final class FriendScheduleStatusTests: XCTestCase {
 
         // And it evaluates without a recorded outcome.
         let vm = makeViewModel(friends: decoded, outcomes: [:])
-        XCTAssertEqual(vm.scheduleSyncHealth(for: decoded[0], now: now), .synchronizedWithoutUpcomingSchedule)
+        XCTAssertEqual(
+            vm.scheduleSyncHealth(for: decoded[0], now: now, calendar: utcCalendar),
+            .synchronizedWithoutUpcomingSchedule
+        )
     }
 
     // MARK: - Evaluator boundary

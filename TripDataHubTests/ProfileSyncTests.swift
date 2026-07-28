@@ -711,6 +711,8 @@ final class ProfileSyncTests: XCTestCase {
         )
         oldRemote.saveToLocalStorage()
         let mockService = MockProfileCloudKitService(fetchResult: oldRemote, saveDelayNanoseconds: 100_000_000)
+        let tombstoneSaved = expectation(description: "profile tombstone saved")
+        mockService.onSave = { tombstoneSaved.fulfill() }
         let vm = AppViewModel(profileCloudKitService: mockService)
 
         vm.deleteLocalProfileAccount()
@@ -719,7 +721,7 @@ final class ProfileSyncTests: XCTestCase {
         XCTAssertEqual(ProfileSnapshot.loadFromLocalStorage().displayName, "")
         XCTAssertNil(ProfileSnapshot.loadFromLocalStorage().avatarImageData)
 
-        try await Task.sleep(nanoseconds: 150_000_000)
+        await fulfillment(of: [tombstoneSaved], timeout: 2)
         XCTAssertTrue(mockService.saveCalled)
     }
 
@@ -936,6 +938,7 @@ final class MockProfileCloudKitService: ProfileCloudKitServicing, @unchecked Sen
     private(set) var saveCallCount = 0
     private(set) var deleteCalled = false
     private(set) var lastSavedSnapshot: ProfileSnapshot?
+    var onSave: (() -> Void)?
 
     init(
         fetchResult: ProfileSnapshot?,
@@ -961,6 +964,7 @@ final class MockProfileCloudKitService: ProfileCloudKitServicing, @unchecked Sen
         saveCalled = true
         saveCallCount += 1
         lastSavedSnapshot = snapshot
+        onSave?()
     }
 
     func deleteProfile() async throws {

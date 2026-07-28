@@ -912,6 +912,85 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertEqual(refreshed.first(where: { $0.employeeID == "0333333" })?.status, .pending)
     }
 
+    func test_refreshConnections_reportsScheduleFetchFailureAndPreservesCachedFriend() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+        let cachedSchedule = makeSchedule(legs: [
+            makeLeg(
+                leg: 1,
+                flight: "100",
+                depAirport: "ANC",
+                arrAirport: "SDF",
+                depUTC: "2026-05-01T06:00:00Z",
+                arrUTC: "2026-05-01T10:00:00Z"
+            )
+        ])
+        let cached = FriendConnection(
+            employeeID: "0222222",
+            status: .pending,
+            requestedAt: Date(timeIntervalSince1970: 1),
+            sharedSchedules: [cachedSchedule]
+        )
+        await database.insertFriendLink(
+            gemsA: "0111111",
+            gemsB: "0222222",
+            approvedA: true,
+            approvedB: true,
+            status: "accepted",
+            linkedAt: Date(timeIntervalSince1970: 2)
+        )
+        await database.failRecordFetch(named: "tdh_schedule_0222222")
+
+        let result = try await service.refreshConnections(
+            myGEMSID: "111111",
+            connections: [cached]
+        )
+
+        XCTAssertEqual(result.connections.first?.sharedSchedules, [cachedSchedule])
+        XCTAssertEqual(result.connections.first?.status, .accepted)
+        XCTAssertEqual(result.connections.first?.linkedAt, Date(timeIntervalSince1970: 2))
+        XCTAssertEqual(result.outcomes["0222222"], .failed(.fetchError))
+    }
+
+    func test_refreshConnections_preservesCachedScheduleWhenAcceptedFriendHasNoScheduleRecord() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+        let cachedSchedule = makeSchedule(legs: [
+            makeLeg(
+                leg: 1,
+                flight: "100",
+                depAirport: "ANC",
+                arrAirport: "SDF",
+                depUTC: "2026-05-01T06:00:00Z",
+                arrUTC: "2026-05-01T10:00:00Z"
+            )
+        ])
+        let cached = FriendConnection(
+            employeeID: "0222222",
+            status: .accepted,
+            requestedAt: Date(timeIntervalSince1970: 1),
+            linkedAt: Date(timeIntervalSince1970: 2),
+            sharedSchedules: [cachedSchedule]
+        )
+        await database.insertFriendLink(
+            gemsA: "0111111",
+            gemsB: "0222222",
+            approvedA: true,
+            approvedB: true,
+            status: "accepted",
+            linkedAt: Date(timeIntervalSince1970: 2)
+        )
+
+        let result = try await service.refreshConnections(
+            myGEMSID: "111111",
+            connections: [cached]
+        )
+
+        XCTAssertEqual(result.connections.first?.sharedSchedules, [cachedSchedule])
+        XCTAssertEqual(result.connections.first?.status, .accepted)
+        XCTAssertEqual(result.outcomes["0222222"], .succeeded)
+    }
+
     func test_refreshConnections_clearsSharedSchedulesWhenFriendLinkIsCanceled() async throws {
         let database = FriendCloudKitFakeDatabase()
         let service = FriendScheduleCloudKitService(databaseProvider: { database })

@@ -20,6 +20,7 @@ struct TimelineTabView: View {
     @State private var friendMatchAlert: FriendMatchPresentation?
     @State private var friendScheduleMatches: FriendScheduleMatches = .empty
     @State private var tripActionSelection: TimelineTripActionSelection?
+    @State private var tripPendingDeletion: TimelineTripActionSelection?
     @State private var tripJSONExportOutput: TripJSONExportOutput?
     @State private var tripJSONExportErrorMessage: String?
     @State private var showingAddEvent = false
@@ -179,14 +180,7 @@ struct TimelineTabView: View {
                     Label("Export Bid Period JSON", systemImage: "calendar.badge.clock")
                 }
                 Button("Delete Trip", role: .destructive) {
-                    if let pairing = tripActionSelection?.pairing {
-                        let ids = Set(
-                            viewModel.crewAccessSchedules
-                                .filter { $0.legs.contains { $0.pairing == pairing } }
-                                .map(\.id)
-                        )
-                        Task { await viewModel.deleteCrewAccessTrips(ids: ids) }
-                    }
+                    tripPendingDeletion = tripActionSelection
                     dismissTripActions()
                 }
                 Button("Cancel", role: .cancel) {
@@ -194,6 +188,22 @@ struct TimelineTabView: View {
                 }
             } message: {
                 Text("Choose an action for this trip.")
+            }
+            .alert(
+                tripPendingDeletion.map { "Delete Trip \($0.pairing)?" } ?? "Delete Trip?",
+                isPresented: Binding(
+                    get: { tripPendingDeletion != nil },
+                    set: { if !$0 { tripPendingDeletion = nil } }
+                )
+            ) {
+                Button("Delete Trip", role: .destructive) {
+                    deletePendingTrip()
+                }
+                Button("Cancel", role: .cancel) {
+                    tripPendingDeletion = nil
+                }
+            } message: {
+                Text("This will remove the trip from Timeline and synced devices.")
             }
 #if canImport(UIKit)
             .sheet(item: $tripJSONExportOutput, onDismiss: removeTripJSONExportFile) { output in
@@ -258,6 +268,17 @@ struct TimelineTabView: View {
 
     private func dismissTripActions() {
         tripActionSelection = nil
+    }
+
+    private func deletePendingTrip() {
+        guard let pairing = tripPendingDeletion?.pairing else { return }
+        let ids = Set(
+            viewModel.crewAccessSchedules
+                .filter { $0.legs.contains { $0.pairing == pairing } }
+                .map(\.id)
+        )
+        tripPendingDeletion = nil
+        Task { await viewModel.deleteCrewAccessTrips(ids: ids) }
     }
 
     private func exportSelectedTripJSON() {

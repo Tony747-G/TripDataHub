@@ -935,6 +935,9 @@ struct CalendarTripTimelinePopup: View {
     @State private var scrollTrigger = UUID()
     @State private var unusedSelection: String?
     @State private var timelineContentHeight: CGFloat?
+    @State private var tripJSONExportOutput: TripJSONExportOutput?
+    @State private var tripJSONExportErrorMessage: String?
+    @State private var isExportingTripJSON = false
 
     private static let maxTimelineHeight: CGFloat = 530
 
@@ -962,6 +965,15 @@ struct CalendarTripTimelinePopup: View {
                     Text("Trip Id: \(tripDisplayID)")
                         .font(.system(size: 16, weight: .bold))
                     Spacer()
+                    Button {
+                        Task { await exportTripJSON() }
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 18, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isExportingTripJSON)
+                    .accessibilityLabel("Export Trip JSON")
                     Button {
                         onDismiss()
                     } label: {
@@ -997,6 +1009,68 @@ struct CalendarTripTimelinePopup: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 40)
         }
+#if canImport(UIKit)
+        .sheet(item: $tripJSONExportOutput, onDismiss: removeTripJSONExportFile) { output in
+            ActivityView(activityItems: [output.url]) { _ in
+                TripJSONExportService.removeTemporaryFiles(for: output)
+                tripJSONExportOutput = nil
+            }
+        }
+#endif
+        .alert("Unable to Export JSON", isPresented: Binding(
+            get: { tripJSONExportErrorMessage != nil },
+            set: { if !$0 { tripJSONExportErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { tripJSONExportErrorMessage = nil }
+        } message: {
+            Text(tripJSONExportErrorMessage ?? "The trip could not be exported.")
+        }
+    }
+
+    @MainActor
+    private func exportTripJSON() async {
+        guard !isExportingTripJSON else { return }
+        guard let schedule = exportSchedule else {
+            tripJSONExportErrorMessage = TripJSONExportError.tripDataUnavailable.localizedDescription
+            return
+        }
+        isExportingTripJSON = true
+        defer { isExportingTripJSON = false }
+
+        do {
+            removeTripJSONExportFile()
+            tripJSONExportOutput = try await viewModel.prepareCrewAccessTripJSONExport(for: schedule)
+        } catch {
+            tripJSONExportErrorMessage = error.localizedDescription
+        }
+    }
+
+    private var exportSchedule: PayPeriodSchedule? {
+        let matchingSchedules = viewModel.crewAccessSchedules.filter { schedule in
+            schedule.legs.contains { leg in
+                "\(leg.payPeriod)|\(leg.pairing)" == tripID
+            }
+        }
+        let legs = matchingSchedules.flatMap(\.legs).filter {
+            "\($0.payPeriod)|\($0.pairing)" == tripID
+        }
+        guard !legs.isEmpty else { return nil }
+        return PayPeriodSchedule(
+            id: tripID,
+            label: legs[0].payPeriod,
+            tripCount: 1,
+            legCount: legs.count,
+            openTimeCount: 0,
+            updatedAt: matchingSchedules.map(\.updatedAt).max() ?? .distantPast,
+            legs: legs,
+            openTimeTrips: []
+        )
+    }
+
+    private func removeTripJSONExportFile() {
+        guard let output = tripJSONExportOutput else { return }
+        TripJSONExportService.removeTemporaryFiles(for: output)
+        tripJSONExportOutput = nil
     }
 }
 

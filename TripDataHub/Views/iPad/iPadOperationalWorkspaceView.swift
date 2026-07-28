@@ -48,6 +48,9 @@ struct IPadOperationalWorkspaceView: View {
     @State private var bidPeriodPDFExportURL: URL?
     @State private var isExportingBidPeriodPDF = false
     @State private var bidPeriodExportErrorMessage: String?
+    @State private var bidPeriodJSONExportOutput: TripJSONExportOutput?
+    @State private var isExportingBidPeriodJSON = false
+    @State private var bidPeriodJSONExportErrorMessage: String?
     @State private var exportIncludesBidLayer = true
     @State private var exportIncludesPersonalLayer = true
     @State private var isShowingImportPreviewFromExternalOpen = false
@@ -187,6 +190,12 @@ struct IPadOperationalWorkspaceView: View {
                 }
             }
         }
+        .sheet(item: $bidPeriodJSONExportOutput, onDismiss: removeBidPeriodJSONExportFile) { output in
+            IPadActivityView(activityItems: [output.url]) { _ in
+                TripJSONExportService.removeTemporaryFiles(for: output)
+                bidPeriodJSONExportOutput = nil
+            }
+        }
 #endif
         .sheet(isPresented: $showingBidPeriodExportOptions) {
             NavigationStack {
@@ -230,6 +239,14 @@ struct IPadOperationalWorkspaceView: View {
             Button("OK", role: .cancel) { bidPeriodExportErrorMessage = nil }
         } message: {
             Text(bidPeriodExportErrorMessage ?? "Unable to generate the PDF.")
+        }
+        .alert("JSON Export Failed", isPresented: Binding(
+            get: { bidPeriodJSONExportErrorMessage != nil },
+            set: { if !$0 { bidPeriodJSONExportErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { bidPeriodJSONExportErrorMessage = nil }
+        } message: {
+            Text(bidPeriodJSONExportErrorMessage ?? "Unable to generate the Bid Period JSON.")
         }
         .onChange(of: viewModel.pendingImport?.id) { _, newValue in
             isShowingImportPreviewFromExternalOpen = newValue != nil
@@ -276,6 +293,13 @@ struct IPadOperationalWorkspaceView: View {
             exportIncludesPersonalLayer = true
             showingBidPeriodExportOptions = true
         })
+        items.append(ExpandableFloatingMenuItem(
+            id: "export-json",
+            icon: "doc.badge.arrow.up",
+            label: isExportingBidPeriodJSON ? "Exporting..." : "Export JSON"
+        ) {
+            Task { await exportCurrentBidPeriodJSON() }
+        })
         items.append(ExpandableFloatingMenuItem(id: "settings", icon: "gearshape", label: "Settings") {
             showingSettings = true
         })
@@ -321,6 +345,34 @@ struct IPadOperationalWorkspaceView: View {
         guard let url = bidPeriodPDFExportURL else { return }
         try? FileManager.default.removeItem(at: url)
         bidPeriodPDFExportURL = nil
+    }
+
+    @MainActor
+    private func exportCurrentBidPeriodJSON() async {
+        guard !isExportingBidPeriodJSON else { return }
+        guard let selectedBidPeriodID else {
+            bidPeriodJSONExportErrorMessage = BidPeriodScheduleExportError
+                .assignedBidPeriodUnavailable
+                .localizedDescription
+            return
+        }
+        isExportingBidPeriodJSON = true
+        defer { isExportingBidPeriodJSON = false }
+
+        do {
+            removeBidPeriodJSONExportFile()
+            bidPeriodJSONExportOutput = try await viewModel.prepareBidPeriodScheduleJSONExport(
+                bidPeriodID: selectedBidPeriodID
+            )
+        } catch {
+            bidPeriodJSONExportErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func removeBidPeriodJSONExportFile() {
+        guard let output = bidPeriodJSONExportOutput else { return }
+        TripJSONExportService.removeTemporaryFiles(for: output)
+        bidPeriodJSONExportOutput = nil
     }
 }
 

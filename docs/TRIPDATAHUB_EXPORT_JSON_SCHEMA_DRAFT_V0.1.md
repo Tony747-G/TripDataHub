@@ -278,6 +278,10 @@ without layover metadata remain in the same duty and do not produce a layover or
 `scheduledRest`. The result is marked `derived` and the two offsets are included in
 `calculationRule`.
 
+Deferred `groundTransport` rows are skipped when locating the next public flight or
+deadhead segment. A layover is retained only when every skipped row preserves a
+continuous station chain from the arriving segment to that next public segment.
+
 `hotelStay` remains separate and is emitted only when persisted Check-in and Check-out
 instants are both available. The current importer does not persist those timestamp
 pairs, so `hotelStay` is omitted rather than inferred from `blockGap` or
