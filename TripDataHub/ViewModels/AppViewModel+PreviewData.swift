@@ -123,6 +123,26 @@ extension AppViewModel {
     }
 
     private static var uiTestTimelineSchedules: [PayPeriodSchedule] {
+        // Keep this fixture ahead of the wall clock: the Next Report strip only renders before a
+        // future report time. A fixed historical schedule silently turned this UI test into a
+        // permanent failure once June 2026 passed.
+        var utcCalendar = Calendar(identifier: .gregorian)
+        utcCalendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        let start = utcCalendar.date(byAdding: .day, value: 2, to: Date()) ?? Date().addingTimeInterval(2 * 86_400)
+        let outboundArrival = start.addingTimeInterval(6 * 3_600)
+        let returnDeparture = start.addingTimeInterval(24 * 3_600)
+        let returnArrival = start.addingTimeInterval(32 * 3_600)
+
+        let utcFormatter = ISO8601DateFormatter()
+        utcFormatter.formatOptions = [.withInternetDateTime]
+        utcFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+
+        let localFormatter = DateFormatter()
+        localFormatter.calendar = utcCalendar
+        localFormatter.locale = Locale(identifier: "en_US_POSIX")
+        localFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+        localFormatter.dateFormat = "yyyy-MM-dd HH:mm"
+
         let firstLegs = [
             TripLeg(
                 payPeriod: "CA26-01-A70001",
@@ -130,11 +150,11 @@ extension AppViewModel {
                 leg: 1,
                 flight: "063",
                 depAirport: "ANC",
-                depLocal: "2026-06-09 09:15",
+                depLocal: localFormatter.string(from: start),
                 arrAirport: "SDF",
-                arrLocal: "2026-06-09 18:30",
-                depUTC: "2026-06-09T18:15:00Z",
-                arrUTC: "2026-06-10T00:30:00Z",
+                arrLocal: localFormatter.string(from: outboundArrival),
+                depUTC: utcFormatter.string(from: start),
+                arrUTC: utcFormatter.string(from: outboundArrival),
                 status: "-",
                 block: "6:15"
             ),
@@ -144,27 +164,13 @@ extension AppViewModel {
                 leg: 2,
                 flight: "108",
                 depAirport: "SDF",
-                depLocal: "2026-06-10 08:20",
-                arrAirport: "NRT",
-                arrLocal: "2026-06-11 12:05",
-                depUTC: "2026-06-10T13:20:00Z",
-                arrUTC: "2026-06-11T03:05:00Z",
-                status: "-",
-                block: "13:45"
-            ),
-            TripLeg(
-                payPeriod: "CA26-01-A70001",
-                pairing: "A70001",
-                leg: 3,
-                flight: "109",
-                depAirport: "NRT",
-                depLocal: "2026-06-12 16:40",
+                depLocal: localFormatter.string(from: returnDeparture),
                 arrAirport: "ANC",
-                arrLocal: "2026-06-12 08:25",
-                depUTC: "2026-06-12T07:40:00Z",
-                arrUTC: "2026-06-12T17:25:00Z",
+                arrLocal: localFormatter.string(from: returnArrival),
+                depUTC: utcFormatter.string(from: returnDeparture),
+                arrUTC: utcFormatter.string(from: returnArrival),
                 status: "-",
-                block: "8:45"
+                block: "8:00"
             )
         ]
 

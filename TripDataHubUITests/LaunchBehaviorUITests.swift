@@ -11,8 +11,11 @@ final class LaunchBehaviorUITests: XCTestCase {
         app.launchArguments += ["UITEST_TIMELINE_SEED"]
         app.launch()
 
-        // Use matching(identifier:) rather than subscript to ensure lookup by accessibility identifier.
-        let dateHeader = app.staticTexts.matching(identifier: "timeline.dayHeader.2026-06-09").firstMatch
+        // The launch fixture is deliberately relative to the test clock, so the day ID must not
+        // be hard-coded. This finds the first rendered Timeline day header by its stable prefix.
+        let dateHeader = app.staticTexts.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "timeline.dayHeader.")
+        ).firstMatch
         XCTAssertTrue(dateHeader.waitForExistence(timeout: 10))
 
         let nextReportCard = app.staticTexts.matching(identifier: "timeline.nextReportCard").firstMatch
@@ -33,20 +36,19 @@ final class LaunchBehaviorUITests: XCTestCase {
         XCTAssertEqual(loginButton.label, "TripBoard Log-in")
     }
 
-    func test_settingsOpenTimeDemoModeShowsDemoLoadAction() {
+    func test_settingsHidesInternalDemoAndDiagnosticsControls() {
         let app = XCUIApplication()
         app.launchArguments += ["UITEST_LOGGED_OUT_VERIFIED"]
-        app.launchArguments += ["UITEST_OPENTIME_DEMO"]
         app.launch()
 
         openSettings(in: app)
 
-        let demoSwitch = app.switches["settings.openTimeDemoMode"]
-        XCTAssertTrue(demoSwitch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.switches["settings.openTimeDemoMode"].exists)
+        XCTAssertFalse(app.staticTexts["Sync Diagnostics"].exists)
 
-        let demoLoadButton = app.buttons["settings.tripboardAction"]
-        XCTAssertTrue(demoLoadButton.waitForExistence(timeout: 5))
-        XCTAssertEqual(demoLoadButton.label, "Load Demo OpenTime")
+        let tripBoardButton = app.buttons["settings.tripboardAction"]
+        XCTAssertTrue(tripBoardButton.waitForExistence(timeout: 5))
+        XCTAssertEqual(tripBoardButton.label, "TripBoard Log-in")
     }
 
     func test_phoneNavigationUsesExpandableMenuWithoutTabBar() {

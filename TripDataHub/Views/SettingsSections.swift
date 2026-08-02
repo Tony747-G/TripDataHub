@@ -84,8 +84,10 @@ struct SettingsTripBoardFetchSection: View {
 
     var body: some View {
         Section {
-            Toggle("Demo Mode", isOn: $viewModel.isOpenTimeDemoMode)
-                .accessibilityIdentifier("settings.openTimeDemoMode")
+            if AppEnvironment.isOpenTimeDemoModeControlVisible {
+                Toggle("Demo Mode", isOn: $viewModel.isOpenTimeDemoMode)
+                    .accessibilityIdentifier("settings.openTimeDemoMode")
+            }
 
             Toggle("Auto Fetch on App Open", isOn: $autoFetchOnOpen)
                 .disabled(viewModel.isOpenTimeDemoMode)

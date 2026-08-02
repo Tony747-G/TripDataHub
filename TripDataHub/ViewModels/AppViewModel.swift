@@ -511,6 +511,13 @@ final class AppViewModel: ObservableObject {
         self.syncStateDefaults = syncStateDefaults
         self.crewAccessImportsDirectory = crewAccessImportsDirectory
         self.retentionReferenceDate = retentionReferenceDate
+        // The production Settings surface no longer exposes the sample OpenTime toggle. Clear
+        // any value left by older builds so a user cannot become stuck in Demo Mode with no way
+        // to return to real TripBoard fetches. UI-test launch overrides run after init and can
+        // still opt into sample data explicitly.
+        if !AppEnvironment.isOpenTimeDemoModeControlVisible {
+            self.isOpenTimeDemoMode = false
+        }
         let resolvedDiagnostics = diagnostics ?? SyncDiagnosticsLog.shared
         self.diagnostics = resolvedDiagnostics
         self.externalOpenCoordinator = ExternalOpenImportCoordinator.shared
