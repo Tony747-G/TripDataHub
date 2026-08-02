@@ -76,6 +76,7 @@
 		BCA4AE729D06B2ACB035CB39 /* CalendarSupportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30EA7A40210086623915E4DE /* CalendarSupportTests.swift */; };
 		BDB5E75E3F22104CE4F4E4BA /* iPadBidPeriodCalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D4D53F3DC79EADA851A73C6 /* iPadBidPeriodCalendarView.swift */; };
 		C1BE472B7026727E93A81105 /* CrewAccessDeletionOutboxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08FCE35D25E3208FFD755AF3 /* CrewAccessDeletionOutboxTests.swift */; };
+		3F6D91C07A24E5B8D1042B6E /* CrewAccessInProgressTripReimportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A17C4E2B8D34F119C63E7A1 /* CrewAccessInProgressTripReimportTests.swift */; };
 		C253B94D1BAE19FE0272F3F3 /* AdminPolicy.json in Resources */ = {isa = PBXBuildFile; fileRef = 98EDE30CF9675F9EFF5433AD /* AdminPolicy.json */; };
 		C5194577FDCCA8F6FD89109E /* CrewAccessImportCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3CE005F5518E5100BD8071A /* CrewAccessImportCloudKitService.swift */; };
 		C6DAD0A1BE825FB0BA256D13 /* SettingsTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B75C57D0E8EA97E45C283A7B /* SettingsTabView.swift */; };
@@ -145,6 +146,7 @@
 		022B7246751D741B1792AE69 /* ScheduleTimelineRendererView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleTimelineRendererView.swift; sourceTree = "<group>"; };
 		0280B0ED64CBF38F6C06B873 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		08FCE35D25E3208FFD755AF3 /* CrewAccessDeletionOutboxTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessDeletionOutboxTests.swift; sourceTree = "<group>"; };
+		0A17C4E2B8D34F119C63E7A1 /* CrewAccessInProgressTripReimportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessInProgressTripReimportTests.swift; sourceTree = "<group>"; };
 		0AF942899EBB7E90814E4995 /* CrewAccessPDFImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessPDFImportService.swift; sourceTree = "<group>"; };
 		0E245B85CBF5B6A4E6E03E66 /* FriendScheduleStatusDot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendScheduleStatusDot.swift; sourceTree = "<group>"; };
 		0E58C37096DF95CCD2C96C0C /* ManualEventStartupRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualEventStartupRecoveryTests.swift; sourceTree = "<group>"; };
@@ -414,6 +416,7 @@
 				30EA7A40210086623915E4DE /* CalendarSupportTests.swift */,
 				08FCE35D25E3208FFD755AF3 /* CrewAccessDeletionOutboxTests.swift */,
 				41B93306AF0DF77C8A58D12F /* CrewAccessImportCloudKitServiceTests.swift */,
+				0A17C4E2B8D34F119C63E7A1 /* CrewAccessInProgressTripReimportTests.swift */,
 				A6525000DBE9BF9003668EC3 /* CrewAccessParserRegressionTests.swift */,
 				947E8F6FB100BB0AED4967CD /* DeviceScheduleCloudKitServiceTests.swift */,
 				8410083F38BBF0219A4F809B /* ExternalOpenImportCoordinatorTests.swift */,
@@ -663,6 +666,7 @@
 				BCA4AE729D06B2ACB035CB39 /* CalendarSupportTests.swift in Sources */,
 				C1BE472B7026727E93A81105 /* CrewAccessDeletionOutboxTests.swift in Sources */,
 				95EA363B67369FCF2A615031 /* CrewAccessImportCloudKitServiceTests.swift in Sources */,
+				3F6D91C07A24E5B8D1042B6E /* CrewAccessInProgressTripReimportTests.swift in Sources */,
 				659F96191E8496BC418E8015 /* CrewAccessParserRegressionTests.swift in Sources */,
 				8A6763FD9E2EE3410248A68C /* DeviceScheduleCloudKitServiceTests.swift in Sources */,
 				6B9506F2B4875F005E21D1A7 /* ExternalOpenImportCoordinatorTests.swift in Sources */,

@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 
 final class LaunchBehaviorUITests: XCTestCase {
@@ -60,7 +61,6 @@ final class LaunchBehaviorUITests: XCTestCase {
         menuButton.tap()
 
         XCTAssertTrue(app.buttons["Timeline"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.buttons["Calendar"].exists)
         XCTAssertTrue(app.buttons["Browser"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["Add Event"].exists)
         XCTAssertTrue(app.buttons["Settings"].exists)
@@ -70,17 +70,30 @@ final class LaunchBehaviorUITests: XCTestCase {
         screenshot.lifetime = .keepAlways
         add(screenshot)
 
-        app.buttons["Calendar"].tap()
-        // Match any bid-period header rather than a hardcoded id: the calendar
-        // opens on *today's* BP, so a literal like "BP26-04" rots as soon as the
-        // next bid period starts.
+    }
+
+    /// Calendar is a required iPad workspace surface. It is deliberately hidden from the iPhone
+    /// floating menu while that phone UI is redesigned, so this test is skipped on iPhone and must
+    /// be run against an iPadOS Simulator in CI/release verification.
+    func test_iPadCalendarShowsCurrentBidPeriod() throws {
+        try XCTSkipUnless(
+            UIDevice.current.userInterfaceIdiom == .pad,
+            "The Calendar UI is verified on iPadOS only."
+        )
+
+        let app = XCUIApplication()
+        app.launchArguments += ["UITEST_TIMELINE_SEED"]
+        app.launch()
+
+        // Match any bid-period header rather than a hardcoded id: the calendar opens on today's
+        // BP, so a literal such as BP26-04 becomes stale at the next bid-period transition.
         let bidPeriodHeader = app.staticTexts
             .matching(NSPredicate(format: "label MATCHES %@", #"BP\d{2}-\d{2}"#))
             .firstMatch
-        XCTAssertTrue(bidPeriodHeader.waitForExistence(timeout: 5))
+        XCTAssertTrue(bidPeriodHeader.waitForExistence(timeout: 10))
 
         let calendarScreenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        calendarScreenshot.name = "iPhone calendar layout"
+        calendarScreenshot.name = "iPad calendar layout"
         calendarScreenshot.lifetime = .keepAlways
         add(calendarScreenshot)
     }

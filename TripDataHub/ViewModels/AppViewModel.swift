@@ -331,6 +331,37 @@ final class AppViewModel: ObservableObject {
     /// has no such flag, and decides on fingerprint generation alone. Written only by
     /// `mergeImportedCrewAccessSchedule`; automatic paths never set it.
     private var reimportedCrewAccessTripKeys: Set<String> = []
+
+    /// Canonical payload fingerprints the user explicitly confirmed on *this* device and that
+    /// CloudKit has not yet acknowledged as a live record.
+    ///
+    /// This is the single sanctioned exception to INV-008. A tombstone normally removes the local
+    /// JSON unconditionally, but INV-006 makes that JSON the Timeline's source of truth, so
+    /// applying a stale tombstone to a generation the user just confirmed empties the Timeline
+    /// immediately after a successful import. A fingerprint identifies one import generation
+    /// (`generatedAt` is re-stamped by the parser on every import), so protection never leaks to
+    /// the generation that was actually deleted.
+    ///
+    /// Written only by `recordExplicitCrewAccessReimport`, i.e. only from `confirmPendingImport`.
+    /// Automatic sync, launch recovery and local file scans never add to it. Entries are dropped
+    /// as soon as a live remote record carries the same fingerprint (convergence reached).
+    ///
+    /// FIFO and capped: a stuck entry must not grow the defaults payload without bound.
+    private var confirmedCrewAccessImportFingerprints: [String] = []
+    private static let confirmedCrewAccessImportFingerprintLimit = 64
+
+    /// Depth of the in-flight import transaction opened by `confirmPendingImport`.
+    ///
+    /// The transaction spans the local JSON commit through the CloudKit upload of that same
+    /// generation. While it is open, foreground/startup CrewAccess sync must not fetch records,
+    /// apply tombstones or reconcile, because every one of those steps can delete the JSON the
+    /// transaction just wrote and leave the Timeline empty.
+    private var crewAccessImportTransactionDepth = 0
+
+    /// Sync reasons that arrived while an import transaction was open. Coalesced into one run so a
+    /// deferred request is never lost and never replayed N times.
+    private var deferredCrewAccessSyncReasons: [String] = []
+
     private var isUploadingSharedSchedule = false
     private var needsSharedScheduleUpload = false
     private var pendingSharedScheduleUploadReason: String?
@@ -386,6 +417,7 @@ final class AppViewModel: ObservableObject {
     private let observedCrewAccessTombstoneKeysKey = "crewaccess_tombstone_observed_v1"
     private let deletedCrewAccessPayloadFingerprintsKey = "crewaccess_deleted_payload_fingerprints_v1"
     private let reimportedCrewAccessTripKeysKey = "crewaccess_reimported_trip_keys_v1"
+    private let confirmedCrewAccessImportFingerprintsKey = "crewaccess_confirmed_import_fingerprints_v1"
     private let logTenExportBacklogKey = "logten_export_backlog_v1"
     private let logTenExportedFingerprintsKey = "logten_exported_fingerprints_v1"
     private let seniorityFileName = "pilot_seniority_records_v1.json"
@@ -394,6 +426,12 @@ final class AppViewModel: ObservableObject {
     /// Where this device keeps its CrewAccess import JSON. Injectable so a test can stand up two
     /// AppViewModels with genuinely separate local file state; production uses the shared default.
     private let crewAccessImportsDirectory: URL?
+
+    /// "Now" for the CrewAccess retention window. Injectable so a test can pin which Bid Periods
+    /// are retained instead of depending on the machine date and on where today happens to fall in
+    /// the Bid Period table — both of which make retention behaviour drift over time. Production
+    /// passes the wall clock.
+    private let retentionReferenceDate: @Sendable () -> Date
 
     /// On-device diagnostics ring buffer. Records only; never influences sync behaviour.
     let diagnostics: SyncDiagnosticsLog
@@ -452,6 +490,7 @@ final class AppViewModel: ObservableObject {
         manualEventStore: ManualEventStoring = ManualEventStore(),
         syncStateDefaults: UserDefaults = .standard,
         crewAccessImportsDirectory: URL? = AppViewModel.defaultCrewAccessImportsDirectory(),
+        retentionReferenceDate: @escaping @Sendable () -> Date = { Date() },
         diagnostics: SyncDiagnosticsLog? = nil
     ) {
         self.syncService = syncService
@@ -471,6 +510,7 @@ final class AppViewModel: ObservableObject {
         self.manualEventStore = manualEventStore
         self.syncStateDefaults = syncStateDefaults
         self.crewAccessImportsDirectory = crewAccessImportsDirectory
+        self.retentionReferenceDate = retentionReferenceDate
         let resolvedDiagnostics = diagnostics ?? SyncDiagnosticsLog.shared
         self.diagnostics = resolvedDiagnostics
         self.externalOpenCoordinator = ExternalOpenImportCoordinator.shared
@@ -509,6 +549,12 @@ final class AppViewModel: ObservableObject {
             .compactMapValues { ($0 as? [String]).map(Set.init) }
         self.reimportedCrewAccessTripKeys = Set(
             syncStateDefaults.stringArray(forKey: reimportedCrewAccessTripKeysKey) ?? []
+        )
+        // Durable so a Confirm whose upload was interrupted by termination still overrides the
+        // stale tombstone on the next launch instead of losing the trip.
+        self.confirmedCrewAccessImportFingerprints = Array(
+            (syncStateDefaults.stringArray(forKey: confirmedCrewAccessImportFingerprintsKey) ?? [])
+                .suffix(Self.confirmedCrewAccessImportFingerprintLimit)
         )
         Self.saveDeletedCrewAccessTripIntents(
             self.deletedCrewAccessTripIntents,
@@ -1752,14 +1798,83 @@ final class AppViewModel: ObservableObject {
     /// The **only** path allowed to cancel a deletion. Automatic sync, launch recovery and local
     /// file scans must never call it. The re-import outbox is persisted, so a failed upload of the
     /// new generation is retried on the next sync rather than being forgotten.
-    func recordExplicitCrewAccessReimport(tripKeys: Set<String>) {
+    /// - Parameter payloadFingerprint: canonical fingerprint of the generation being confirmed.
+    ///   Supplying it is what lets the fetch path keep this generation's JSON when a stale remote
+    ///   tombstone for the same file name arrives mid-import. Omit it only from tests that are
+    ///   exercising the deletion outbox rather than the import path.
+    func recordExplicitCrewAccessReimport(tripKeys: Set<String>, payloadFingerprint: String? = nil) {
         guard !tripKeys.isEmpty else { return }
         for tripKey in tripKeys {
             deletedCrewAccessTripIntents.removeValue(forKey: tripKey)
             reimportedCrewAccessTripKeys.insert(tripKey)
         }
+        if let payloadFingerprint, !confirmedCrewAccessImportFingerprints.contains(payloadFingerprint) {
+            confirmedCrewAccessImportFingerprints.append(payloadFingerprint)
+            if confirmedCrewAccessImportFingerprints.count > Self.confirmedCrewAccessImportFingerprintLimit {
+                confirmedCrewAccessImportFingerprints.removeFirst(
+                    confirmedCrewAccessImportFingerprints.count - Self.confirmedCrewAccessImportFingerprintLimit
+                )
+            }
+        }
         saveDeletedCrewAccessTripIntents()
         syncStateDefaults.set(Array(reimportedCrewAccessTripKeys), forKey: reimportedCrewAccessTripKeysKey)
+        saveConfirmedCrewAccessImportFingerprints()
+    }
+
+    private func saveConfirmedCrewAccessImportFingerprints() {
+        syncStateDefaults.set(
+            confirmedCrewAccessImportFingerprints,
+            forKey: confirmedCrewAccessImportFingerprintsKey
+        )
+    }
+
+    /// True when this payload is a generation the user confirmed on this device and CloudKit has
+    /// not yet acknowledged. The only condition under which a remote tombstone may be overridden.
+    private func isConfirmedCrewAccessImportGeneration(_ jsonData: Data) -> Bool {
+        guard !confirmedCrewAccessImportFingerprints.isEmpty,
+              let fingerprint = Self.canonicalPayloadFingerprint(jsonData) else { return false }
+        return confirmedCrewAccessImportFingerprints.contains(fingerprint)
+    }
+
+    /// Drops the override once CloudKit carries the generation live: the tombstone race is over and
+    /// leaving the entry in place would let a *future* legitimate delete of this same generation be
+    /// overridden.
+    private func clearConfirmedCrewAccessImportGeneration(_ jsonData: Data) {
+        guard !confirmedCrewAccessImportFingerprints.isEmpty,
+              let fingerprint = Self.canonicalPayloadFingerprint(jsonData),
+              confirmedCrewAccessImportFingerprints.contains(fingerprint) else { return }
+        confirmedCrewAccessImportFingerprints.removeAll { $0 == fingerprint }
+        saveConfirmedCrewAccessImportFingerprints()
+    }
+
+    // MARK: - Import Transaction
+
+    /// True while `confirmPendingImport` is committing a generation locally and pushing it to
+    /// CloudKit. Exposed for tests and for the sync entry points that must stand down.
+    var isCrewAccessImportTransactionActive: Bool { crewAccessImportTransactionDepth > 0 }
+
+    private func beginCrewAccessImportTransaction() {
+        crewAccessImportTransactionDepth += 1
+    }
+
+    /// Closes the transaction and replays, exactly once, whatever sync was deferred while it ran.
+    private func endCrewAccessImportTransaction() {
+        guard crewAccessImportTransactionDepth > 0 else { return }
+        crewAccessImportTransactionDepth -= 1
+        guard crewAccessImportTransactionDepth == 0,
+              !deferredCrewAccessSyncReasons.isEmpty else { return }
+        let reason = deferredCrewAccessSyncReasons.joined(separator: "+")
+        deferredCrewAccessSyncReasons = []
+        Task { [weak self] in
+            await self?.syncCrewAccessDeviceData(reason: "deferred after import (\(reason))")
+        }
+    }
+
+    private func deferCrewAccessSyncDuringImportTransaction(reason: String) {
+        if !deferredCrewAccessSyncReasons.contains(reason) {
+            deferredCrewAccessSyncReasons.append(reason)
+        }
+        logNonFatal("CrewAccess sync deferred by in-flight import transaction: \(reason)")
     }
 
     /// Trip key for a CrewAccess trip id and information date, using this device's domicile.
@@ -2144,6 +2259,13 @@ final class AppViewModel: ObservableObject {
     @discardableResult
     func fetchCrewAccessImportFilesIfNeeded(reason: String) async -> Bool {
         guard isIdentityVerified else { return false }
+        // An open import transaction owns the local JSON directory until its new generation is on
+        // CloudKit. Fetching here would apply the pre-import record set — including a tombstone for
+        // the file just written — and reconcile would then rebuild an empty Timeline (INV-006).
+        if isCrewAccessImportTransactionActive {
+            deferCrewAccessSyncDuringImportTransaction(reason: reason)
+            return false
+        }
         if isFetchingCrewAccessImports {
             needsCrewAccessImportFetch = true
             pendingCrewAccessImportFetchReason = reason
@@ -2207,9 +2329,25 @@ final class AppViewModel: ObservableObject {
                     // a sync-down rewrites files, so a "newer" local file proves nothing about a
                     // re-import. Deletion intents are owned by the outbox below and are never
                     // adjusted from here.
+                    //
+                    // The one exception: the local file *is* a generation the user confirmed on
+                    // this device and CloudKit has not acknowledged yet. That is not a re-import
+                    // inferred from the filesystem — it is an explicit local Confirm recorded by
+                    // `recordExplicitCrewAccessReimport`. Deleting it would drop the source of
+                    // truth for a trip the user just imported (INV-006) on the strength of a
+                    // tombstone that describes the *previous* generation. The local-upload loop
+                    // below republishes it, restoring the CloudKit record to live.
+                    if let localData = try? Data(contentsOf: url),
+                       isConfirmedCrewAccessImportGeneration(localData) {
+                        logNonFatal("CrewAccess tombstone overridden by explicit local re-import: \(record.fileName)")
+                        continue
+                    }
                     try? fm.removeItem(at: url)
                     continue
                 }
+                // Live remote record carrying a confirmed generation: the race is over, so the
+                // override is retired rather than left armed against a future delete.
+                clearConfirmedCrewAccessImportGeneration(record.jsonData)
                 // A live record for a trip this device deleted is left to the outbox, which decides
                 // by payload generation whether it is a stale re-upload or a new import.
                 if let tripKey, deletedCrewAccessTripIntents[tripKey] != nil {
@@ -2250,7 +2388,19 @@ final class AppViewModel: ObservableObject {
                     // download, restore, copy and reinstall, so neither proves a user re-imported.
                     // Only `confirmPendingImport` may cancel a deletion, via the re-import outbox.
                     if remote?.deletedAt != nil {
-                        try? fm.removeItem(at: url)
+                        // Same single exception as the record loop above: an explicit Confirm on
+                        // this device outranks a tombstone that describes the generation it
+                        // replaced. Republishing here is what makes CloudKit converge on the new
+                        // generation as a live record. Automatic paths still cannot reach this —
+                        // the fingerprint set is only ever written by `confirmPendingImport`.
+                        guard isConfirmedCrewAccessImportGeneration(data) else {
+                            try? fm.removeItem(at: url)
+                            continue
+                        }
+                        let uploaded = await uploadCrewAccessImportFile(at: url, json: json)
+                        if uploaded { clearConfirmedCrewAccessImportGeneration(data) }
+                        recoveryUploadsSucceeded = recoveryUploadsSucceeded && uploaded
+                        logNonFatal("CrewAccess explicit re-import republished over tombstone: \(url.lastPathComponent)")
                         continue
                     }
 
@@ -2513,6 +2663,13 @@ final class AppViewModel: ObservableObject {
 
     func syncCrewAccessDeviceData(reason: String) async {
         guard isIdentityVerified else { return }
+        // Gated at the outermost sync entry point as well as at the fetch, so neither the fetch,
+        // the tombstone application, nor `applyCrewAccessRetentionPolicy`'s reconcile can run
+        // against a half-committed import. The request is replayed once the transaction closes.
+        if isCrewAccessImportTransactionActive {
+            deferCrewAccessSyncDuringImportTransaction(reason: reason)
+            return
+        }
         if isSyncingCrewAccessDeviceData {
             needsCrewAccessDeviceDataSync = true
             pendingCrewAccessDeviceDataSyncReason = reason
@@ -2848,20 +3005,63 @@ final class AppViewModel: ObservableObject {
             )
 
             let replacing = crewAccessSchedules.contains(where: { $0.id == schedule.id })
+
+            // Everything from here to the CloudKit upload is one Import transaction. Foreground and
+            // startup CrewAccess sync stand down for its duration (see `syncCrewAccessDeviceData`),
+            // because a fetch landing between the local commit and the upload applies the
+            // pre-import record set — including a tombstone for the generation being replaced — and
+            // reconcile then rebuilds a Timeline without the trip the user just confirmed.
+            beginCrewAccessImportTransaction()
+            var transactionHandedToUpload = false
+            defer { if !transactionHandedToUpload { endCrewAccessImportTransaction() } }
+
+            // Fail-closed rollback state, captured before the first write.
+            let rollbackState = CrewAccessImportRollbackState(
+                crewAccessSchedules: crewAccessSchedules,
+                schedules: schedules,
+                legImportReferenceTimes: crewAccessLegImportReferenceTimes,
+                lastSyncAt: lastSyncAt
+            )
+
             let jsonWriteContext = try persistCrewAccessJSON(json)
+            // Stale same-trip files are moved aside rather than deleted, because they are removed
+            // before verification runs and the rollback has to be able to undo that too.
+            var staleStashes: [CrewAccessStaleJSONStash] = []
             do {
-                try mergeImportedCrewAccessSchedule(schedule)
-                removeStaleCrewAccessJSONFilesBestEffort(jsonWriteContext.staleSameBidPeriodTripURLs)
+                try mergeImportedCrewAccessSchedule(
+                    schedule,
+                    payloadFingerprint: Self.canonicalFingerprint(json)
+                )
+                staleStashes = stashStaleCrewAccessJSONFilesBestEffort(
+                    jsonWriteContext.staleSameBidPeriodTripURLs
+                )
                 await applyCrewAccessRetentionPolicy()
+                // The reconcile above rebuilds the Timeline from the JSON directory. If the trip
+                // the user just confirmed is not in the result, the import did not succeed no
+                // matter how well the individual steps reported — persisting or uploading that
+                // state would publish "old trip gone, new trip gone".
+                try verifyCrewAccessImportCommit(json: json, jsonURL: jsonWriteContext.finalURL)
             } catch {
                 do {
                     try rollbackCrewAccessJSONWrite(with: jsonWriteContext)
                 } catch {
                     logNonFatal("Failed to rollback CrewAccess JSON after merge/cache error: \(error.localizedDescription)")
                 }
+                // Every file this commit removed comes back, not just `finalURL`.
+                restoreStashedStaleCrewAccessJSONFiles(staleStashes)
+                // The generation is no longer on disk, so its tombstone override must be
+                // disarmed — an armed fingerprint with no file behind it would only make a
+                // later legitimate delete harder to converge.
+                if let fingerprint = Self.canonicalFingerprint(json) {
+                    confirmedCrewAccessImportFingerprints.removeAll { $0 == fingerprint }
+                    saveConfirmedCrewAccessImportFingerprints()
+                }
+                await restoreCrewAccessStateAfterFailedImport(rollbackState)
                 throw error
             }
+            // Verification passed, so the superseded copies are safe to discard.
             finalizeCrewAccessJSONWriteBestEffort(with: jsonWriteContext)
+            discardStashedStaleCrewAccessJSONFilesBestEffort(staleStashes)
 
             // New import committed successfully — safe to tombstone overlapping trips.
             if !overlapIDs.isEmpty || !overlapPairings.isEmpty {
@@ -2912,10 +3112,34 @@ final class AppViewModel: ObservableObject {
             await rescheduleNotificationsIfAuthorized()
             let uploadURL = jsonWriteContext.finalURL
             let staleFileNames = jsonWriteContext.staleSameBidPeriodTripURLs.map(\.lastPathComponent)
+            transactionHandedToUpload = true
             Task { [weak self] in
                 guard let self else { return }
-                let scheduleUploaded = await self.uploadDeviceScheduleIfNeeded(reason: "import confirmed")
+                // The transaction stays open across these uploads and is closed exactly once, in
+                // this defer, so a deferred foreground sync resumes only after the new generation
+                // is on CloudKit.
+                defer { self.endCrewAccessImportTransaction() }
+
+                // Source JSON first, schedule snapshot second. INV-006 makes the JSON the
+                // recoverable source and the snapshot merely derived, so publishing the snapshot
+                // first opens a window in which another device fetches a snapshot referencing a
+                // trip whose JSON it cannot yet download — and, when the JSON upload then fails,
+                // a window in which the only surviving artifact is the derived one. Uploading the
+                // source first means every intermediate state another device can observe is one it
+                // can fully rebuild from files.
                 let importUploaded = await self.uploadCrewAccessImportFile(at: uploadURL, json: json)
+
+                // Never publish a snapshot that lost the trip this import just confirmed. The
+                // snapshot is a legacy fallback for devices with no files, so an empty or
+                // trip-less one is exactly what would propagate the empty-Timeline bug.
+                let scheduleUploaded: Bool
+                if self.crewAccessSchedules.isEmpty {
+                    scheduleUploaded = false
+                    self.logNonFatal("Skipped device schedule upload after import: rebuilt schedule is empty")
+                } else {
+                    scheduleUploaded = await self.uploadDeviceScheduleIfNeeded(reason: "import confirmed")
+                }
+
                 var staleTombstoned = true
                 if !staleFileNames.isEmpty {
                     staleTombstoned = await self.tombstoneCrewAccessImportFiles(fileNames: staleFileNames)
@@ -2924,11 +3148,149 @@ final class AppViewModel: ObservableObject {
                     self.markTripSyncCompleted()
                 }
             }
+        } catch let error as CrewAccessImportCommitError {
+            // Reached only after the rollback above restored the pre-import state, so "no changes
+            // were applied" is accurate and the user can retry the same Confirm.
+            crewAccessImportMessage = "Import failed: \(error.userFacingDescription) No changes were applied."
+            logNonFatal("CrewAccess confirm verification failed: \(error.diagnosticDescription)")
+            importInProgress = false
         } catch {
             crewAccessImportMessage = "Import failed: unable to write CrewAccess JSON. No changes were applied."
             logNonFatal("CrewAccess confirm transaction failed: \(error.localizedDescription)")
             importInProgress = false
         }
+    }
+
+    // MARK: - Import Commit Verification
+
+    /// Why a confirmed import was rejected after its local commit.
+    ///
+    /// These are not write errors — every individual step reported success. They mean the rebuilt
+    /// Timeline does not contain the trip the user confirmed, which is the "Timeline went empty
+    /// after Confirm" failure. Treating it as success is what previously let the state be cached
+    /// and uploaded.
+    enum CrewAccessImportCommitError: Error {
+        /// The JSON the commit just wrote is not on disk any more.
+        case sourceJSONMissing(fileName: String)
+        /// The JSON is on disk but is not a readable payload for this trip.
+        case sourceJSONUnreadable(fileName: String)
+        /// Reconcile rebuilt the Timeline without the confirmed trip.
+        case tripMissingFromRebuiltTimeline(tripID: String)
+        /// Reconcile kept the trip but dropped legs of it (for example a GND segment).
+        case legsMissingFromRebuiltTimeline(tripID: String, missing: Int, expected: Int)
+
+        var userFacingDescription: String {
+            switch self {
+            case .sourceJSONMissing, .sourceJSONUnreadable:
+                return "the imported trip file could not be re-read."
+            case .tripMissingFromRebuiltTimeline, .legsMissingFromRebuiltTimeline:
+                return "the trip did not appear in the rebuilt Timeline."
+            }
+        }
+
+        var diagnosticDescription: String {
+            switch self {
+            case .sourceJSONMissing(let fileName):
+                return "source JSON missing after commit: \(fileName)"
+            case .sourceJSONUnreadable(let fileName):
+                return "source JSON unreadable after commit: \(fileName)"
+            case .tripMissingFromRebuiltTimeline(let tripID):
+                return "trip absent from rebuilt Timeline: \(tripID)"
+            case .legsMissingFromRebuiltTimeline(let tripID, let missing, let expected):
+                return "trip \(tripID) rebuilt with \(expected - missing)/\(expected) legs"
+            }
+        }
+    }
+
+    /// Pre-import state, restored verbatim when the commit fails verification.
+    private struct CrewAccessImportRollbackState {
+        let crewAccessSchedules: [PayPeriodSchedule]
+        let schedules: [PayPeriodSchedule]
+        let legImportReferenceTimes: [String: Date]
+        let lastSyncAt: Date?
+    }
+
+    /// Fail-closed check that the confirmed trip survived the JSON write and the reconcile.
+    ///
+    /// Checks the three things that can independently go wrong: the file is gone (a concurrent
+    /// tombstone application), the file is unreadable (a truncated or clobbered write), or the
+    /// reconcile produced a Timeline without the trip or without some of its legs.
+    ///
+    /// The expectation is derived from the JSON that was just written, not from the pending
+    /// import's `parsedSchedule`. Reconcile reads that file and nothing else, so comparing against
+    /// it is the only self-consistent check — comparing against the in-memory parse would flag
+    /// harmless differences between the two representations as import failures.
+    private func verifyCrewAccessImportCommit(json: CrewAccessTripJSON, jsonURL: URL) throws {
+        let fileName = jsonURL.lastPathComponent
+        guard FileManager.default.fileExists(atPath: jsonURL.path),
+              let data = try? Data(contentsOf: jsonURL) else {
+            throw CrewAccessImportCommitError.sourceJSONMissing(fileName: fileName)
+        }
+        guard let decoded = try? JSONDecoder().decode(CrewAccessTripJSON.self, from: data),
+              Self.normalizedCrewAccessTripID(decoded.tripId)
+                == Self.normalizedCrewAccessTripID(json.tripId) else {
+            throw CrewAccessImportCommitError.sourceJSONUnreadable(fileName: fileName)
+        }
+
+        // What reconcile should have produced from that file.
+        guard let expected = Self.buildCrewAccessSchedule(from: decoded, modifiedAt: Date()) else {
+            // The payload carries no buildable trip at all. Nothing to assert against, and the
+            // pre-existing parse/preview gates own that case — do not turn it into a new failure.
+            return
+        }
+
+        let domicile = verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
+        let expectedTripKeys = Self.crewAccessTripKeys(for: expected, domicile: domicile)
+        let rebuiltTripKeys = Set(
+            crewAccessSchedules.flatMap { Self.crewAccessTripKeys(for: $0, domicile: domicile) }
+        )
+        guard expectedTripKeys.isEmpty || !expectedTripKeys.isDisjoint(with: rebuiltTripKeys) else {
+            throw CrewAccessImportCommitError.tripMissingFromRebuiltTimeline(tripID: decoded.tripId)
+        }
+
+        // Leg-level check, so a segment silently dropped by the rebuild is caught too: the
+        // in-progress replacement case adds a GND leg, and a trip that came back with only its
+        // flight legs is still a broken import.
+        let rebuiltLegKeys = Set(
+            crewAccessSchedules.flatMap { $0.legs.map(Self.logTenLegDedupKey(for:)) }
+        )
+        let expectedLegKeys = expected.legs
+            .map(Self.logTenLegDedupKey(for:))
+            .filter { !$0.hasPrefix("|") }
+        let missingLegCount = expectedLegKeys.filter { !rebuiltLegKeys.contains($0) }.count
+        guard missingLegCount == 0 else {
+            throw CrewAccessImportCommitError.legsMissingFromRebuiltTimeline(
+                tripID: decoded.tripId,
+                missing: missingLegCount,
+                expected: expectedLegKeys.count
+            )
+        }
+    }
+
+    /// Puts memory, the derived schedule list and the on-disk cache back to their pre-import
+    /// values. The JSON write is rolled back separately by `rollbackCrewAccessJSONWrite`.
+    private func restoreCrewAccessStateAfterFailedImport(
+        _ state: CrewAccessImportRollbackState
+    ) async {
+        crewAccessSchedules = state.crewAccessSchedules
+        schedules = state.schedules
+        restoreCrewAccessLegImportReferenceTimes(state.legImportReferenceTimes)
+        lastSyncAt = state.lastSyncAt
+        // Reconcile already told the sharing layer about the broken state; correct it.
+        handleSchedulesChangedForSharing()
+        do {
+            try cacheService.save(
+                ScheduleCacheSnapshotV2(
+                    crewAccessSchedules: state.crewAccessSchedules,
+                    bidproSchedules: bidproSchedules,
+                    lastSyncAt: state.lastSyncAt ?? Date(),
+                    migratedAt: nil
+                )
+            )
+        } catch {
+            logNonFatal("Failed to restore schedule cache after failed CrewAccess import: \(error.localizedDescription)")
+        }
+        await rescheduleNotificationsIfAuthorized()
     }
 
     func discardPendingImport() async {
@@ -3844,7 +4206,10 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    private func mergeImportedCrewAccessSchedule(_ imported: PayPeriodSchedule) throws {
+    private func mergeImportedCrewAccessSchedule(
+        _ imported: PayPeriodSchedule,
+        payloadFingerprint: String?
+    ) throws {
         var updatedCrewAccess = crewAccessSchedules
         let importConfirmedAt = Date()
         for leg in imported.legs {
@@ -3856,8 +4221,13 @@ final class AppViewModel: ObservableObject {
         let domicile = verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
         let importedTripKeys = Self.crewAccessTripKeys(for: imported, domicile: domicile)
         // Reached only after persistCrewAccessJSON succeeded in confirmPendingImport, so the new
-        // generation is already durable on disk before the deletion is cancelled.
-        recordExplicitCrewAccessReimport(tripKeys: importedTripKeys)
+        // generation is already durable on disk before the deletion is cancelled. The fingerprint
+        // additionally lets the fetch path protect this exact generation from a stale tombstone
+        // until CloudKit acknowledges it.
+        recordExplicitCrewAccessReimport(
+            tripKeys: importedTripKeys,
+            payloadFingerprint: payloadFingerprint
+        )
         updatedCrewAccess = updatedCrewAccess.compactMap { schedule in
             let remainingLegs = schedule.legs.filter { leg in
                 guard let key = Self.crewAccessTripKey(for: leg, domicile: domicile) else {
@@ -4645,7 +5015,7 @@ final class AppViewModel: ObservableObject {
             return nil
         }
         return retainedBidPeriodOrders(
-            currentDateUTC: Date(),
+            currentDateUTC: retentionReferenceDate(),
             previousCount: previousCount,
             domicile: verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
         )
@@ -5088,7 +5458,10 @@ final class AppViewModel: ObservableObject {
         return ("", hotelWords.joined(separator: " ").trimmingCharacters(in: .whitespaces))
     }
 
-    private nonisolated static func buildCrewAccessSchedule(from payload: CrewAccessTripJSON, modifiedAt: Date) -> PayPeriodSchedule? {
+    /// Internal rather than private so tests can build the *same* schedule the import path builds.
+    /// Hand-rolled test schedules drift from the production leg/trip key formats and then assert
+    /// against keys that never occur in the app.
+    nonisolated static func buildCrewAccessSchedule(from payload: CrewAccessTripJSON, modifiedAt: Date) -> PayPeriodSchedule? {
         let normalizedDate = normalizeTripInformationDateForDisplay(payload.tripInformationDate, fallbackDate: modifiedAt).dateString
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -5517,16 +5890,71 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    private func removeStaleCrewAccessJSONFilesBestEffort(_ urls: [URL]) {
-        guard !urls.isEmpty else { return }
+    /// A stale same-trip JSON moved aside during a commit, and where it went.
+    ///
+    /// These files are removed *before* `verifyCrewAccessImportCommit` runs, so deleting them
+    /// outright made the rollback incomplete: a commit that then failed verification restored
+    /// `finalURL` but had already destroyed every other file representing the same trip, which is
+    /// exactly the "old trip gone and new trip gone" state the fail-closed path exists to prevent.
+    /// Moving instead of deleting keeps the rollback total.
+    private struct CrewAccessStaleJSONStash {
+        let originalURL: URL
+        let backupURL: URL
+    }
+
+    /// Moves stale same-trip JSON files aside instead of deleting them. Same hidden-dotfile naming
+    /// as the `finalURL` backup, so the import-file scan skips them while they exist.
+    private func stashStaleCrewAccessJSONFilesBestEffort(_ urls: [URL]) -> [CrewAccessStaleJSONStash] {
+        guard !urls.isEmpty else { return [] }
         let fm = FileManager.default
+        var stashes: [CrewAccessStaleJSONStash] = []
         for url in urls {
             guard fm.fileExists(atPath: url.path) else { continue }
+            let backupURL = url
+                .deletingLastPathComponent()
+                .appendingPathComponent(".\(url.lastPathComponent).stale-\(UUID().uuidString)")
             do {
-                try fm.removeItem(at: url)
-                logger.info("[Import] Removed stale trip file: \(url.lastPathComponent, privacy: .private)")
+                try fm.moveItem(at: url, to: backupURL)
+                stashes.append(CrewAccessStaleJSONStash(originalURL: url, backupURL: backupURL))
+                logger.info("[Import] Stashed stale trip file: \(url.lastPathComponent, privacy: .private)")
             } catch {
-                logger.error("[Import] Failed to remove stale trip file \(url.lastPathComponent, privacy: .private): \(error.localizedDescription, privacy: .public)")
+                // Falling back to a delete would reintroduce the unrecoverable case, so leave the
+                // file in place. A surviving duplicate is reconciled on the next import or sync;
+                // an unrecoverable one is not.
+                logger.error("[Import] Failed to stash stale trip file \(url.lastPathComponent, privacy: .private): \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        return stashes
+    }
+
+    /// Puts every stashed stale file back. Called on every failure path, alongside
+    /// `rollbackCrewAccessJSONWrite`.
+    private func restoreStashedStaleCrewAccessJSONFiles(_ stashes: [CrewAccessStaleJSONStash]) {
+        let fm = FileManager.default
+        for stash in stashes {
+            guard fm.fileExists(atPath: stash.backupURL.path) else { continue }
+            do {
+                if fm.fileExists(atPath: stash.originalURL.path) {
+                    _ = try fm.replaceItemAt(stash.originalURL, withItemAt: stash.backupURL)
+                } else {
+                    try fm.moveItem(at: stash.backupURL, to: stash.originalURL)
+                }
+                logger.info("[Import] Restored stale trip file: \(stash.originalURL.lastPathComponent, privacy: .private)")
+            } catch {
+                logger.error("[Import] Failed to restore stale trip file \(stash.originalURL.lastPathComponent, privacy: .private): \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// Discards the stashes. Only safe once the commit has passed verification — until then the
+    /// stash is the only copy of the superseded trip.
+    private func discardStashedStaleCrewAccessJSONFilesBestEffort(_ stashes: [CrewAccessStaleJSONStash]) {
+        let fm = FileManager.default
+        for stash in stashes where fm.fileExists(atPath: stash.backupURL.path) {
+            do {
+                try fm.removeItem(at: stash.backupURL)
+            } catch {
+                logger.error("[Import] Failed to remove stale trip stash \(stash.backupURL.lastPathComponent, privacy: .private): \(error.localizedDescription, privacy: .public)")
             }
         }
     }
