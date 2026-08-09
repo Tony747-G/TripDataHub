@@ -21,6 +21,7 @@
 		1212BF43E98EB31FB58E9A8F /* AppViewModelDeviceSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F704B25EFA9967FD3C609BE4 /* AppViewModelDeviceSyncTests.swift */; };
 		1322F51E683F63D579467CC2 /* BrowserTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEA20E261C3699D0271304A1 /* BrowserTabView.swift */; };
 		1413F694AAE3B23F47C3C436 /* FlightCountdownSharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58C18FF3A67E7E968B09F58E /* FlightCountdownSharedModels.swift */; };
+		1C8242913F4F6079CA94E38C /* CrewAccessLegHistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E70B14965EF8048E36881638 /* CrewAccessLegHistoryTests.swift */; };
 		235EF66A04B56236E1DFB575 /* FriendScheduleCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA4B8F120FCBF73865EE520 /* FriendScheduleCloudKitService.swift */; };
 		247048D05968BBDA85B3D994 /* NextReportWindowBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 819FCF962E2F8C300B558BA2 /* NextReportWindowBuilderTests.swift */; };
 		27B924E6CA6484B9156032EC /* FlightCountdownCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F6C86491D2E927C2CEC60D5 /* FlightCountdownCoordinator.swift */; };
@@ -41,8 +42,6 @@
 		5DBC9261365351B322FC0116 /* FlightCountdownSharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58C18FF3A67E7E968B09F58E /* FlightCountdownSharedModels.swift */; };
 		657CE0BD8328A988EB6D9DAF /* TripScheduleSnapshotEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A29DAE34FE231561964648C1 /* TripScheduleSnapshotEncoder.swift */; };
 		659F96191E8496BC418E8015 /* CrewAccessParserRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6525000DBE9BF9003668EC3 /* CrewAccessParserRegressionTests.swift */; };
-		8A18503D37DE38141BD83F97 /* TimelineFlightVisualStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF4743B286D28846759D4FEC /* TimelineFlightVisualStateTests.swift */; };
-		1E691F8BB35EED2960A05D24 /* CrewAccessLegHistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E57E2396CF238E1A2227C29 /* CrewAccessLegHistoryTests.swift */; };
 		67D77849AA568A57737B8039 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 294D51ABEDC7BE8DE4F66EED /* ShareViewController.swift */; };
 		68AE24D4DC9200A316B42E55 /* AppViewModelLogTenExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3333297AB2139014598E2FD /* AppViewModelLogTenExportTests.swift */; };
 		6A4D1917B4C1F6301A23AA7D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 3E72BFB505AAA65912E222FA /* LaunchScreen.storyboard */; };
@@ -62,11 +61,13 @@
 		86F8A20621DA16666563F01C /* FriendScheduleMatching.swift in Sources */ = {isa = PBXBuildFile; fileRef = 890162126747FE986AEDD30B /* FriendScheduleMatching.swift */; };
 		87418240871BAEDE8B2124F2 /* iPadTripBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6D9C7C076517590A793657B /* iPadTripBarView.swift */; };
 		8A6763FD9E2EE3410248A68C /* DeviceScheduleCloudKitServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 947E8F6FB100BB0AED4967CD /* DeviceScheduleCloudKitServiceTests.swift */; };
+		8F0A778FC8EAC5141D59846B /* CrewAccessInProgressTripReimportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CB4D97AB3709D6CD123B043 /* CrewAccessInProgressTripReimportTests.swift */; };
 		94D6405C334A97CF691121BA /* TripDataCountdownWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C08E1E529B18BA244811A48 /* TripDataCountdownWidget.swift */; };
 		9599AC8B5334199EAAC4FC49 /* FlightCountdownTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58EB09BC72A13BE9062573CC /* FlightCountdownTests.swift */; };
 		95B113CB364AA3060CA5D213 /* TimelineSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A53834B9B503F29F362404 /* TimelineSupport.swift */; };
 		95EA363B67369FCF2A615031 /* CrewAccessImportCloudKitServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41B93306AF0DF77C8A58D12F /* CrewAccessImportCloudKitServiceTests.swift */; };
 		96553879BF5110F396CC6CE6 /* AppGroupImportHandoff.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBE459E3CF25ACF48E17077F /* AppGroupImportHandoff.swift */; };
+		988E0257C627515581F487BB /* TimelineFlightVisualStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AFBDD6FF3680C18CF5E78E3 /* TimelineFlightVisualStateTests.swift */; };
 		9A440A2F395319BE8FFF8DDC /* ExpandableFloatingMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC2084526B8C403A2D265F80 /* ExpandableFloatingMenu.swift */; };
 		9CC4DBFF8DD7A807E39DE379 /* RosterParsingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0A40DFB2EF7B9A57798ECF9 /* RosterParsingModels.swift */; };
 		9D0A859BE373BD64930F62E3 /* ProfileCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E95348863D32C465BA74266C /* ProfileCard.swift */; };
@@ -81,7 +82,6 @@
 		BCA4AE729D06B2ACB035CB39 /* CalendarSupportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30EA7A40210086623915E4DE /* CalendarSupportTests.swift */; };
 		BDB5E75E3F22104CE4F4E4BA /* iPadBidPeriodCalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D4D53F3DC79EADA851A73C6 /* iPadBidPeriodCalendarView.swift */; };
 		C1BE472B7026727E93A81105 /* CrewAccessDeletionOutboxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08FCE35D25E3208FFD755AF3 /* CrewAccessDeletionOutboxTests.swift */; };
-		3F6D91C07A24E5B8D1042B6E /* CrewAccessInProgressTripReimportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A17C4E2B8D34F119C63E7A1 /* CrewAccessInProgressTripReimportTests.swift */; };
 		C253B94D1BAE19FE0272F3F3 /* AdminPolicy.json in Resources */ = {isa = PBXBuildFile; fileRef = 98EDE30CF9675F9EFF5433AD /* AdminPolicy.json */; };
 		C5194577FDCCA8F6FD89109E /* CrewAccessImportCloudKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3CE005F5518E5100BD8071A /* CrewAccessImportCloudKitService.swift */; };
 		C6DAD0A1BE825FB0BA256D13 /* SettingsTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B75C57D0E8EA97E45C283A7B /* SettingsTabView.swift */; };
@@ -167,7 +167,6 @@
 		022B7246751D741B1792AE69 /* ScheduleTimelineRendererView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleTimelineRendererView.swift; sourceTree = "<group>"; };
 		0280B0ED64CBF38F6C06B873 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		08FCE35D25E3208FFD755AF3 /* CrewAccessDeletionOutboxTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessDeletionOutboxTests.swift; sourceTree = "<group>"; };
-		0A17C4E2B8D34F119C63E7A1 /* CrewAccessInProgressTripReimportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessInProgressTripReimportTests.swift; sourceTree = "<group>"; };
 		0AF942899EBB7E90814E4995 /* CrewAccessPDFImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessPDFImportService.swift; sourceTree = "<group>"; };
 		0E245B85CBF5B6A4E6E03E66 /* FriendScheduleStatusDot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendScheduleStatusDot.swift; sourceTree = "<group>"; };
 		0E58C37096DF95CCD2C96C0C /* ManualEventStartupRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualEventStartupRecoveryTests.swift; sourceTree = "<group>"; };
@@ -181,6 +180,7 @@
 		27A6DE05081EABB2B72DF802 /* SyncDiagnosticsLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncDiagnosticsLog.swift; sourceTree = "<group>"; };
 		27B3B19D320BB806C27D1D1C /* TripDataHub.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TripDataHub.entitlements; sourceTree = "<group>"; };
 		294D51ABEDC7BE8DE4F66EED /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		2AFBDD6FF3680C18CF5E78E3 /* TimelineFlightVisualStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineFlightVisualStateTests.swift; sourceTree = "<group>"; };
 		2C935139ABDF9C6B5FE71310 /* CalendarModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarModels.swift; sourceTree = "<group>"; };
 		2CA4B8F120FCBF73865EE520 /* FriendScheduleCloudKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendScheduleCloudKitService.swift; sourceTree = "<group>"; };
 		2DC289F484BCC26A5FB3F491 /* ProfileSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileSyncTests.swift; sourceTree = "<group>"; };
@@ -237,14 +237,13 @@
 		9B6FCCCA54583B5E8D70721D /* BidPeriodService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BidPeriodService.swift; sourceTree = "<group>"; };
 		9BDD762619119C64ED70F521 /* TripDataHubApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripDataHubApp.swift; sourceTree = "<group>"; };
 		9C6A66B614D3A175C4E929D9 /* CrewAccessImportHelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessImportHelpView.swift; sourceTree = "<group>"; };
+		9CB4D97AB3709D6CD123B043 /* CrewAccessInProgressTripReimportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessInProgressTripReimportTests.swift; sourceTree = "<group>"; };
 		9FF7CB3CBD912159638B5C95 /* FriendScheduleStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendScheduleStatusTests.swift; sourceTree = "<group>"; };
 		A1682DE701661661F9C87C7D /* TripScheduleSnapshotEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripScheduleSnapshotEncoderTests.swift; sourceTree = "<group>"; };
 		A29DAE34FE231561964648C1 /* TripScheduleSnapshotEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripScheduleSnapshotEncoder.swift; sourceTree = "<group>"; };
 		A3333297AB2139014598E2FD /* AppViewModelLogTenExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModelLogTenExportTests.swift; sourceTree = "<group>"; };
 		A472159ED43D1D3AE0B8922B /* PDFTripParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFTripParser.swift; sourceTree = "<group>"; };
 		A6525000DBE9BF9003668EC3 /* CrewAccessParserRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessParserRegressionTests.swift; sourceTree = "<group>"; };
-		EF4743B286D28846759D4FEC /* TimelineFlightVisualStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineFlightVisualStateTests.swift; sourceTree = "<group>"; };
-		9E57E2396CF238E1A2227C29 /* CrewAccessLegHistoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessLegHistoryTests.swift; sourceTree = "<group>"; };
 		A6D9C7C076517590A793657B /* iPadTripBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadTripBarView.swift; sourceTree = "<group>"; };
 		A9A5F829F752D306D7E225C9 /* ProfileSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileSnapshot.swift; sourceTree = "<group>"; };
 		ABBFA59E2733EED76133B12E /* RootTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootTabView.swift; sourceTree = "<group>"; };
@@ -269,6 +268,7 @@
 		D9ED434951F84971C73C60F7 /* TimelineRowViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineRowViews.swift; sourceTree = "<group>"; };
 		DC92941B770B36F5CA2CB758 /* TripJSONExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripJSONExportService.swift; sourceTree = "<group>"; };
 		DF695C0A628B417D70BF6664 /* ImportPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportPreviewView.swift; sourceTree = "<group>"; };
+		E70B14965EF8048E36881638 /* CrewAccessLegHistoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewAccessLegHistoryTests.swift; sourceTree = "<group>"; };
 		E95348863D32C465BA74266C /* ProfileCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileCard.swift; sourceTree = "<group>"; };
 		EABE1DFB8EE6CCCF77FB5717 /* ImportFileSniffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportFileSniffer.swift; sourceTree = "<group>"; };
 		EB93AA8DEFC3BFC3256EBA03 /* TripDataHubRelease.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TripDataHubRelease.entitlements; sourceTree = "<group>"; };
@@ -439,10 +439,9 @@
 				30EA7A40210086623915E4DE /* CalendarSupportTests.swift */,
 				08FCE35D25E3208FFD755AF3 /* CrewAccessDeletionOutboxTests.swift */,
 				41B93306AF0DF77C8A58D12F /* CrewAccessImportCloudKitServiceTests.swift */,
-				0A17C4E2B8D34F119C63E7A1 /* CrewAccessInProgressTripReimportTests.swift */,
+				9CB4D97AB3709D6CD123B043 /* CrewAccessInProgressTripReimportTests.swift */,
+				E70B14965EF8048E36881638 /* CrewAccessLegHistoryTests.swift */,
 				A6525000DBE9BF9003668EC3 /* CrewAccessParserRegressionTests.swift */,
-				EF4743B286D28846759D4FEC /* TimelineFlightVisualStateTests.swift */,
-				9E57E2396CF238E1A2227C29 /* CrewAccessLegHistoryTests.swift */,
 				947E8F6FB100BB0AED4967CD /* DeviceScheduleCloudKitServiceTests.swift */,
 				8410083F38BBF0219A4F809B /* ExternalOpenImportCoordinatorTests.swift */,
 				58EB09BC72A13BE9062573CC /* FlightCountdownTests.swift */,
@@ -453,6 +452,7 @@
 				0E58C37096DF95CCD2C96C0C /* ManualEventStartupRecoveryTests.swift */,
 				819FCF962E2F8C300B558BA2 /* NextReportWindowBuilderTests.swift */,
 				2DC289F484BCC26A5FB3F491 /* ProfileSyncTests.swift */,
+				2AFBDD6FF3680C18CF5E78E3 /* TimelineFlightVisualStateTests.swift */,
 				10B50A4E5115BBBBEFE5B8D8 /* TripJSONExportServiceTests.swift */,
 				A1682DE701661661F9C87C7D /* TripScheduleSnapshotEncoderTests.swift */,
 			);
@@ -693,10 +693,9 @@
 				BCA4AE729D06B2ACB035CB39 /* CalendarSupportTests.swift in Sources */,
 				C1BE472B7026727E93A81105 /* CrewAccessDeletionOutboxTests.swift in Sources */,
 				95EA363B67369FCF2A615031 /* CrewAccessImportCloudKitServiceTests.swift in Sources */,
-				3F6D91C07A24E5B8D1042B6E /* CrewAccessInProgressTripReimportTests.swift in Sources */,
+				8F0A778FC8EAC5141D59846B /* CrewAccessInProgressTripReimportTests.swift in Sources */,
+				1C8242913F4F6079CA94E38C /* CrewAccessLegHistoryTests.swift in Sources */,
 				659F96191E8496BC418E8015 /* CrewAccessParserRegressionTests.swift in Sources */,
-				8A18503D37DE38141BD83F97 /* TimelineFlightVisualStateTests.swift in Sources */,
-				1E691F8BB35EED2960A05D24 /* CrewAccessLegHistoryTests.swift in Sources */,
 				8A6763FD9E2EE3410248A68C /* DeviceScheduleCloudKitServiceTests.swift in Sources */,
 				6B9506F2B4875F005E21D1A7 /* ExternalOpenImportCoordinatorTests.swift in Sources */,
 				9599AC8B5334199EAAC4FC49 /* FlightCountdownTests.swift in Sources */,
@@ -707,6 +706,7 @@
 				D09307D688FEFADEAB7D4E05 /* ManualEventStartupRecoveryTests.swift in Sources */,
 				247048D05968BBDA85B3D994 /* NextReportWindowBuilderTests.swift in Sources */,
 				E523CAFDE61554494FEF76A0 /* ProfileSyncTests.swift in Sources */,
+				988E0257C627515581F487BB /* TimelineFlightVisualStateTests.swift in Sources */,
 				CEDCA270F7DC7D9A4FBA10CF /* TripJSONExportServiceTests.swift in Sources */,
 				560C6AC50CBE2C357746B607 /* TripScheduleSnapshotEncoderTests.swift in Sources */,
 			);
