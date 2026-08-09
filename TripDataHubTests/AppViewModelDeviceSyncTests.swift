@@ -1197,6 +1197,116 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         }
     }
 
+    // MARK: - Legacy 12h notification migration
+
+    /// The 12h reminder toggle was removed from Settings, but the scheduler kept reading
+    /// `notification_12h_enabled`. Because the key was cleared only from `SettingsTabView.onAppear`,
+    /// a user who upgraded with 12h enabled and never opened Settings kept receiving T-12h
+    /// reminders with no in-app way to stop them.
+    ///
+    /// Settings is deliberately never involved in any of these tests — that is the whole point.
+    func test_legacy12hPreferenceIsMigratedAtStartupWithoutOpeningSettings() {
+        let defaults = makeNotificationDefaults()
+
+        // 1. A user upgrading with the legacy reminder enabled, 48h on and 24h off.
+        defaults.set(true, forKey: notification12hKey)
+        defaults.set(true, forKey: notification48hKey)
+        defaults.set(false, forKey: notification24hKey)
+
+        // 2. Model-layer startup. 3. Settings is never opened.
+        let vm = makeMinimalViewModel(syncStateDefaults: defaults)
+
+        // 4. Resolved preferences never report the legacy threshold as enabled.
+        let prefs = vm.notificationPreferences
+        XCTAssertFalse(prefs.notify12h, "legacy 12h must never resolve as enabled")
+
+        // 5. 48h and 24h keep their prior values.
+        XCTAssertTrue(prefs.notify48h, "48h preference must be preserved")
+        XCTAssertFalse(prefs.notify24h, "24h preference must be preserved")
+        XCTAssertTrue(prefs.anyEnabled, "48h alone still means reminders are enabled")
+
+        // 6. The legacy key is gone from storage.
+        XCTAssertNil(
+            defaults.object(forKey: notification12hKey),
+            "startup migration must clear the legacy key"
+        )
+    }
+
+    /// Even if the legacy key survives or reappears — a restored backup, or an older build still
+    /// writing it — the resolver must not turn it back into a scheduled reminder.
+    func test_legacy12hKeyReappearingAfterMigrationStillResolvesDisabled() {
+        let defaults = makeNotificationDefaults()
+
+        let vm = makeMinimalViewModel(syncStateDefaults: defaults)
+        defaults.set(true, forKey: notification12hKey)
+
+        XCTAssertFalse(
+            vm.notificationPreferences.notify12h,
+            "the resolver must ignore the legacy key, not merely have cleared it once"
+        )
+    }
+
+    /// 7. An actual reschedule driven by the legacy preference must not request a T-12h threshold.
+    func test_rescheduleFromLegacy12hPreferenceRequestsNoTwelveHourThreshold() async {
+        let defaults = makeNotificationDefaults()
+
+        defaults.set(true, forKey: notification12hKey)
+        defaults.set(true, forKey: notification48hKey)
+        defaults.set(false, forKey: notification24hKey)
+
+        let notifications = RecordingNotificationService()
+        let vm = makeMinimalViewModel(
+            notificationService: notifications,
+            syncStateDefaults: defaults
+        )
+
+        await vm.updateNotificationPreferencesFromSettings(triggeredByEnablingToggle: false)
+
+        let requests = await notifications.requests
+        XCTAssertFalse(requests.isEmpty, "precondition: a reschedule should have been attempted")
+        for request in requests {
+            XCTAssertFalse(request.notify12h, "no reschedule may request a T-12h reminder")
+        }
+        XCTAssertTrue(requests.contains { $0.notify48h }, "48h must still be scheduled")
+    }
+
+    /// With only the legacy preference set, nothing is enabled any more, so the reschedule must
+    /// clear reminders rather than keep the subsystem armed on a preference with no UI.
+    func test_legacy12hAloneNoLongerCountsAsAnyNotificationEnabled() async {
+        let defaults = makeNotificationDefaults()
+
+        defaults.set(true, forKey: notification12hKey)
+        defaults.set(false, forKey: notification48hKey)
+        defaults.set(false, forKey: notification24hKey)
+
+        let notifications = RecordingNotificationService()
+        let vm = makeMinimalViewModel(
+            notificationService: notifications,
+            syncStateDefaults: defaults
+        )
+
+        XCTAssertFalse(vm.notificationPreferences.anyEnabled)
+
+        await vm.updateNotificationPreferencesFromSettings(triggeredByEnablingToggle: false)
+
+        let requests = await notifications.requests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.notify48h, false)
+        XCTAssertEqual(requests.first?.notify24h, false)
+        XCTAssertEqual(requests.first?.notify12h, false)
+    }
+
+    private var notification12hKey: String { "notification_12h_enabled" }
+    private var notification48hKey: String { "notification_48h_enabled" }
+    private var notification24hKey: String { "notification_24h_enabled" }
+
+    private func makeNotificationDefaults() -> UserDefaults {
+        let suiteName = "AppViewModelDeviceSyncTests.notifications.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
+    }
+
     // MARK: - Leg-history preservation through schedule-wide transforms (INV-012)
 
     /// Both of these transforms rebuild *every* leg of *every* schedule they touch, not just the
@@ -1260,18 +1370,22 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         XCTAssertEqual(leg.aircraftRegistration, "N605UP")
     }
 
-    private func makeMinimalViewModel() -> AppViewModel {
+    private func makeMinimalViewModel(
+        notificationService: NextReportNotificationServiceProtocol = NoopNotificationService(),
+        syncStateDefaults: UserDefaults = .standard
+    ) -> AppViewModel {
         AppViewModel(
             syncService: NoopSyncService(),
             authService: NoopAuthService(),
             cacheService: InMemoryCacheService(),
-            notificationService: NoopNotificationService(),
+            notificationService: notificationService,
             crewAccessImportService: NoopImportService(),
             friendScheduleCloudKitService: NoopFriendCloudKitService(),
             gemsVerificationCloudKitService: NoopGEMSVerificationService(),
             deviceScheduleCloudKitService: FakeDeviceScheduleCloudKitService(),
             crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService(),
-            keychainService: EmptyKeychainService()
+            keychainService: EmptyKeychainService(),
+            syncStateDefaults: syncStateDefaults
         )
     }
 
@@ -1414,6 +1528,31 @@ private struct NoopNotificationService: NextReportNotificationServiceProtocol {
         notify12h: Bool
     ) async -> NotificationRescheduleResult {
         NotificationRescheduleResult(requested: 0, scheduled: 0, failed: 0)
+    }
+}
+
+/// Authorized notification service that records every reschedule request, so a test can assert on
+/// the thresholds the view model actually asked for.
+private actor RecordingNotificationService: NextReportNotificationServiceProtocol {
+    struct Request: Sendable {
+        let notify48h: Bool
+        let notify24h: Bool
+        let notify12h: Bool
+    }
+
+    private(set) var requests: [Request] = []
+
+    func authorizationStatus() async -> UNAuthorizationStatus { .authorized }
+    func requestAuthorization() async throws -> Bool { true }
+
+    func reschedule(
+        schedules: [PayPeriodSchedule],
+        notify48h: Bool,
+        notify24h: Bool,
+        notify12h: Bool
+    ) async -> NotificationRescheduleResult {
+        requests.append(Request(notify48h: notify48h, notify24h: notify24h, notify12h: notify12h))
+        return NotificationRescheduleResult(requested: 0, scheduled: 0, failed: 0)
     }
 }
 

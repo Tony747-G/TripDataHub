@@ -12,7 +12,6 @@ struct SettingsTabView: View {
     @AppStorage(OperationalSettings.crewBaseKey) private var crewBaseRawValue = OperationalSettings.defaultCrewBase.rawValue
     @AppStorage("notification_48h_enabled") private var notify48h = false
     @AppStorage("notification_24h_enabled") private var notify24h = false
-    @AppStorage("notification_12h_enabled") private var notify12h = false
     @AppStorage(ProfileStorageKeys.faaMedicalExpiryDate) private var faaMedicalExpiryDate = ""
     @AppStorage(ProfileStorageKeys.passportExpiryDate) private var passportExpiryDate = ""
     @AppStorage(ProfileStorageKeys.chinaVisaExpiryDate) private var chinaVisaExpiryDate = ""
@@ -87,19 +86,14 @@ struct SettingsTabView: View {
                 .padding(.vertical, 8)
                 .background(.background)
             }
+            // The legacy 12h migration used to live here. It now runs in AppViewModel startup
+            // (`migrateLegacyNotificationPreferencesIfNeeded`), because a migration that only
+            // happens when the user opens Settings is not a migration. Repeating it here would
+            // only add a redundant reschedule on every appearance.
             .onAppear {
-                let shouldDisableLegacy12h = notify12h
-                if shouldDisableLegacy12h {
-                    notify12h = false
-                }
                 Task {
                     await viewModel.refreshNotificationAuthorizationStatus()
                     await viewModel.applyCrewAccessRetentionPolicy()
-                    if shouldDisableLegacy12h {
-                        await viewModel.updateNotificationPreferencesFromSettings(
-                            triggeredByEnablingToggle: false
-                        )
-                    }
                     if viewModel.notificationAuthorizationStatus == .denied {
                         notify48h = false
                         notify24h = false

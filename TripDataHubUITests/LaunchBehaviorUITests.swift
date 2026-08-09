@@ -31,7 +31,7 @@ final class LaunchBehaviorUITests: XCTestCase {
 
         openSettings(in: app)
 
-        let loginButton = app.buttons["settings.tripboardAction"]
+        let loginButton = scrollToTripBoardAction(in: app)
         XCTAssertTrue(loginButton.waitForExistence(timeout: 5))
         XCTAssertEqual(loginButton.label, "TripBoard Log-in")
     }
@@ -46,7 +46,7 @@ final class LaunchBehaviorUITests: XCTestCase {
         XCTAssertFalse(app.switches["settings.openTimeDemoMode"].exists)
         XCTAssertFalse(app.staticTexts["Sync Diagnostics"].exists)
 
-        let tripBoardButton = app.buttons["settings.tripboardAction"]
+        let tripBoardButton = scrollToTripBoardAction(in: app)
         XCTAssertTrue(tripBoardButton.waitForExistence(timeout: 5))
         XCTAssertEqual(tripBoardButton.label, "TripBoard Log-in")
     }
@@ -108,6 +108,16 @@ final class LaunchBehaviorUITests: XCTestCase {
         let settingsButton = app.buttons["Settings"]
         XCTAssertTrue(settingsButton.waitForExistence(timeout: 2))
         settingsButton.tap()
+    }
+
+    private func scrollToTripBoardAction(in app: XCUIApplication) -> XCUIElement {
+        let action = app.buttons["settings.tripboardAction"]
+        var remainingScrolls = 6
+        while (!action.exists || !action.isHittable) && remainingScrolls > 0 {
+            app.swipeUp()
+            remainingScrolls -= 1
+        }
+        return action
     }
 
 }

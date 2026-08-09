@@ -614,6 +614,9 @@ final class AppViewModel: ObservableObject {
             seedAppReviewMockScheduleIfNeeded(for: loadedVerifiedIdentity.gemsID)
         }
         backfillMissingUTCInCachedSchedulesIfNeeded()
+        // Must run before the startup Task below, which is the first thing that can reschedule
+        // notifications from the stored preferences.
+        migrateLegacyNotificationPreferencesIfNeeded()
         if self.authStatus == .loggedIn, errorMessage == SyncServiceError.notAuthenticated.localizedDescription {
             errorMessage = nil
         }
@@ -3432,10 +3435,27 @@ final class AppViewModel: ObservableObject {
     ) -> [TripImportReplacementCandidate] {
         let incomingPairing = incomingJSON.tripId
         let domicile = verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
+        // Two resolutions, deliberately (INV-012).
+        //
+        // `newStart` / `newEnd` are the *operational* bounds and stay Actual-preferred, because
+        // time-overlap detection asks when the aeroplane was really occupied.
+        //
+        // `plannedStart` / `plannedEnd` are the *identity* bounds and are Scheduled-first. They
+        // feed the Bid Period trip key below, which is compared against
+        // `crewAccessTripKeys(for:domicile:)` — already Scheduled-first. Deriving one side of that
+        // comparison from an Actual instant made a post-flight re-import whose ATD crossed the
+        // 03:00 domicile-local boundary look like a different Bid Period, demoting a same-Trip-ID
+        // replacement to `.timeOverlap` and routing it down the destructive cleanup path.
         let newStart = incomingJSON.items
             .compactMap { LegConnectionTextBuilder.parseUTC($0.startUtc) }.min()
         let newEnd = incomingJSON.items
             .compactMap { LegConnectionTextBuilder.parseUTC($0.endUtc) }.max()
+        let plannedStart = incomingJSON.items
+            .compactMap { LegConnectionTextBuilder.parseUTC($0.stdUtc ?? $0.originalStdUtc ?? $0.startUtc) }
+            .min()
+        let plannedEnd = incomingJSON.items
+            .compactMap { LegConnectionTextBuilder.parseUTC($0.staUtc ?? $0.originalStaUtc ?? $0.endUtc) }
+            .max()
         let incomingOperationalInterval = Self.crewAccessOperationalInterval(
             startUTC: newStart,
             endUTC: newEnd
@@ -3459,8 +3479,8 @@ final class AppViewModel: ObservableObject {
             if existingPairings.contains(incomingPairing),
                let incomingKey = Self.crewAccessTripKey(
                 tripID: incomingPairing,
-                startUTC: newStart,
-                endUTC: newEnd,
+                startUTC: plannedStart,
+                endUTC: plannedEnd,
                 domicile: domicile
                ),
                Self.crewAccessTripKeys(for: existing, domicile: domicile).contains(incomingKey) {
@@ -7495,12 +7515,36 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    private var notificationPreferences: (notify48h: Bool, notify24h: Bool, notify12h: Bool, anyEnabled: Bool) {
-        let defaults = UserDefaults.standard
+    /// Removes the legacy 12h reminder preference.
+    ///
+    /// The 12h toggle was removed from Settings, but the stored key kept feeding the scheduler.
+    /// Clearing it only from `SettingsTabView.onAppear` meant a user who upgraded with 12h enabled
+    /// and never opened Settings kept receiving T-12h reminders with no in-app way to stop them.
+    /// The migration therefore belongs here, in model startup, ahead of any rescheduling.
+    ///
+    /// Writes only when the key is actually present, so this is idempotent and does not touch
+    /// UserDefaults on every launch. 48h and 24h preferences are not read or modified.
+    private func migrateLegacyNotificationPreferencesIfNeeded() {
+        let defaults = syncStateDefaults
+        guard defaults.object(forKey: notification12hKey) != nil else { return }
+        defaults.removeObject(forKey: notification12hKey)
+    }
+
+    /// Resolved reminder preferences for the scheduler.
+    ///
+    /// `internal` for test access.
+    ///
+    /// 12h is hard-wired to `false` rather than read back from `notification12hKey`. Clearing the
+    /// key at startup is not sufficient on its own: the value can reappear from a device backup or
+    /// from an older build still writing it, and there is no longer any UI that could turn it off
+    /// again. Refusing to read it makes a T-12h reminder unreachable from the legacy preference by
+    /// construction, not merely by migration timing.
+    var notificationPreferences: (notify48h: Bool, notify24h: Bool, notify12h: Bool, anyEnabled: Bool) {
+        let defaults = syncStateDefaults
         let n48 = defaults.object(forKey: notification48hKey) as? Bool ?? false
         let n24 = defaults.object(forKey: notification24hKey) as? Bool ?? false
-        let n12 = defaults.object(forKey: notification12hKey) as? Bool ?? false
-        return (n48, n24, n12, n48 || n24 || n12)
+        let n12 = false
+        return (n48, n24, n12, n48 || n24)
     }
 
     private func rescheduleNotificationsIfAuthorized() async {

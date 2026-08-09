@@ -271,6 +271,103 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
         XCTAssertEqual(liveGeneration, newPayload.generatedAt)
     }
 
+    /// Replacement identity is Scheduled-first on both sides of the comparison (INV-012).
+    ///
+    /// BP26-05 starts 2026-07-12 03:00 ANC-local, i.e. 2026-07-12T11:00Z in July. This trip is
+    /// scheduled out at 09:00Z — inside BP26-04 — and actually departs four hours late at 13:00Z,
+    /// which lands in BP26-05. The delay is ordinary; the Bid Period boundary it happens to cross
+    /// is not.
+    ///
+    /// `crewAccessTripKeys(for:domicile:)` resolves the *existing* schedule Scheduled-first. The
+    /// incoming side used to be derived from `startUtc`, which resolves Actual-first after the
+    /// merge, so the two halves of the same comparison disagreed. The same-Trip-ID branch then
+    /// missed and the trip fell through to `.timeOverlap`, routing an ordinary re-import of the
+    /// same trip down the destructive replacement path.
+    ///
+    /// The two generations carry different information dates on purpose: that is what makes their
+    /// schedule IDs differ, which is the only way to reach the Bid Period key comparison at all.
+    func test_lateDepartureCrossingBidPeriodBoundaryStillClassifiesAsSameTripID() async throws {
+        // Pinned inside the trip's own Bid Period so retention cannot prune the first generation
+        // out from under the comparison.
+        let harness = try makeHarness(
+            name: "bp-boundary-actual",
+            retentionReferenceDate: Self.date("2026-07-12T20:00:00Z")
+        )
+        let vm = harness.device.viewModel
+
+        let scheduledGeneration = Self.trip(
+            tripID: "T900042",
+            tripInformationDate: "2026-06-30",
+            generatedAt: "2026-06-30T12:00:00Z",
+            items: [
+                Self.item(
+                    sequence: 1,
+                    from: "ANC",
+                    to: "CVG",
+                    flight: "5X900",
+                    startUtc: "2026-07-12T09:00:00Z",
+                    endUtc: "2026-07-12T15:00:00Z",
+                    stdUtc: "2026-07-12T09:00:00Z",
+                    staUtc: "2026-07-12T15:00:00Z"
+                )
+            ]
+        )
+
+        // Post-flight generation: the schedule is unchanged, only the actuals are new. `startUtc`
+        // and `endUtc` follow the display resolution and therefore carry the actual instants.
+        let flownGeneration = Self.trip(
+            tripID: "T900042",
+            tripInformationDate: "2026-07-12",
+            generatedAt: "2026-07-12T20:00:00Z",
+            items: [
+                Self.item(
+                    sequence: 1,
+                    from: "ANC",
+                    to: "CVG",
+                    flight: "5X900",
+                    startUtc: "2026-07-12T13:00:00Z",
+                    endUtc: "2026-07-12T19:00:00Z",
+                    stdUtc: "2026-07-12T09:00:00Z",
+                    staUtc: "2026-07-12T15:00:00Z",
+                    atdUtc: "2026-07-12T13:00:00Z",
+                    ataUtc: "2026-07-12T19:00:00Z"
+                )
+            ]
+        )
+
+        let scheduledSchedule = try XCTUnwrap(
+            AppViewModel.buildCrewAccessSchedule(from: scheduledGeneration, modifiedAt: Date())
+        )
+        let flownSchedule = try XCTUnwrap(
+            AppViewModel.buildCrewAccessSchedule(from: flownGeneration, modifiedAt: Date())
+        )
+        XCTAssertNotEqual(
+            scheduledSchedule.id,
+            flownSchedule.id,
+            "precondition: differing information dates must give differing schedule IDs, otherwise "
+                + "the identical-schedule-ID branch answers before the Bid Period key is consulted"
+        )
+        XCTAssertNotEqual(
+            bidPeriod(for: Self.date("2026-07-12T09:00:00Z"), domicile: "ANC")?.id,
+            bidPeriod(for: Self.date("2026-07-12T13:00:00Z"), domicile: "ANC")?.id,
+            "precondition: the scheduled and actual departures straddle a Bid Period boundary"
+        )
+
+        await harness.confirm(payload: scheduledGeneration)
+        vm.pendingImport = Self.pendingImport(for: flownGeneration)
+
+        let candidates = vm.pendingImportReplacementCandidates
+        XCTAssertEqual(candidates.count, 1)
+        let candidate = try XCTUnwrap(candidates.first)
+        XCTAssertEqual(candidate.id, scheduledSchedule.id)
+        guard case .sameTripID = candidate.reason else {
+            return XCTFail(
+                "a late departure must not reclassify a same-Trip-ID replacement as a time overlap; "
+                    + "got \(candidate.reason)"
+            )
+        }
+    }
+
     func test_timeOverlapWithSharedPairing_survivesRelaunchReconcile() async throws {
         let harness = try makeHarness(name: "original")
         let newPayload = crossBidPeriodReplacementTrip()
@@ -796,7 +893,11 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
         flight: String,
         startUtc: String,
         endUtc: String,
-        deadhead: Bool = false
+        deadhead: Bool = false,
+        stdUtc: String? = nil,
+        staUtc: String? = nil,
+        atdUtc: String? = nil,
+        ataUtc: String? = nil
     ) -> CrewAccessTripItemJSON {
         CrewAccessTripItemJSON(
             sequence: sequence,
@@ -813,10 +914,10 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
             timeDerivation: "utc",
             aircraft: "B767",
             block: "0:00",
-            stdUtc: nil,
-            staUtc: nil,
-            atdUtc: nil,
-            ataUtc: nil,
+            stdUtc: stdUtc,
+            staUtc: staUtc,
+            atdUtc: atdUtc,
+            ataUtc: ataUtc,
             tailNumber: nil
         )
     }
