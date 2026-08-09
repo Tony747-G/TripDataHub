@@ -110,6 +110,7 @@ struct CrewAccessTripJSON: Codable, Equatable, Sendable {
     let sourceVersion: String
     let mappingVersion: String
     let generatedAt: String
+    let pdfCreatedUtc: String?
     let tripId: String
     let tripInformationDate: String
     let creditTime: String?
@@ -119,6 +120,40 @@ struct CrewAccessTripJSON: Codable, Equatable, Sendable {
     let hotelDetails: [String]
     let crew: [CrewAccessCrewJSON]
     let items: [CrewAccessTripItemJSON]
+
+    init(
+        schemaVersion: Int,
+        source: String,
+        sourceVersion: String,
+        mappingVersion: String,
+        generatedAt: String,
+        pdfCreatedUtc: String? = nil,
+        tripId: String,
+        tripInformationDate: String,
+        creditTime: String?,
+        tripDays: String?,
+        tafb: String?,
+        dutyTotals: [String],
+        hotelDetails: [String],
+        crew: [CrewAccessCrewJSON],
+        items: [CrewAccessTripItemJSON]
+    ) {
+        self.schemaVersion = schemaVersion
+        self.source = source
+        self.sourceVersion = sourceVersion
+        self.mappingVersion = mappingVersion
+        self.generatedAt = generatedAt
+        self.pdfCreatedUtc = pdfCreatedUtc
+        self.tripId = tripId
+        self.tripInformationDate = tripInformationDate
+        self.creditTime = creditTime
+        self.tripDays = tripDays
+        self.tafb = tafb
+        self.dutyTotals = dutyTotals
+        self.hotelDetails = hotelDetails
+        self.crew = crew
+        self.items = items
+    }
 }
 
 struct CrewAccessTripItemJSON: Codable, Equatable, Sendable {
@@ -142,6 +177,13 @@ struct CrewAccessTripItemJSON: Codable, Equatable, Sendable {
     let atdUtc: String?       // Actual Time of Departure (UTC) — nil until actual data available
     let ataUtc: String?       // Actual Time of Arrival (UTC)   — nil until actual data available
     let tailNumber: String?   // Aircraft registration (e.g. N123UP)
+    let stableLegId: String?
+    let originalStdUtc: String?
+    let originalStaUtc: String?
+    let scheduledDepartureObservedAtUtc: String?
+    let scheduledArrivalObservedAtUtc: String?
+    let actualDepartureObservedAtUtc: String?
+    let actualArrivalObservedAtUtc: String?
 
     // Memberwise initializer (required because custom Decodable init is defined below)
     init(
@@ -163,7 +205,14 @@ struct CrewAccessTripItemJSON: Codable, Equatable, Sendable {
         staUtc: String?,
         atdUtc: String?,
         ataUtc: String?,
-        tailNumber: String?
+        tailNumber: String?,
+        stableLegId: String? = nil,
+        originalStdUtc: String? = nil,
+        originalStaUtc: String? = nil,
+        scheduledDepartureObservedAtUtc: String? = nil,
+        scheduledArrivalObservedAtUtc: String? = nil,
+        actualDepartureObservedAtUtc: String? = nil,
+        actualArrivalObservedAtUtc: String? = nil
     ) {
         self.sequence          = sequence
         self.depAirport        = depAirport
@@ -184,6 +233,13 @@ struct CrewAccessTripItemJSON: Codable, Equatable, Sendable {
         self.atdUtc            = atdUtc
         self.ataUtc            = ataUtc
         self.tailNumber        = tailNumber
+        self.stableLegId       = stableLegId
+        self.originalStdUtc    = originalStdUtc
+        self.originalStaUtc    = originalStaUtc
+        self.scheduledDepartureObservedAtUtc = scheduledDepartureObservedAtUtc
+        self.scheduledArrivalObservedAtUtc = scheduledArrivalObservedAtUtc
+        self.actualDepartureObservedAtUtc = actualDepartureObservedAtUtc
+        self.actualArrivalObservedAtUtc = actualArrivalObservedAtUtc
     }
 
     // Custom decoder for backward compatibility with JSON files that lack newer fields
@@ -208,6 +264,13 @@ struct CrewAccessTripItemJSON: Codable, Equatable, Sendable {
         atdUtc            = try c.decodeIfPresent(String.self, forKey: .atdUtc)
         ataUtc            = try c.decodeIfPresent(String.self, forKey: .ataUtc)
         tailNumber        = try c.decodeIfPresent(String.self, forKey: .tailNumber)
+        stableLegId       = try c.decodeIfPresent(String.self, forKey: .stableLegId)
+        originalStdUtc    = try c.decodeIfPresent(String.self, forKey: .originalStdUtc)
+        originalStaUtc    = try c.decodeIfPresent(String.self, forKey: .originalStaUtc)
+        scheduledDepartureObservedAtUtc = try c.decodeIfPresent(String.self, forKey: .scheduledDepartureObservedAtUtc)
+        scheduledArrivalObservedAtUtc = try c.decodeIfPresent(String.self, forKey: .scheduledArrivalObservedAtUtc)
+        actualDepartureObservedAtUtc = try c.decodeIfPresent(String.self, forKey: .actualDepartureObservedAtUtc)
+        actualArrivalObservedAtUtc = try c.decodeIfPresent(String.self, forKey: .actualArrivalObservedAtUtc)
     }
 }
 
@@ -259,6 +322,15 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter
+    }()
+
+    private static let crewAccessCreatedFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "ddMMMyyyy HH:mm"
         return formatter
     }()
 
@@ -341,6 +413,8 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
 
         let tripInfoDateText = extractValue(from: lines, prefix: "Date:")
         let tripInfoDate = tripInfoDateText.flatMap { Self.tripDateFormatter.date(from: $0.uppercased()) }
+        let pdfCreatedUTC = Self.extractPDFCreatedUTC(from: lines)
+        let pdfCreatedUTCString = pdfCreatedUTC.map { Self.isoUTCFormatter.string(from: $0) }
 
         guard let tripIDLine = extractValue(from: lines, prefix: "Trip Id:") else {
             errors.append(ImportErrorItem(
@@ -500,8 +574,14 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
             let calculatedBlock = calculateBlock(depUTC: depUTC, arrUTC: arrUTC)
             let effectiveBlock = normalizedInputBlock ?? calculatedBlock ?? ""
             let layover = layoverByArrivingSequence[row.sequence]
+            let departureIsScheduled = pdfCreatedUTC.map { $0 < depUTC } ?? true
+            let arrivalIsScheduled = pdfCreatedUTC.map { $0 < arrUTC } ?? true
+            let depUTCString = Self.isoUTCFormatter.string(from: depUTC)
+            let arrUTCString = Self.isoUTCFormatter.string(from: arrUTC)
+            let stableLegID = UUID()
 
             let leg = TripLeg(
+                id: stableLegID,
                 payPeriod: label,
                 pairing: tripID,
                 leg: legSequence,
@@ -510,17 +590,24 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
                 depLocal: depLocalDisplay,
                 arrAirport: row.arrAirport,
                 arrLocal: arrLocalDisplay,
-                depUTC: Self.isoUTCFormatter.string(from: depUTC),
-                arrUTC: Self.isoUTCFormatter.string(from: arrUTC),
+                depUTC: depUTCString,
+                arrUTC: arrUTCString,
                 status: legStatus(for: row),
                 block: effectiveBlock,
                 layoverStation: layover?.station,
                 layoverHotelName: layover?.hotelName,
                 layoverDuration: layover.map { stripH($0.duration) },
-                stdUTC: Self.isoUTCFormatter.string(from: depUTC),
-                staUTC: Self.isoUTCFormatter.string(from: arrUTC),
-                atdUTC: nil,
-                ataUTC: nil
+                stdUTC: departureIsScheduled ? depUTCString : nil,
+                staUTC: arrivalIsScheduled ? arrUTCString : nil,
+                atdUTC: departureIsScheduled ? nil : depUTCString,
+                ataUTC: arrivalIsScheduled ? nil : arrUTCString,
+                originalSTDUTC: departureIsScheduled ? depUTCString : nil,
+                originalSTAUTC: arrivalIsScheduled ? arrUTCString : nil,
+                scheduledDepartureObservedAtUTC: departureIsScheduled ? pdfCreatedUTCString : nil,
+                scheduledArrivalObservedAtUTC: arrivalIsScheduled ? pdfCreatedUTCString : nil,
+                actualDepartureObservedAtUTC: departureIsScheduled ? nil : pdfCreatedUTCString,
+                actualArrivalObservedAtUTC: arrivalIsScheduled ? nil : pdfCreatedUTCString,
+                aircraftType: row.aircraft
             )
             tripLegs.append(leg)
 
@@ -530,8 +617,8 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
                 arrAirport: row.arrAirport,
                 deadhead: row.deadhead,
                 flight: normalizeFlightNumber(row.flight, isDeadhead: row.deadhead),
-                startUtc: Self.isoUTCFormatter.string(from: depUTC),
-                endUtc: Self.isoUTCFormatter.string(from: arrUTC),
+                startUtc: depUTCString,
+                endUtc: arrUTCString,
                 startLocalDisplay: depLocalDisplay,
                 endLocalDisplay: arrLocalDisplay,
                 originTz: depTimeZoneID,
@@ -539,11 +626,18 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
                 timeDerivation: "from_utc",
                 aircraft: row.aircraft,
                 block: effectiveBlock,
-                stdUtc: Self.isoUTCFormatter.string(from: depUTC),
-                staUtc: Self.isoUTCFormatter.string(from: arrUTC),
-                atdUtc: nil,
-                ataUtc: nil,
-                tailNumber: nil
+                stdUtc: departureIsScheduled ? depUTCString : nil,
+                staUtc: arrivalIsScheduled ? arrUTCString : nil,
+                atdUtc: departureIsScheduled ? nil : depUTCString,
+                ataUtc: arrivalIsScheduled ? nil : arrUTCString,
+                tailNumber: nil,
+                stableLegId: stableLegID.uuidString,
+                originalStdUtc: departureIsScheduled ? depUTCString : nil,
+                originalStaUtc: arrivalIsScheduled ? arrUTCString : nil,
+                scheduledDepartureObservedAtUtc: departureIsScheduled ? pdfCreatedUTCString : nil,
+                scheduledArrivalObservedAtUtc: arrivalIsScheduled ? pdfCreatedUTCString : nil,
+                actualDepartureObservedAtUtc: departureIsScheduled ? nil : pdfCreatedUTCString,
+                actualArrivalObservedAtUtc: arrivalIsScheduled ? nil : pdfCreatedUTCString
             ))
         }
 
@@ -572,11 +666,12 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         ) : nil
 
         let jsonPayload: CrewAccessTripJSON? = errors.isEmpty ? CrewAccessTripJSON(
-            schemaVersion: 1,
+            schemaVersion: 2,
             source: PendingImportSource.crewAccessPDF.rawValue,
             sourceVersion: Self.parserVersion,
             mappingVersion: tzResolver.mappingVersion,
             generatedAt: Self.isoUTCFormatter.string(from: Date()),
+            pdfCreatedUtc: pdfCreatedUTCString,
             tripId: tripID,
             tripInformationDate: effectiveTripDateText,
             creditTime: tripSummary.creditTime,
@@ -598,6 +693,37 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
             errors: dedupErrors(errors),
             rawExtractStats: stats
         )
+    }
+
+    /// Matches the CrewAccess footer, e.g. `Created 09Aug2026 02:15 (UTC) by 00007793942`.
+    /// Compiled once — this used to be rebuilt on every line of every page.
+    private static let pdfCreatedUTCRegex = try? NSRegularExpression(
+        pattern: #"Created\s+(\d{2}[A-Za-z]{3}\d{4})\s+(\d{2}:\d{2})\s+\(UTC\)"#
+    )
+
+    /// Extracts the PDF's own `Created (UTC)` instant, which is the observation time every
+    /// Scheduled/Actual classification in this parser is measured against (INV-012).
+    ///
+    /// `internal static` so the classification input can be tested directly instead of only
+    /// through a full PDF parse. Returns nil when the footer is absent — a missing Created time is
+    /// treated as "unknown", never fabricated.
+    static func extractPDFCreatedUTC(from lines: [String]) -> Date? {
+        guard let regex = pdfCreatedUTCRegex else { return nil }
+        for line in lines {
+            guard let match = regex.firstMatch(
+                    in: line,
+                    range: NSRange(line.startIndex..., in: line)
+                  ),
+                  let dateRange = Range(match.range(at: 1), in: line),
+                  let timeRange = Range(match.range(at: 2), in: line) else {
+                continue
+            }
+            let value = "\(line[dateRange]) \(line[timeRange])".uppercased()
+            if let date = crewAccessCreatedFormatter.date(from: value) {
+                return date
+            }
+        }
+        return nil
     }
 
     private func stripH(_ s: String) -> String {

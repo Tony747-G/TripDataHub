@@ -202,7 +202,7 @@ enum BidPeriodScheduleExportError: LocalizedError, Equatable {
 }
 
 enum BidPeriodScheduleExportService {
-    static let schemaVersion = "1.0"
+    static let schemaVersion = "1.1"
     static let exportType = "bidPeriodSchedule"
     static let boundaryLocalTime = "03:00"
 
@@ -376,7 +376,11 @@ enum BidPeriodScheduleExportService {
         rootIssues: inout [ExportDiagnosticIssue]
     ) -> BidPeriodExportTrip {
         let sortedLegs = trip.legs.sorted(by: legSort)
-        let firstDeparture = sortedLegs.compactMap { TripJSONExportService.parseInstant($0.depUTC ?? "") }.min()
+        // Bid Period assignment is identity, so it resolves Scheduled before Actual (INV-012).
+        // A delayed departure must not reassign an already-exported trip to another Bid Period.
+        let firstDeparture = sortedLegs
+            .compactMap { TripJSONExportService.parseInstant($0.plannedDepartureUTC ?? "") }
+            .min()
         let assignedBidPeriod = firstDeparture.flatMap { bidPeriod(for: $0, domicile: domicile) }
         let tripID = stableTripID(pairing: trip.pairing, startUTC: trip.startUTC)
         let schedule = PayPeriodSchedule(
@@ -656,7 +660,23 @@ enum BidPeriodScheduleExportService {
                 flightNumber: leg.flight.isEmpty ? nil : leg.flight,
                 origin: leg.depAirport.isEmpty ? nil : leg.depAirport,
                 destination: leg.arrAirport.isEmpty ? nil : leg.arrAirport,
-                blockTime: leg.block.isEmpty ? nil : leg.block
+                aircraft: leg.aircraftType,
+                aircraftRegistration: leg.aircraftRegistration,
+                blockTime: leg.block.isEmpty ? nil : leg.block,
+                departure: TripJSONExportService.endpointHistory(
+                    originalScheduled: leg.originalSTDUTC ?? leg.stdUTC,
+                    scheduled: leg.stdUTC,
+                    scheduledObservedAt: leg.scheduledDepartureObservedAtUTC,
+                    actual: leg.atdUTC,
+                    actualObservedAt: leg.actualDepartureObservedAtUTC
+                ),
+                arrival: TripJSONExportService.endpointHistory(
+                    originalScheduled: leg.originalSTAUTC ?? leg.staUTC,
+                    scheduled: leg.staUTC,
+                    scheduledObservedAt: leg.scheduledArrivalObservedAtUTC,
+                    actual: leg.ataUTC,
+                    actualObservedAt: leg.actualArrivalObservedAtUTC
+                )
             )
             events.append(segment)
             nextSequence += 1
@@ -954,8 +974,10 @@ enum BidPeriodScheduleExportService {
     }
 
     private static func legSort(_ lhs: TripLeg, _ rhs: TripLeg) -> Bool {
-        let lhsDate = TripJSONExportService.parseInstant(lhs.depUTC ?? "") ?? .distantFuture
-        let rhsDate = TripJSONExportService.parseInstant(rhs.depUTC ?? "") ?? .distantFuture
+        // Scheduled ordering keeps the exported leg order deterministic and independent of
+        // whether Actual times have been observed yet.
+        let lhsDate = TripJSONExportService.parseInstant(lhs.plannedDepartureUTC ?? "") ?? .distantFuture
+        let rhsDate = TripJSONExportService.parseInstant(rhs.plannedDepartureUTC ?? "") ?? .distantFuture
         if lhsDate != rhsDate { return lhsDate < rhsDate }
         if lhs.leg != rhs.leg { return lhs.leg < rhs.leg }
         return lhs.id.uuidString < rhs.id.uuidString

@@ -2991,11 +2991,19 @@ final class AppViewModel: ObservableObject {
         }
         guard pendingImport.canConfirm,
               let schedule = pendingImport.parsedSchedule,
-              let json = pendingImport.jsonPayload else {
+              let parsedJSON = pendingImport.jsonPayload else {
             crewAccessImportMessage = "Cannot confirm import while errors exist."
             // importInProgress stays true; user must discard to reset.
             return
         }
+
+        let existingPayloads = Self.loadCrewAccessTripJSONPayloadsFromImportFilesSync(
+            directory: crewAccessImportsDirectory
+        ).map(\.payload)
+        let json = Self.mergeCrewAccessLegHistory(
+            incoming: parsedJSON,
+            existingPayloads: existingPayloads
+        )
 
         do {
             // Compute overlap IDs before any writes so we can roll back cleanly.
@@ -3006,9 +3014,17 @@ final class AppViewModel: ObservableObject {
                 overlapCandidates
                     .map(\.id)
             )
-            let overlapPairings = Set(
-                overlapCandidates
-                    .flatMap(\.pairings)
+            let overlapSchedules = crewAccessSchedules.filter { overlapIDs.contains($0.id) }
+            let domicile = verifiedIdentity?.domicile ?? DomicileSupport.defaultDomicile
+            let overlapTripKeys = Set(
+                overlapSchedules.flatMap { Self.crewAccessTripKeys(for: $0, domicile: domicile) }
+            )
+            let overlapArtifacts = Self.captureCrewAccessReplacementArtifacts(
+                scheduleIDs: overlapIDs,
+                directory: crewAccessImportsDirectory
+            )
+            let overlapPayloadFingerprints = Self.crewAccessPayloadFingerprints(
+                at: overlapArtifacts.map(\.url)
             )
 
             let replacing = crewAccessSchedules.contains(where: { $0.id == schedule.id })
@@ -3031,9 +3047,23 @@ final class AppViewModel: ObservableObject {
             )
 
             let jsonWriteContext = try persistCrewAccessJSON(json)
+            let incomingTripKey = Self.crewAccessTripKey(
+                tripID: json.tripId,
+                tripInformationDate: json.tripInformationDate,
+                fallbackDate: nil
+            )
+            // Replacement targets were resolved against the pre-import file set. Protect both
+            // forms of incoming identity explicitly; a schedule change can preserve its pairing
+            // while moving to a different schedule ID / Bid Period key.
+            let protectedOverlapTripKeys = overlapTripKeys.filter { $0 != incomingTripKey }
+            let protectedOverlapArtifacts = overlapArtifacts.filter { artifact in
+                artifact.url.standardizedFileURL != jsonWriteContext.finalURL.standardizedFileURL
+                    && protectedOverlapTripKeys.contains(artifact.tripKey)
+            }
             // Stale same-trip files are moved aside rather than deleted, because they are removed
             // before verification runs and the rollback has to be able to undo that too.
             var staleStashes: [CrewAccessStaleJSONStash] = []
+            var overlapStashes: [CrewAccessStaleJSONStash] = []
             do {
                 try mergeImportedCrewAccessSchedule(
                     schedule,
@@ -3042,12 +3072,19 @@ final class AppViewModel: ObservableObject {
                 staleStashes = stashStaleCrewAccessJSONFilesBestEffort(
                     jsonWriteContext.staleSameBidPeriodTripURLs
                 )
+                overlapStashes = stashStaleCrewAccessJSONFilesBestEffort(
+                    protectedOverlapArtifacts.map(\.url)
+                )
                 await applyCrewAccessRetentionPolicy()
                 // The reconcile above rebuilds the Timeline from the JSON directory. If the trip
                 // the user just confirmed is not in the result, the import did not succeed no
                 // matter how well the individual steps reported — persisting or uploading that
                 // state would publish "old trip gone, new trip gone".
-                try verifyCrewAccessImportCommit(json: json, jsonURL: jsonWriteContext.finalURL)
+                try verifyCrewAccessImportCommit(
+                    json: json,
+                    jsonURL: jsonWriteContext.finalURL,
+                    supersededScheduleIDs: overlapIDs
+                )
             } catch {
                 do {
                     try rollbackCrewAccessJSONWrite(with: jsonWriteContext)
@@ -3056,6 +3093,7 @@ final class AppViewModel: ObservableObject {
                 }
                 // Every file this commit removed comes back, not just `finalURL`.
                 restoreStashedStaleCrewAccessJSONFiles(staleStashes)
+                restoreStashedStaleCrewAccessJSONFiles(overlapStashes)
                 // The generation is no longer on disk, so its tombstone override must be
                 // disarmed — an armed fingerprint with no file behind it would only make a
                 // later legitimate delete harder to converge.
@@ -3069,38 +3107,18 @@ final class AppViewModel: ObservableObject {
             // Verification passed, so the superseded copies are safe to discard.
             finalizeCrewAccessJSONWriteBestEffort(with: jsonWriteContext)
             discardStashedStaleCrewAccessJSONFilesBestEffort(staleStashes)
+            discardStashedStaleCrewAccessJSONFilesBestEffort(overlapStashes)
 
-            // New import committed successfully — safe to tombstone overlapping trips.
-            if !overlapIDs.isEmpty || !overlapPairings.isEmpty {
-                // Merge/reconcile can remove or reshape the original overlap schedule IDs before
-                // this cleanup runs. Re-resolve from the post-merge schedule list by the captured
-                // IDs and pairings so we tombstone only the previously detected time-overlap files.
-                // The newly imported schedule is not included because same-Trip-ID candidates are
-                // filtered out above; these pairings come only from time-overlap candidates.
-                let resolvedOverlapIDs = Set(
-                    crewAccessSchedules
-                        .filter { existing in
-                            let existingPairings = Set(existing.legs.map(\.pairing))
-                            return overlapIDs.contains(existing.id)
-                                || !existingPairings.isDisjoint(with: overlapPairings)
-                        }
-                        .map(\.id)
+            // Verification ran after the exact pre-import artifacts were moved out of the source
+            // directory and reconcile rebuilt state. Only now is it safe to make their deletion
+            // durable and publish tombstones. No post-merge pairing lookup is permitted here.
+            if !protectedOverlapTripKeys.isEmpty {
+                preservePastLogTenRecords(from: overlapSchedules)
+                enqueueCrewAccessDeletion(
+                    tripKeys: Array(protectedOverlapTripKeys),
+                    deletedAt: Date(),
+                    payloads: overlapPayloadFingerprints
                 )
-                if !resolvedOverlapIDs.isEmpty {
-                    await deleteCrewAccessTrips(ids: resolvedOverlapIDs)
-                }
-                let overlapTripIDs = overlapPairings.map(Self.normalizedCrewAccessTripID)
-                let importsDirectory = crewAccessImportsDirectory
-                if !overlapTripIDs.isEmpty {
-                    _ = await Task.detached(priority: .utility) {
-                        Self.deleteCrewAccessImportFilesBestEffort(
-                            scheduleIDs: Array(resolvedOverlapIDs),
-                            tripIDs: overlapTripIDs,
-                            tripKeys: [],
-                            directory: importsDirectory
-                        )
-                    }.value
-                }
             }
 
             lastImportDidReplaceExistingTrip = replacing
@@ -3118,7 +3136,10 @@ final class AppViewModel: ObservableObject {
             errorMessage = nil
             await rescheduleNotificationsIfAuthorized()
             let uploadURL = jsonWriteContext.finalURL
-            let staleFileNames = jsonWriteContext.staleSameBidPeriodTripURLs.map(\.lastPathComponent)
+            let staleFileNames = Array(Set(
+                jsonWriteContext.staleSameBidPeriodTripURLs.map(\.lastPathComponent)
+                    + protectedOverlapArtifacts.map(\.fileName)
+            ))
             transactionHandedToUpload = true
             Task { [weak self] in
                 guard let self else { return }
@@ -3185,12 +3206,16 @@ final class AppViewModel: ObservableObject {
         case tripMissingFromRebuiltTimeline(tripID: String)
         /// Reconcile kept the trip but dropped legs of it (for example a GND segment).
         case legsMissingFromRebuiltTimeline(tripID: String, missing: Int, expected: Int)
+        /// Reconcile still contains a schedule captured as a pre-import overlap target.
+        case supersededTripStillPresent(scheduleID: String)
 
         var userFacingDescription: String {
             switch self {
             case .sourceJSONMissing, .sourceJSONUnreadable:
                 return "the imported trip file could not be re-read."
-            case .tripMissingFromRebuiltTimeline, .legsMissingFromRebuiltTimeline:
+            case .tripMissingFromRebuiltTimeline,
+                 .legsMissingFromRebuiltTimeline,
+                 .supersededTripStillPresent:
                 return "the trip did not appear in the rebuilt Timeline."
             }
         }
@@ -3205,6 +3230,8 @@ final class AppViewModel: ObservableObject {
                 return "trip absent from rebuilt Timeline: \(tripID)"
             case .legsMissingFromRebuiltTimeline(let tripID, let missing, let expected):
                 return "trip \(tripID) rebuilt with \(expected - missing)/\(expected) legs"
+            case .supersededTripStillPresent(let scheduleID):
+                return "superseded schedule still present after rebuild: \(scheduleID)"
             }
         }
     }
@@ -3227,7 +3254,11 @@ final class AppViewModel: ObservableObject {
     /// import's `parsedSchedule`. Reconcile reads that file and nothing else, so comparing against
     /// it is the only self-consistent check — comparing against the in-memory parse would flag
     /// harmless differences between the two representations as import failures.
-    private func verifyCrewAccessImportCommit(json: CrewAccessTripJSON, jsonURL: URL) throws {
+    private func verifyCrewAccessImportCommit(
+        json: CrewAccessTripJSON,
+        jsonURL: URL,
+        supersededScheduleIDs: Set<String> = []
+    ) throws {
         let fileName = jsonURL.lastPathComponent
         guard FileManager.default.fileExists(atPath: jsonURL.path),
               let data = try? Data(contentsOf: jsonURL) else {
@@ -3271,6 +3302,12 @@ final class AppViewModel: ObservableObject {
                 missing: missingLegCount,
                 expected: expectedLegKeys.count
             )
+        }
+
+        if let remainingID = crewAccessSchedules
+            .map(\.id)
+            .first(where: supersededScheduleIDs.contains) {
+            throw CrewAccessImportCommitError.supersededTripStillPresent(scheduleID: remainingID)
         }
     }
 
@@ -3326,6 +3363,57 @@ final class AppViewModel: ObservableObject {
         let tripId: String      // pairing(s) for display
         let pairings: Set<String>
         let reason: TripReplacementReason
+    }
+
+    /// An exact source artifact selected from the pre-import file set.
+    ///
+    /// Pairing is intentionally absent. It is a display identifier that may be shared by the old
+    /// and replacing generations, so it is never safe deletion identity after state mutation.
+    private struct CrewAccessReplacementArtifact {
+        let url: URL
+        let fileName: String
+        let scheduleID: String
+        let tripKey: String
+    }
+
+    private nonisolated static func captureCrewAccessReplacementArtifacts(
+        scheduleIDs: Set<String>,
+        directory: URL?
+    ) -> [CrewAccessReplacementArtifact] {
+        guard !scheduleIDs.isEmpty, let directory else { return [] }
+        let fm = FileManager.default
+        guard let urls = try? fm.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        return urls.compactMap { url in
+            guard let values = try? url.resourceValues(
+                forKeys: [.contentModificationDateKey, .isRegularFileKey]
+            ),
+            values.isRegularFile == true,
+            url.pathExtension.lowercased() == "json",
+            let data = try? Data(contentsOf: url),
+            let payload = try? JSONDecoder().decode(CrewAccessTripJSON.self, from: data),
+            let schedule = buildCrewAccessSchedule(
+                from: payload,
+                modifiedAt: values.contentModificationDate ?? Date()
+            ),
+            scheduleIDs.contains(schedule.id),
+            let tripKey = crewAccessTripKey(
+                tripID: payload.tripId,
+                tripInformationDate: payload.tripInformationDate,
+                fallbackDate: nil
+            ) else { return nil }
+
+            return CrewAccessReplacementArtifact(
+                url: url,
+                fileName: url.lastPathComponent,
+                scheduleID: schedule.id,
+                tripKey: tripKey
+            )
+        }
     }
 
     /// Existing schedules that the pending import would replace or supersede.
@@ -3631,6 +3719,99 @@ final class AppViewModel: ObservableObject {
             logNonFatal("Failed to save schedule cache after CrewAccess file reconciliation: \(error.localizedDescription)")
         }
         await rescheduleNotificationsIfAuthorized()
+    }
+
+    func updateCrewAccessRegistration(for leg: TripLeg, registration rawValue: String?) async throws {
+        let registration = rawValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        let normalizedRegistration = registration?.isEmpty == false ? registration : nil
+        let payloads = Self.loadCrewAccessTripJSONPayloadsFromImportFilesSync(
+            directory: crewAccessImportsDirectory
+        ).map(\.payload)
+        // Deterministically the newest matching generation, matching how the import merge picks a
+        // predecessor. Taking the first hit in directory-enumeration order could write the
+        // registration into a superseded file, which reconcile would then discard — surfacing as
+        // "the registration update did not survive reconciliation".
+        let matching = payloads.filter { candidate in
+            Self.normalizedCrewAccessTripID(candidate.tripId)
+                == Self.normalizedCrewAccessTripID(leg.pairing)
+                && Self.buildCrewAccessSchedule(from: candidate, modifiedAt: Date())?.id == leg.payPeriod
+                && candidate.items.contains { Self.crewAccessItem($0, matches: leg) }
+        }
+        guard let payload = Self.latestCrewAccessPayload(in: matching) else {
+            throw NSError(
+                domain: "CrewAccessRegistration",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "The source CrewAccess leg could not be found."]
+            )
+        }
+
+        let updatedItems = payload.items.map { item in
+            guard Self.crewAccessItem(item, matches: leg) else { return item }
+            return Self.copyCrewAccessItem(
+                item,
+                tailNumber: normalizedRegistration,
+                stableLegID: item.stableLegId ?? leg.id.uuidString
+            )
+        }
+        let updatedPayload = CrewAccessTripJSON(
+            schemaVersion: max(2, payload.schemaVersion),
+            source: payload.source,
+            sourceVersion: payload.sourceVersion,
+            mappingVersion: payload.mappingVersion,
+            generatedAt: payload.generatedAt,
+            pdfCreatedUtc: payload.pdfCreatedUtc,
+            tripId: payload.tripId,
+            tripInformationDate: payload.tripInformationDate,
+            creditTime: payload.creditTime,
+            tripDays: payload.tripDays,
+            tafb: payload.tafb,
+            dutyTotals: payload.dutyTotals,
+            hotelDetails: payload.hotelDetails,
+            crew: payload.crew,
+            items: updatedItems
+        )
+
+        beginCrewAccessImportTransaction()
+        defer { endCrewAccessImportTransaction() }
+
+        // Same fail-closed shape as `confirmPendingImport`: capture the pre-write in-memory state
+        // before the first write so a failed verification restores memory, the derived schedule
+        // list and the on-disk cache together, not just the JSON file. No fingerprint is armed on
+        // this path (no `mergeImportedCrewAccessSchedule` call), so there is none to disarm.
+        let rollbackState = CrewAccessImportRollbackState(
+            crewAccessSchedules: crewAccessSchedules,
+            schedules: schedules,
+            legImportReferenceTimes: crewAccessLegImportReferenceTimes,
+            lastSyncAt: lastSyncAt
+        )
+
+        let writeContext = try persistCrewAccessJSON(updatedPayload)
+        do {
+            await reconcileCrewAccessSchedulesWithImportFiles()
+            guard crewAccessSchedules.flatMap(\.legs).contains(where: {
+                $0.id == leg.id && $0.aircraftRegistration == normalizedRegistration
+            }) else {
+                throw NSError(
+                    domain: "CrewAccessRegistration",
+                    code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "The registration update did not survive reconciliation."]
+                )
+            }
+            finalizeCrewAccessJSONWriteBestEffort(with: writeContext)
+        } catch {
+            do {
+                try rollbackCrewAccessJSONWrite(with: writeContext)
+            } catch {
+                logNonFatal("Failed to rollback CrewAccess JSON after registration update: \(error.localizedDescription)")
+            }
+            await restoreCrewAccessStateAfterFailedImport(rollbackState)
+            throw error
+        }
+
+        _ = await uploadCrewAccessImportFile(at: writeContext.finalURL, json: updatedPayload)
+        _ = await uploadDeviceScheduleIfNeeded(reason: "aircraft registration updated")
     }
 
     private func preservingAppReviewMockSchedules(
@@ -4306,33 +4487,17 @@ final class AppViewModel: ObservableObject {
 #endif
     }
 
-    private func refreshScheduleTimezones(_ schedules: [PayPeriodSchedule]) -> [PayPeriodSchedule] {
+    /// `internal` for test access: this transform previously dropped the whole CrewAccess leg
+    /// history and the manual registration, and that regression needs direct coverage.
+    func refreshScheduleTimezones(_ schedules: [PayPeriodSchedule]) -> [PayPeriodSchedule] {
         schedules.map { schedule in
             let updatedLegs = schedule.legs.map { leg in
-                let depLocal = localDisplayFromUTCString(leg.depUTC, airport: leg.depAirport) ?? leg.depLocal
-                let arrLocal = localDisplayFromUTCString(leg.arrUTC, airport: leg.arrAirport) ?? leg.arrLocal
-                return TripLeg(
-                    id: leg.id,
-                    payPeriod: leg.payPeriod,
-                    pairing: leg.pairing,
-                    leg: leg.leg,
-                    flight: leg.flight,
-                    depAirport: leg.depAirport,
-                    depLocal: depLocal,
-                    arrAirport: leg.arrAirport,
-                    arrLocal: arrLocal,
-                    depUTC: leg.depUTC,
-                    arrUTC: leg.arrUTC,
-                    status: leg.status,
-                    block: leg.block,
-                    layoverStation: leg.layoverStation,
-                    layoverHotelName: leg.layoverHotelName,
-                    layoverDuration: leg.layoverDuration,
-                    stdUTC: leg.stdUTC,
-                    staUTC: leg.staUTC,
-                    atdUTC: leg.atdUTC,
-                    ataUTC: leg.ataUTC
-                )
+                // Copy-and-mutate only. Memberwise reconstruction here previously dropped the
+                // whole CrewAccess leg history and the manual aircraft registration (INV-012).
+                var updated = leg
+                updated.depLocal = localDisplayFromUTCString(leg.depUTC, airport: leg.depAirport) ?? leg.depLocal
+                updated.arrLocal = localDisplayFromUTCString(leg.arrUTC, airport: leg.arrAirport) ?? leg.arrLocal
+                return updated
             }
             return PayPeriodSchedule(
                 id: schedule.id,
@@ -4376,7 +4541,8 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    private func backfillMissingUTC(in schedules: [PayPeriodSchedule]) -> (schedules: [PayPeriodSchedule], recoveredLegs: Int) {
+    /// `internal` for test access — see `refreshScheduleTimezones(_:)`.
+    func backfillMissingUTC(in schedules: [PayPeriodSchedule]) -> (schedules: [PayPeriodSchedule], recoveredLegs: Int) {
         var recovered = 0
         let out = schedules.map { schedule in
             let isCrewAccessSchedule = schedule.id.uppercased().hasPrefix("CA")
@@ -4387,28 +4553,17 @@ final class AppViewModel: ObservableObject {
                     ?? backfilledUTCString(fromDisplay: leg.arrLocal, airport: leg.arrAirport, preferUTCDisplay: isCrewAccessSchedule)
                 if normalizedUTCValue(leg.depUTC) == nil && depUTC != nil { recovered += 1 }
                 if normalizedUTCValue(leg.arrUTC) == nil && arrUTC != nil { recovered += 1 }
-                return TripLeg(
-                    id: leg.id,
-                    payPeriod: leg.payPeriod,
-                    pairing: leg.pairing,
-                    leg: leg.leg,
-                    flight: leg.flight,
-                    depAirport: leg.depAirport,
-                    depLocal: leg.depLocal,
-                    arrAirport: leg.arrAirport,
-                    arrLocal: leg.arrLocal,
-                    depUTC: depUTC,
-                    arrUTC: arrUTC,
-                    status: leg.status,
-                    block: leg.block,
-                    layoverStation: leg.layoverStation,
-                    layoverHotelName: leg.layoverHotelName,
-                    layoverDuration: leg.layoverDuration,
-                    stdUTC: leg.stdUTC ?? depUTC,
-                    staUTC: leg.staUTC ?? arrUTC,
-                    atdUTC: leg.atdUTC,
-                    ataUTC: leg.ataUTC
-                )
+                // Copy-and-mutate only, so the CrewAccess leg history and the manual aircraft
+                // registration survive the backfill (INV-012).
+                //
+                // `stdUTC` / `staUTC` are deliberately left alone. `depUTC` / `arrUTC` resolve
+                // Actual first, so the old `leg.stdUTC ?? depUTC` synthesized a Scheduled time out
+                // of an Actual one for schema-2 legs that had never had a Scheduled observation.
+                // A missing Scheduled value means "not observed" and must stay nil.
+                var updated = leg
+                updated.depUTC = depUTC
+                updated.arrUTC = arrUTC
+                return updated
             }
             return PayPeriodSchedule(
                 id: schedule.id,
@@ -5137,12 +5292,14 @@ final class AppViewModel: ObservableObject {
         guard let payload = try? JSONDecoder().decode(CrewAccessTripJSON.self, from: record.jsonData) else {
             return nil
         }
+        // Scheduled-preferred, to match `crewAccessTripKey(for:domicile:)`. A record keyed off an
+        // Actual instant would not match the same trip's locally derived key (INV-012).
         let startUTC = payload.items
-            .compactMap { LegConnectionTextBuilder.parseUTC($0.startUtc) }
+            .compactMap { LegConnectionTextBuilder.parseUTC($0.stdUtc ?? $0.originalStdUtc ?? $0.startUtc) }
             .min()
             ?? record.firstDepartureUTC.flatMap { LegConnectionTextBuilder.parseUTC($0) }
         let endUTC = payload.items
-            .compactMap { LegConnectionTextBuilder.parseUTC($0.endUtc) }
+            .compactMap { LegConnectionTextBuilder.parseUTC($0.staUtc ?? $0.originalStaUtc ?? $0.endUtc) }
             .max()
         if let operationalKey = crewAccessTripKey(
             tripID: payload.tripId,
@@ -5202,11 +5359,17 @@ final class AppViewModel: ObservableObject {
         defaults.removeObject(forKey: legacyKey)
     }
 
+    /// Bid Period identity for a leg.
+    ///
+    /// Scheduled, never Actual (INV-012). This key is the deletion / tombstone / retention
+    /// identity, so it has to be stable across the life of the trip. `depUTC` resolves Actual
+    /// first, so using it here let a delayed departure that crossed the 03:00 domicile-local Bid
+    /// Period boundary silently re-key a trip that was already on disk under the old key.
     private nonisolated static func crewAccessTripKey(for leg: TripLeg, domicile: String) -> String? {
         crewAccessTripKey(
             tripID: leg.pairing,
-            startUTC: LegConnectionTextBuilder.parseUTC(leg.depUTC),
-            endUTC: LegConnectionTextBuilder.parseUTC(leg.arrUTC),
+            startUTC: LegConnectionTextBuilder.parseUTC(leg.plannedDepartureUTC),
+            endUTC: LegConnectionTextBuilder.parseUTC(leg.plannedArrivalUTC),
             domicile: domicile
         )
     }
@@ -5484,7 +5647,13 @@ final class AppViewModel: ObservableObject {
         let label = String(format: "CA%02d-%02d-%@", year, month, tripID)
 
         let legs = payload.items.map { item in
-            TripLeg(
+            let stableID = item.stableLegId.flatMap(UUID.init(uuidString:)) ?? UUID()
+            let currentDeparture = item.atdUtc ?? item.stdUtc ?? item.startUtc
+            let currentArrival = item.ataUtc ?? item.staUtc ?? item.endUtc
+            let scheduledDeparture = payload.schemaVersion >= 2 ? item.stdUtc : (item.stdUtc ?? item.startUtc)
+            let scheduledArrival = payload.schemaVersion >= 2 ? item.staUtc : (item.staUtc ?? item.endUtc)
+            return TripLeg(
+                id: stableID,
                 payPeriod: label,
                 pairing: tripID,
                 leg: item.sequence,
@@ -5493,16 +5662,28 @@ final class AppViewModel: ObservableObject {
                 depLocal: item.startLocalDisplay,
                 arrAirport: item.arrAirport,
                 arrLocal: item.endLocalDisplay,
-                depUTC: item.startUtc,
-                arrUTC: item.endUtc,
+                depUTC: currentDeparture,
+                arrUTC: currentArrival,
                 status: item.flight.caseInsensitiveCompare("GND") == .orderedSame
                     ? "GND"
                     : (item.deadhead ? "DH" : "-"),
                 block: item.block,
-                stdUTC: item.stdUtc ?? item.startUtc,
-                staUTC: item.staUtc ?? item.endUtc,
+                stdUTC: scheduledDeparture,
+                staUTC: scheduledArrival,
                 atdUTC: item.atdUtc,
-                ataUTC: item.ataUtc
+                ataUTC: item.ataUtc,
+                originalSTDUTC: payload.schemaVersion >= 2
+                    ? item.originalStdUtc
+                    : (item.originalStdUtc ?? item.stdUtc ?? item.startUtc),
+                originalSTAUTC: payload.schemaVersion >= 2
+                    ? item.originalStaUtc
+                    : (item.originalStaUtc ?? item.staUtc ?? item.endUtc),
+                scheduledDepartureObservedAtUTC: item.scheduledDepartureObservedAtUtc,
+                scheduledArrivalObservedAtUTC: item.scheduledArrivalObservedAtUtc,
+                actualDepartureObservedAtUTC: item.actualDepartureObservedAtUtc,
+                actualArrivalObservedAtUTC: item.actualArrivalObservedAtUtc,
+                aircraftType: item.aircraft,
+                aircraftRegistration: item.tailNumber
             )
         }.sorted { lhs, rhs in
             if lhs.leg == rhs.leg {
@@ -5523,6 +5704,319 @@ final class AppViewModel: ObservableObject {
             legs: legs,
             openTimeTrips: []
         )
+    }
+
+    /// Combines one newly observed PDF generation with the durable per-leg history from the
+    /// previous canonical JSON. The incoming PDF has already classified each endpoint by comparing
+    /// its own Created UTC with its own DEP/ARR instant.
+    ///
+    /// Predecessor selection is two-tier. The Bid Period trip key is preferred, but a revision can
+    /// move a trip across the 03:00 domicile-local Bid Period boundary, which changes that key. In
+    /// that case the same-Trip-ID generation is still the right predecessor: without the fallback
+    /// the merge silently returned `incoming`, dropping Original Scheduled and the manual
+    /// registration in the very same transaction that tombstones the old artifact.
+    nonisolated static func mergeCrewAccessLegHistory(
+        incoming: CrewAccessTripJSON,
+        existingPayloads: [CrewAccessTripJSON]
+    ) -> CrewAccessTripJSON {
+        let incomingTripKey = crewAccessTripKey(
+            tripID: incoming.tripId,
+            tripInformationDate: incoming.tripInformationDate,
+            fallbackDate: nil
+        )
+        let incomingTripID = normalizedCrewAccessTripID(incoming.tripId)
+        guard !incomingTripID.isEmpty else { return incoming }
+
+        // Never treat the incoming generation as its own predecessor. Exact equality, so a
+        // genuinely different generation that happens to share a timestamp is still considered.
+        let candidates = existingPayloads.filter {
+            normalizedCrewAccessTripID($0.tripId) == incomingTripID && $0 != incoming
+        }
+        let sameBidPeriod = candidates.filter { candidate in
+            guard let incomingTripKey else { return false }
+            return crewAccessTripKey(
+                tripID: candidate.tripId,
+                tripInformationDate: candidate.tripInformationDate,
+                fallbackDate: nil
+            ) == incomingTripKey
+        }
+        // The cross-Bid-Period tier is bounded on purpose. Trip IDs are reused between Bid
+        // Periods, so an unbounded same-Trip-ID lookup would attach a previous trip's Original
+        // Scheduled times to an unrelated trip that merely reuses the identifier — exactly the
+        // "wrong history is worse than new identity" failure the matching ladder exists to avoid.
+        // A genuine boundary revision moves a trip by hours or a day or two; the next reuse of the
+        // same Trip ID is a whole Bid Period (roughly eight weeks) away.
+        let crossBidPeriod = candidates.filter {
+            isPlausibleCrossBidPeriodRevision(incoming: incoming, candidate: $0)
+        }
+        let existing = latestCrewAccessPayload(in: sameBidPeriod)
+            ?? latestCrewAccessPayload(in: crossBidPeriod)
+        guard let existing else { return incoming }
+
+        var unmatchedExisting = Set(existing.items.indices)
+        let mergedItems = incoming.items.map { item in
+            let matchedIndex = matchingExistingCrewAccessLegIndex(
+                for: item,
+                existingItems: existing.items,
+                unmatchedIndices: unmatchedExisting
+            )
+            guard let matchedIndex else { return item }
+            unmatchedExisting.remove(matchedIndex)
+            return mergeCrewAccessLegHistory(incoming: item, existing: existing.items[matchedIndex], existingSchemaVersion: existing.schemaVersion)
+        }
+
+        return CrewAccessTripJSON(
+            schemaVersion: max(2, incoming.schemaVersion),
+            source: incoming.source,
+            sourceVersion: incoming.sourceVersion,
+            mappingVersion: incoming.mappingVersion,
+            generatedAt: incoming.generatedAt,
+            pdfCreatedUtc: incoming.pdfCreatedUtc,
+            tripId: incoming.tripId,
+            tripInformationDate: incoming.tripInformationDate,
+            creditTime: incoming.creditTime,
+            tripDays: incoming.tripDays,
+            tafb: incoming.tafb,
+            dutyTotals: incoming.dutyTotals,
+            hotelDetails: incoming.hotelDetails,
+            crew: incoming.crew,
+            items: mergedItems
+        )
+    }
+
+    /// Matches only identities whose candidate set is unique. Sequence is context, never identity
+    /// by itself: an inserted leg may shift every later sequence number. When no low-ambiguity
+    /// match exists, retaining the incoming leg's new history is safer than attaching another
+    /// physical leg's Scheduled/Actual values.
+    private nonisolated static func matchingExistingCrewAccessLegIndex(
+        for incoming: CrewAccessTripItemJSON,
+        existingItems: [CrewAccessTripItemJSON],
+        unmatchedIndices: Set<Int>
+    ) -> Int? {
+        func uniqueIndex(where predicate: (CrewAccessTripItemJSON) -> Bool) -> Int? {
+            let matches = unmatchedIndices.filter { predicate(existingItems[$0]) }
+            return matches.count == 1 ? matches.first : nil
+        }
+
+        let incomingStableID = incoming.stableLegId.map(normalizedCrewAccessLegToken)
+        if let incomingStableID,
+           let match = uniqueIndex(where: {
+               $0.stableLegId.map(normalizedCrewAccessLegToken) == incomingStableID
+           }) {
+            return match
+        }
+
+        let sameFlight: (CrewAccessTripItemJSON) -> Bool = {
+            normalizedCrewAccessLegToken($0.flight) == normalizedCrewAccessLegToken(incoming.flight)
+        }
+        let sameOrigin: (CrewAccessTripItemJSON) -> Bool = {
+            normalizedCrewAccessLegToken($0.depAirport) == normalizedCrewAccessLegToken(incoming.depAirport)
+        }
+        let sameDestination: (CrewAccessTripItemJSON) -> Bool = {
+            normalizedCrewAccessLegToken($0.arrAirport) == normalizedCrewAccessLegToken(incoming.arrAirport)
+        }
+
+        if let match = uniqueIndex(where: {
+            $0.sequence == incoming.sequence
+                && sameFlight($0)
+                && sameOrigin($0)
+                && sameDestination($0)
+        }) {
+            return match
+        }
+        if let match = uniqueIndex(where: {
+            sameFlight($0) && sameOrigin($0) && sameDestination($0)
+        }) {
+            return match
+        }
+        if let match = uniqueIndex(where: {
+            $0.sequence == incoming.sequence && sameOrigin($0) && sameDestination($0)
+        }) {
+            return match
+        }
+
+        let incomingDepartureDate = crewAccessOperationalDepartureUTCDate(incoming)
+        if let incomingDepartureDate,
+           let match = uniqueIndex(where: {
+               $0.sequence == incoming.sequence
+                   && sameOrigin($0)
+                   && crewAccessOperationalDepartureUTCDate($0) == incomingDepartureDate
+           }) {
+            return match
+        }
+
+        return nil
+    }
+
+    private nonisolated static func crewAccessOperationalDepartureUTCDate(
+        _ item: CrewAccessTripItemJSON
+    ) -> String? {
+        let value = item.stdUtc ?? item.atdUtc ?? item.startUtc
+        guard value.count >= 10 else { return nil }
+        let date = String(value.prefix(10))
+        guard date.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil else {
+            return nil
+        }
+        return date
+    }
+
+    private nonisolated static func mergeCrewAccessLegHistory(
+        incoming: CrewAccessTripItemJSON,
+        existing: CrewAccessTripItemJSON,
+        existingSchemaVersion: Int
+    ) -> CrewAccessTripItemJSON {
+        let legacyScheduledDeparture = existingSchemaVersion < 2 ? (existing.stdUtc ?? existing.startUtc) : existing.stdUtc
+        let legacyScheduledArrival = existingSchemaVersion < 2 ? (existing.staUtc ?? existing.endUtc) : existing.staUtc
+        let scheduledDeparture = incoming.stdUtc ?? legacyScheduledDeparture
+        let scheduledArrival = incoming.staUtc ?? legacyScheduledArrival
+        let actualDeparture = incoming.atdUtc ?? existing.atdUtc
+        let actualArrival = incoming.ataUtc ?? existing.ataUtc
+
+        return CrewAccessTripItemJSON(
+            sequence: incoming.sequence,
+            depAirport: incoming.depAirport,
+            arrAirport: incoming.arrAirport,
+            deadhead: incoming.deadhead,
+            flight: incoming.flight,
+            startUtc: actualDeparture ?? scheduledDeparture ?? incoming.startUtc,
+            endUtc: actualArrival ?? scheduledArrival ?? incoming.endUtc,
+            startLocalDisplay: incoming.startLocalDisplay,
+            endLocalDisplay: incoming.endLocalDisplay,
+            originTz: incoming.originTz,
+            destinationTz: incoming.destinationTz,
+            timeDerivation: incoming.timeDerivation,
+            aircraft: incoming.aircraft,
+            block: incoming.block,
+            stdUtc: scheduledDeparture,
+            staUtc: scheduledArrival,
+            atdUtc: actualDeparture,
+            ataUtc: actualArrival,
+            tailNumber: incoming.tailNumber ?? existing.tailNumber,
+            stableLegId: existing.stableLegId ?? incoming.stableLegId ?? UUID().uuidString,
+            originalStdUtc: existing.originalStdUtc ?? legacyScheduledDeparture ?? incoming.originalStdUtc,
+            originalStaUtc: existing.originalStaUtc ?? legacyScheduledArrival ?? incoming.originalStaUtc,
+            scheduledDepartureObservedAtUtc: incoming.stdUtc != nil
+                ? incoming.scheduledDepartureObservedAtUtc
+                : existing.scheduledDepartureObservedAtUtc,
+            scheduledArrivalObservedAtUtc: incoming.staUtc != nil
+                ? incoming.scheduledArrivalObservedAtUtc
+                : existing.scheduledArrivalObservedAtUtc,
+            actualDepartureObservedAtUtc: incoming.atdUtc != nil
+                ? incoming.actualDepartureObservedAtUtc
+                : existing.actualDepartureObservedAtUtc,
+            actualArrivalObservedAtUtc: incoming.ataUtc != nil
+                ? incoming.actualArrivalObservedAtUtc
+                : existing.actualArrivalObservedAtUtc
+        )
+    }
+
+    private nonisolated static func normalizedCrewAccessLegToken(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+
+    /// How far apart two same-Trip-ID generations may sit and still be treated as the same trip
+    /// across a Bid Period boundary. Bid Periods are roughly eight weeks, so this window is far
+    /// too small to reach the next reuse of the same Trip ID.
+    private nonisolated static let crossBidPeriodRevisionWindow: TimeInterval = 7 * 24 * 60 * 60
+
+    private nonisolated static func isPlausibleCrossBidPeriodRevision(
+        incoming: CrewAccessTripJSON,
+        candidate: CrewAccessTripJSON
+    ) -> Bool {
+        guard let incomingStart = earliestPlannedDepartureInstant(in: incoming),
+              let candidateStart = earliestPlannedDepartureInstant(in: candidate) else {
+            return false
+        }
+        return abs(incomingStart.timeIntervalSince(candidateStart)) <= crossBidPeriodRevisionWindow
+    }
+
+    /// Scheduled-preferred, matching the identity ordering in INV-012.
+    private nonisolated static func earliestPlannedDepartureInstant(
+        in payload: CrewAccessTripJSON
+    ) -> Date? {
+        payload.items
+            .compactMap {
+                LegConnectionTextBuilder.parseUTC($0.stdUtc ?? $0.originalStdUtc ?? $0.startUtc)
+            }
+            .min()
+    }
+
+    /// The most recently generated payload in `candidates`.
+    ///
+    /// `generatedAt` is compared as an instant, not as a string. Lexicographic ordering happens to
+    /// work for a single ISO-8601 UTC format, but payloads reaching this code path do not all come
+    /// from our own writer — the Bid Period import fixture carries an external `exportedAt` — and a
+    /// format difference would have silently selected the wrong predecessor. The string comparison
+    /// remains only as a deterministic tiebreak for unparseable values.
+    private nonisolated static func latestCrewAccessPayload(
+        in candidates: [CrewAccessTripJSON]
+    ) -> CrewAccessTripJSON? {
+        candidates.max { lhs, rhs in
+            let lhsDate = LegConnectionTextBuilder.parseUTC(lhs.generatedAt)
+            let rhsDate = LegConnectionTextBuilder.parseUTC(rhs.generatedAt)
+            switch (lhsDate, rhsDate) {
+            case let (l?, r?):
+                return l == r ? lhs.generatedAt < rhs.generatedAt : l < r
+            case (nil, _?):
+                return true
+            case (_?, nil):
+                return false
+            case (nil, nil):
+                return lhs.generatedAt < rhs.generatedAt
+            }
+        }
+    }
+
+    private nonisolated static func copyCrewAccessItem(
+        _ item: CrewAccessTripItemJSON,
+        tailNumber: String?,
+        stableLegID: String
+    ) -> CrewAccessTripItemJSON {
+        CrewAccessTripItemJSON(
+            sequence: item.sequence,
+            depAirport: item.depAirport,
+            arrAirport: item.arrAirport,
+            deadhead: item.deadhead,
+            flight: item.flight,
+            startUtc: item.startUtc,
+            endUtc: item.endUtc,
+            startLocalDisplay: item.startLocalDisplay,
+            endLocalDisplay: item.endLocalDisplay,
+            originTz: item.originTz,
+            destinationTz: item.destinationTz,
+            timeDerivation: item.timeDerivation,
+            aircraft: item.aircraft,
+            block: item.block,
+            stdUtc: item.stdUtc,
+            staUtc: item.staUtc,
+            atdUtc: item.atdUtc,
+            ataUtc: item.ataUtc,
+            tailNumber: tailNumber,
+            stableLegId: stableLegID,
+            originalStdUtc: item.originalStdUtc,
+            originalStaUtc: item.originalStaUtc,
+            scheduledDepartureObservedAtUtc: item.scheduledDepartureObservedAtUtc,
+            scheduledArrivalObservedAtUtc: item.scheduledArrivalObservedAtUtc,
+            actualDepartureObservedAtUtc: item.actualDepartureObservedAtUtc,
+            actualArrivalObservedAtUtc: item.actualArrivalObservedAtUtc
+        )
+    }
+
+    private nonisolated static func crewAccessItem(
+        _ item: CrewAccessTripItemJSON,
+        matches leg: TripLeg
+    ) -> Bool {
+        // Normalized on both sides, consistently with `matchingExistingCrewAccessLegIndex`.
+        // `UUID.uuidString` is uppercase, but payloads are not all written by this app, and a
+        // lowercase UUID used to make the registration save fail with "leg could not be found".
+        if let stableLegID = item.stableLegId {
+            return normalizedCrewAccessLegToken(stableLegID)
+                == normalizedCrewAccessLegToken(leg.id.uuidString)
+        }
+        return item.sequence == leg.leg
+            && normalizedCrewAccessLegToken(item.flight) == normalizedCrewAccessLegToken(leg.flight)
+            && normalizedCrewAccessLegToken(item.depAirport) == normalizedCrewAccessLegToken(leg.depAirport)
+            && normalizedCrewAccessLegToken(item.arrAirport) == normalizedCrewAccessLegToken(leg.arrAirport)
     }
 
     private nonisolated static func inferTripIdFromFileName(_ fileName: String) -> String {
@@ -6216,16 +6710,9 @@ final class AppViewModel: ObservableObject {
     }
 
     private static func withStableMockLegID(_ leg: TripLeg) -> TripLeg {
-        TripLeg(
-            id: stableMockLegID("\(leg.pairing)-\(leg.leg)-\(leg.flight)"),
-            payPeriod: leg.payPeriod, pairing: leg.pairing, leg: leg.leg, flight: leg.flight,
-            depAirport: leg.depAirport, depLocal: leg.depLocal,
-            arrAirport: leg.arrAirport, arrLocal: leg.arrLocal,
-            depUTC: leg.depUTC, arrUTC: leg.arrUTC, status: leg.status, block: leg.block,
-            layoverStation: leg.layoverStation, layoverHotelName: leg.layoverHotelName,
-            layoverDuration: leg.layoverDuration,
-            stdUTC: leg.stdUTC, staUTC: leg.staUTC, atdUTC: leg.atdUTC, ataUTC: leg.ataUTC
-        )
+        var copy = leg
+        copy.id = stableMockLegID("\(leg.pairing)-\(leg.leg)-\(leg.flight)")
+        return copy
     }
 
     private static func withStableMockLegIDs(_ schedule: PayPeriodSchedule) -> PayPeriodSchedule {

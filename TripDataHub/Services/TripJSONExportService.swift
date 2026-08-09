@@ -105,6 +105,17 @@ struct ExportHotelNameNormalization: Codable, Equatable, Sendable {
     let matchedBy: String
 }
 
+struct ExportObservedInstant: Codable, Equatable, Sendable {
+    let instant: String
+    let observedAt: String?
+}
+
+struct ExportEndpointHistory: Codable, Equatable, Sendable {
+    let originalScheduled: ExportObservedInstant?
+    let scheduled: ExportObservedInstant?
+    let actual: ExportObservedInstant?
+}
+
 struct ExportEvent: Codable, Equatable, Sendable {
     let id: String
     let type: ExportEventType
@@ -115,7 +126,10 @@ struct ExportEvent: Codable, Equatable, Sendable {
     let origin: String?
     let destination: String?
     let aircraft: String?
+    let aircraftRegistration: String?
     let blockTime: String?
+    let departure: ExportEndpointHistory?
+    let arrival: ExportEndpointHistory?
     let station: String?
     let hotelName: String?
     let previousSegmentID: String?
@@ -135,7 +149,10 @@ struct ExportEvent: Codable, Equatable, Sendable {
         origin: String? = nil,
         destination: String? = nil,
         aircraft: String? = nil,
+        aircraftRegistration: String? = nil,
         blockTime: String? = nil,
+        departure: ExportEndpointHistory? = nil,
+        arrival: ExportEndpointHistory? = nil,
         station: String? = nil,
         hotelName: String? = nil,
         previousSegmentID: String? = nil,
@@ -154,7 +171,10 @@ struct ExportEvent: Codable, Equatable, Sendable {
         self.origin = origin
         self.destination = destination
         self.aircraft = aircraft
+        self.aircraftRegistration = aircraftRegistration
         self.blockTime = blockTime
+        self.departure = departure
+        self.arrival = arrival
         self.station = station
         self.hotelName = hotelName
         self.previousSegmentID = previousSegmentID
@@ -211,7 +231,7 @@ enum TripJSONExportError: LocalizedError, Equatable {
 }
 
 enum TripJSONExportService {
-    static let schemaVersion = "1.2"
+    static let schemaVersion = "1.3"
 
     static func payload(
         for schedule: PayPeriodSchedule,
@@ -401,13 +421,16 @@ enum TripJSONExportService {
     private static func flightEvent(
         _ item: CrewAccessTripItemJSON,
         tripID: String,
-        sequence: Int
+        sequence: Int,
+        sourceSchemaVersion: Int
     ) throws -> ExportEvent {
         let type: ExportEventType = item.deadhead ? .deadhead : .flight
         let origin = normalizedIdentifier(item.depAirport)
         let destination = normalizedIdentifier(item.arrAirport)
-        let start = try exportTimestamp(item.startUtc, timeZoneID: item.originTz)
-        let end = try exportTimestamp(item.endUtc, timeZoneID: item.destinationTz)
+        let displayedDeparture = item.atdUtc ?? item.stdUtc ?? item.startUtc
+        let displayedArrival = item.ataUtc ?? item.staUtc ?? item.endUtc
+        let start = try exportTimestamp(displayedDeparture, timeZoneID: item.originTz)
+        let end = try exportTimestamp(displayedArrival, timeZoneID: item.destinationTz)
         return ExportEvent(
             id: "event-\(tripID)-\(type.rawValue)-\(sequence)",
             type: type,
@@ -418,8 +441,56 @@ enum TripJSONExportService {
             origin: nilIfEmpty(origin),
             destination: nilIfEmpty(destination),
             aircraft: nilIfEmpty(item.aircraft),
-            blockTime: nilIfEmpty(item.block)
+            aircraftRegistration: normalizedOptionalString(item.tailNumber),
+            blockTime: nilIfEmpty(item.block),
+            departure: endpointHistory(
+                originalScheduled: sourceSchemaVersion >= 2
+                    ? item.originalStdUtc
+                    : (item.originalStdUtc ?? item.stdUtc ?? item.startUtc),
+                scheduled: sourceSchemaVersion >= 2 ? item.stdUtc : (item.stdUtc ?? item.startUtc),
+                scheduledObservedAt: item.scheduledDepartureObservedAtUtc,
+                actual: item.atdUtc,
+                actualObservedAt: item.actualDepartureObservedAtUtc
+            ),
+            arrival: endpointHistory(
+                originalScheduled: sourceSchemaVersion >= 2
+                    ? item.originalStaUtc
+                    : (item.originalStaUtc ?? item.staUtc ?? item.endUtc),
+                scheduled: sourceSchemaVersion >= 2 ? item.staUtc : (item.staUtc ?? item.endUtc),
+                scheduledObservedAt: item.scheduledArrivalObservedAtUtc,
+                actual: item.ataUtc,
+                actualObservedAt: item.actualArrivalObservedAtUtc
+            )
         )
+    }
+
+    static func endpointHistory(
+        originalScheduled: String?,
+        scheduled: String?,
+        scheduledObservedAt: String?,
+        actual: String?,
+        actualObservedAt: String?
+    ) -> ExportEndpointHistory? {
+        let original = normalizedOptionalString(originalScheduled).map {
+            ExportObservedInstant(instant: $0, observedAt: nil)
+        }
+        let current = normalizedOptionalString(scheduled).map {
+            ExportObservedInstant(instant: $0, observedAt: normalizedOptionalString(scheduledObservedAt))
+        }
+        let actualValue = normalizedOptionalString(actual).map {
+            ExportObservedInstant(instant: $0, observedAt: normalizedOptionalString(actualObservedAt))
+        }
+        guard original != nil || current != nil || actualValue != nil else { return nil }
+        return ExportEndpointHistory(
+            originalScheduled: original,
+            scheduled: current,
+            actual: actualValue
+        )
+    }
+
+    private static func normalizedOptionalString(_ value: String?) -> String? {
+        guard let value else { return nil }
+        return nilIfEmpty(value)
     }
 
     static func publicEvents(
@@ -450,7 +521,8 @@ enum TripJSONExportService {
             let flight = try flightEvent(
                 item,
                 tripID: tripID,
-                sequence: nextSequence
+                sequence: nextSequence,
+                sourceSchemaVersion: payload.schemaVersion
             )
             events.append(flight)
             nextSequence += 1

@@ -11,7 +11,7 @@ The UTF-8 JSON root contains exactly these fields:
 
 ```json
 {
-  "schemaVersion": "1.2",
+  "schemaVersion": "1.3",
   "exportedAt": "2026-07-19T01:30:00Z",
   "generator": {},
   "owner": {},
@@ -20,8 +20,10 @@ The UTF-8 JSON root contains exactly these fields:
 }
 ```
 
-`schemaVersion` is the JSON string `"1.2"`. Version `1.0` was the original
-flight-only contract and `1.1` introduced layover/rest fields.
+`schemaVersion` is the JSON string `"1.3"`. Version `1.0` was the original
+flight-only contract, `1.1` introduced layover/rest fields, and `1.2` added
+stable owner-name and pay-period metadata. Version `1.3` adds lossless per-endpoint
+scheduled/revised/actual history and aircraft registration.
 `exportedAt` and operational
 `instant` values use ISO 8601 UTC. Generator version and build are informational and
 do not determine schema compatibility.
@@ -61,7 +63,7 @@ The export is therefore privacy-minimized, not anonymous.
 ## Bid Period schedule export
 
 The Timeline action `Export Bid Period JSON` creates `<bidPeriod.identifier>.json`
-(for example, `BP26-06.json`) with schema version `1.0` and export type
+(for example, `BP26-06.json`) with schema version `1.1` and export type
 `bidPeriodSchedule`. Bid Period bounds come from `BidPeriodService`, including the
 03:00 domicile-local boundary and variable-duration periods. Schedule inclusion uses
 half-open interval overlap, not assigned-BP equality. Each trip separately records the
@@ -69,7 +71,7 @@ BP assigned from its earliest valid UTC departure.
 
 ```json
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "exportType": "bidPeriodSchedule",
   "exportedAt": "2026-09-10T18:00:00Z",
   "generator": {
@@ -173,7 +175,7 @@ rich payload. Credit, TAFB, and trip days map from their existing trip-level pay
 fields. Individual unavailable values are omitted; if no values are available, the
 whole `summary` is omitted. Corresponding `summary.*` names appear in the trip's
 `diagnostics.unavailableFieldGroups`. Displayed-schedule fallback trips never fabricate
-summary values. These additive BP-only fields remain part of unreleased BP schema `1.0`
+summary values. These additive BP-only fields remain part of BP schema `1.1`
 and do not change the single-trip JSON contract.
 
 ## Trip and stable identifiers
@@ -206,6 +208,55 @@ Every event start/end and the Trip bounds use:
 not copied from a presentation-only source string. `utcOffset` is calculated for the
 specific instant, including daylight-saving rules. When the source has no reliable
 timezone, the implementation retains the correct instant and represents it in UTC.
+
+Flight and deadhead events additionally retain each endpoint's observation history:
+
+```json
+{
+  "aircraft": "747",
+  "aircraftRegistration": "N123EX",
+  "departure": {
+    "originalScheduled": {
+      "instant": "2026-08-23T22:00:00Z"
+    },
+    "scheduled": {
+      "instant": "2026-08-23T22:14:00Z",
+      "observedAt": "2026-08-22T05:15:00Z"
+    },
+    "actual": {
+      "instant": "2026-08-23T22:21:00Z",
+      "observedAt": "2026-08-24T05:15:00Z"
+    }
+  },
+  "arrival": {
+    "originalScheduled": { "instant": "2026-08-24T02:00:00Z" },
+    "scheduled": { "instant": "2026-08-24T02:14:00Z" },
+    "actual": { "instant": "2026-08-24T02:27:00Z" }
+  }
+}
+```
+
+`originalScheduled` is the first retained schedule, `scheduled` is the latest
+pre-endpoint schedule, and `actual` is the latest post-endpoint observation.
+`observedAt` is the CrewAccess PDF `Created` timestamp when available.
+
+`originalScheduled` carries an `instant` only and never an `observedAt`. The model keeps
+one schedule-observation timestamp per endpoint, and a revision overwrites it, so the
+observation time of the *original* schedule is not retained. It is omitted rather than
+back-filled from the current schedule's observation, because that would attribute
+provenance the source never supplied. Consumers must not infer that a missing
+`originalScheduled.observedAt` means the original and current schedules were observed
+together.
+
+Missing legacy history is omitted rather than fabricated: an absent `scheduled` block
+means no pre-endpoint observation was ever recorded for that endpoint, not that the
+scheduled time equals the actual one.
+
+The backward-compatible event `start` and `end` resolve
+`actual > scheduled > originalScheduled`. Note that this display ordering is deliberately
+*not* the ordering used for Bid Period assignment, trip identity or report times, which
+resolve `scheduled > originalScheduled` and ignore actuals entirely (see INV-012). The BP
+schema `1.1` embeds this same event shape.
 
 ## Implemented event subset
 

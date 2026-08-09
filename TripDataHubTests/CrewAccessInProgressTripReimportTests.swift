@@ -15,7 +15,8 @@ import XCTest
 /// remote tombstone for the file name being replaced. Because the JSON is the Timeline's source of
 /// truth (INV-006), reconcile then rebuilt a Timeline without the trip.
 ///
-/// Fixtures are synthetic. No real trip, PDF or crew identity appears here.
+/// Committed fixtures are synthetic. The opt-in A70393R acceptance test reads externally supplied
+/// private fixture paths from environment variables; real schedule data is never copied here.
 @MainActor
 final class CrewAccessInProgressTripReimportTests: XCTestCase {
 
@@ -108,6 +109,190 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
             legs(in: vm, pairing: tripID).map(\.flight),
             "crewAccessSchedules and the merged schedules array must not diverge"
         )
+    }
+
+    func test_manualRegistrationSurvivesReimportReconcileAndRelaunch() async throws {
+        let harness = try makeHarness(name: "registration-original")
+        await harness.confirm(payload: originalTrip())
+        let firstLeg = try XCTUnwrap(legs(in: harness.device.viewModel, pairing: tripID).first)
+
+        try await harness.device.viewModel.updateCrewAccessRegistration(
+            for: firstLeg,
+            registration: "n605up"
+        )
+        await harness.device.viewModel.reconcileCrewAccessSchedulesWithImportFiles()
+        XCTAssertEqual(
+            legs(in: harness.device.viewModel, pairing: tripID).first?.aircraftRegistration,
+            "N605UP"
+        )
+
+        await harness.confirm(payload: revisedTrip())
+        XCTAssertEqual(
+            legs(in: harness.device.viewModel, pairing: tripID).first?.aircraftRegistration,
+            "N605UP",
+            "re-import must retain manual registration"
+        )
+
+        let relaunched = try makeHarness(
+            name: "registration-relaunched",
+            cloud: harness.cloud,
+            importsDirectory: harness.device.importsDirectory
+        )
+        await relaunched.device.viewModel.reconcileCrewAccessSchedulesWithImportFiles()
+        XCTAssertEqual(
+            legs(in: relaunched.device.viewModel, pairing: tripID).first?.aircraftRegistration,
+            "N605UP"
+        )
+    }
+
+    func test_realA70393R_preservesScheduleActualExportAndRelaunch() async throws {
+        // Opt-in only, and only via explicit environment variables. There is deliberately no
+        // default path: guessing at `~/Desktop` / `~/Downloads` made this test silently
+        // machine-specific, so "acceptance passed" was only ever true on one developer's laptop
+        // while CI and every other machine skipped it without saying so.
+        let environment = ProcessInfo.processInfo.environment
+        guard let pdfPath = environment["TDH_REAL_A70393R_PDF"],
+              let bpJSONPath = environment["TDH_REAL_A70393R_BP_JSON"] else {
+            throw XCTSkip(
+                "Private-fixture acceptance is opt-in. Set TDH_REAL_A70393R_PDF and "
+                + "TDH_REAL_A70393R_BP_JSON to absolute paths to run it."
+            )
+        }
+        let pdfURL = URL(fileURLWithPath: pdfPath)
+        let bpJSONURL = URL(fileURLWithPath: bpJSONPath)
+        guard FileManager.default.fileExists(atPath: pdfURL.path),
+              FileManager.default.fileExists(atPath: bpJSONURL.path) else {
+            throw XCTSkip(
+                "TDH_REAL_A70393R_PDF / TDH_REAL_A70393R_BP_JSON are set but do not point at "
+                + "existing files."
+            )
+        }
+
+        let preTrip = try Self.a70393RPreTripPayload(
+            from: Data(contentsOf: bpJSONURL)
+        )
+        let draft = CrewAccessPDFImportService().analyzeTrip(
+            pdfData: try Data(contentsOf: pdfURL),
+            sourceFileName: pdfURL.lastPathComponent
+        )
+        XCTAssertTrue(draft.errors.isEmpty, draft.errors.map(\.message).joined(separator: " | "))
+        let postTrip = try XCTUnwrap(draft.jsonPayload)
+        XCTAssertEqual(postTrip.tripId, "A70393R")
+        XCTAssertEqual(postTrip.pdfCreatedUtc, "2026-08-09T02:15:00Z")
+
+        let harness = try makeHarness(name: "real-a70393r")
+        await harness.confirm(payload: preTrip)
+        await harness.confirm(payload: postTrip)
+        await harness.device.viewModel.reconcileCrewAccessSchedulesWithImportFiles()
+
+        let immediateLegs = legs(in: harness.device.viewModel, pairing: "A70393R")
+        try Self.assertA70393RCanonicalLegs(immediateLegs)
+
+        let canonicalURL = try XCTUnwrap(
+            (try FileManager.default.contentsOfDirectory(
+                at: harness.device.importsDirectory,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            )).first { $0.pathExtension.lowercased() == "json" }
+        )
+        let canonical = try JSONDecoder().decode(
+            CrewAccessTripJSON.self,
+            from: Data(contentsOf: canonicalURL)
+        )
+        let canonicalSchedule = try XCTUnwrap(
+            AppViewModel.buildCrewAccessSchedule(from: canonical, modifiedAt: Date())
+        )
+        try Self.assertA70393RCanonicalLegs(canonicalSchedule.legs)
+
+        let exportedFlights = try TripJSONExportService.publicEvents(
+            payload: canonical,
+            schedule: canonicalSchedule,
+            tripID: "trip-a70393r-2026-08-05"
+        ).filter { $0.type == .flight || $0.type == .deadhead }
+        XCTAssertEqual(exportedFlights.count, 2)
+        try Self.assertA70393RExport(exportedFlights)
+
+        let relaunched = try makeHarness(
+            name: "real-a70393r-relaunched",
+            cloud: harness.cloud,
+            importsDirectory: harness.device.importsDirectory
+        )
+        await relaunched.device.viewModel.reconcileCrewAccessSchedulesWithImportFiles()
+        try Self.assertA70393RCanonicalLegs(
+            legs(in: relaunched.device.viewModel, pairing: "A70393R")
+        )
+    }
+
+    /// A schedule change may retain the pairing while changing both its schedule ID and its Bid
+    /// Period identity. The old implementation captured the old candidate before mutation, then
+    /// re-resolved it *after* reconcile by pairing. That selected the incoming schedule and deleted
+    /// both JSON generations, producing the exact "first import empty, second import works" bug.
+    func test_timeOverlapWithSharedPairing_deletesOnlyPreImportArtifactAfterOneConfirm() async throws {
+        let harness = try makeHarness()
+        let vm = harness.device.viewModel
+        let oldPayload = crossBidPeriodOldTrip()
+        let newPayload = crossBidPeriodReplacementTrip()
+        let oldSchedule = try XCTUnwrap(AppViewModel.buildCrewAccessSchedule(from: oldPayload, modifiedAt: Date()))
+        let newSchedule = try XCTUnwrap(AppViewModel.buildCrewAccessSchedule(from: newPayload, modifiedAt: Date()))
+        XCTAssertNotEqual(oldSchedule.id, newSchedule.id, "precondition: schedule IDs differ")
+
+        await harness.confirm(payload: oldPayload)
+        vm.pendingImport = Self.pendingImport(for: newPayload)
+        let candidates = vm.pendingImportReplacementCandidates
+        XCTAssertEqual(candidates.map(\.id), [oldSchedule.id])
+        guard case .timeOverlap = try XCTUnwrap(candidates.first).reason else {
+            return XCTFail("precondition: shared pairing crosses BP identity and is a time-overlap candidate")
+        }
+
+        await vm.confirmPendingImport()
+        await harness.settle()
+
+        XCTAssertEqual(vm.crewAccessSchedules.filter { $0.id == oldSchedule.id }.count, 0)
+        XCTAssertEqual(vm.crewAccessSchedules.filter { $0.id == newSchedule.id }.count, 1)
+        XCTAssertEqual(vm.schedules.filter { $0.id == oldSchedule.id }.count, 0)
+        XCTAssertEqual(vm.schedules.filter { $0.id == newSchedule.id }.count, 1)
+        XCTAssertEqual(
+            harness.device.localFileNames(),
+            [Self.fileName(tripID: newPayload.tripId, date: newPayload.tripInformationDate)],
+            "the incoming JSON must survive while the exact pre-import JSON is removed"
+        )
+        XCTAssertFalse((vm.crewAccessImportMessage ?? "").hasPrefix("Import failed"))
+
+        await vm.reconcileCrewAccessSchedulesWithImportFiles()
+        XCTAssertEqual(vm.crewAccessSchedules.filter { $0.id == newSchedule.id }.count, 1)
+
+        let oldFileName = Self.fileName(tripID: oldPayload.tripId, date: oldPayload.tripInformationDate)
+        let newFileName = Self.fileName(tripID: newPayload.tripId, date: newPayload.tripInformationDate)
+        let oldIsTombstoned = await harness.cloud.isTombstoned(fileName: oldFileName)
+        let newIsTombstoned = await harness.cloud.isTombstoned(fileName: newFileName)
+        let liveGeneration = await harness.cloud.liveGeneratedAt(tripID: newPayload.tripId)
+        XCTAssertTrue(oldIsTombstoned)
+        XCTAssertFalse(newIsTombstoned)
+        XCTAssertEqual(liveGeneration, newPayload.generatedAt)
+    }
+
+    func test_timeOverlapWithSharedPairing_survivesRelaunchReconcile() async throws {
+        let harness = try makeHarness(name: "original")
+        let newPayload = crossBidPeriodReplacementTrip()
+        let newSchedule = try XCTUnwrap(AppViewModel.buildCrewAccessSchedule(from: newPayload, modifiedAt: Date()))
+        await harness.confirm(payload: crossBidPeriodOldTrip())
+        await harness.confirm(payload: newPayload)
+
+        let relaunched = try makeHarness(
+            name: "relaunched",
+            cloud: harness.cloud,
+            importsDirectory: harness.device.importsDirectory
+        )
+        await relaunched.device.viewModel.reconcileCrewAccessSchedulesWithImportFiles()
+
+        XCTAssertEqual(
+            relaunched.device.viewModel.crewAccessSchedules.filter { $0.id == newSchedule.id }.count,
+            1,
+            "a second import must not be required after app relaunch"
+        )
+        XCTAssertEqual(relaunched.device.localFileNames(), [
+            Self.fileName(tripID: newPayload.tripId, date: newPayload.tripInformationDate)
+        ])
     }
 
     // MARK: - 2. Tombstone conflict
@@ -320,6 +505,176 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
 
     private static let originalGeneratedAt = "2026-07-18T12:00:00Z"
     private static let revisedGeneratedAt = "2026-07-20T23:45:00Z"
+
+    private static func a70393RPreTripPayload(from data: Data) throws -> CrewAccessTripJSON {
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let trips = try XCTUnwrap(root["trips"] as? [[String: Any]])
+        let trip = try XCTUnwrap(trips.first { ($0["tripNumber"] as? String) == "A70393R" })
+        let events = try XCTUnwrap(trip["events"] as? [[String: Any]])
+        let flightEvents = events.filter {
+            let type = $0["type"] as? String
+            return type == "flight" || type == "deadhead"
+        }
+        let items = try flightEvents.map { event -> CrewAccessTripItemJSON in
+            let start = try XCTUnwrap(event["start"] as? [String: Any])
+            let end = try XCTUnwrap(event["end"] as? [String: Any])
+            let startInstant = try XCTUnwrap(start["instant"] as? String)
+            let endInstant = try XCTUnwrap(end["instant"] as? String)
+            return CrewAccessTripItemJSON(
+                sequence: try XCTUnwrap(event["sequence"] as? Int),
+                depAirport: try XCTUnwrap(event["origin"] as? String),
+                arrAirport: try XCTUnwrap(event["destination"] as? String),
+                deadhead: (event["type"] as? String) == "deadhead",
+                flight: try XCTUnwrap(event["flightNumber"] as? String),
+                startUtc: startInstant,
+                endUtc: endInstant,
+                startLocalDisplay: (start["local"] as? String) ?? startInstant,
+                endLocalDisplay: (end["local"] as? String) ?? endInstant,
+                originTz: start["timeZone"] as? String,
+                destinationTz: end["timeZone"] as? String,
+                timeDerivation: "bp-export-real-fixture",
+                aircraft: (event["aircraft"] as? String) ?? "",
+                block: (event["blockTime"] as? String) ?? "",
+                stdUtc: nil,
+                staUtc: nil,
+                atdUtc: nil,
+                ataUtc: nil,
+                tailNumber: nil,
+                stableLegId: UUID().uuidString
+            )
+        }
+        let tripStart = try XCTUnwrap(trip["start"] as? [String: Any])
+        let tripStartInstant = try XCTUnwrap(tripStart["instant"] as? String)
+        return CrewAccessTripJSON(
+            schemaVersion: 1,
+            source: "bp-export-real-fixture",
+            sourceVersion: root["schemaVersion"] as? String ?? "unknown",
+            mappingVersion: "external",
+            generatedAt: root["exportedAt"] as? String ?? "2026-08-05T00:00:00Z",
+            tripId: "A70393R",
+            tripInformationDate: String(tripStartInstant.prefix(10)),
+            creditTime: nil,
+            tripDays: nil,
+            tafb: nil,
+            dutyTotals: [],
+            hotelDetails: [],
+            crew: [],
+            items: items
+        )
+    }
+
+    private static func assertA70393RCanonicalLegs(
+        _ legs: [TripLeg],
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let sorted = legs.sorted { $0.leg < $1.leg }
+        XCTAssertEqual(sorted.map(\.flight), ["5X059", "5X080"], file: file, line: line)
+        let first = try XCTUnwrap(sorted.first, file: file, line: line)
+        XCTAssertEqual(first.originalSTDUTC, "2026-08-05T23:34:00Z", file: file, line: line)
+        XCTAssertEqual(first.stdUTC, "2026-08-05T23:34:00Z", file: file, line: line)
+        XCTAssertEqual(first.atdUTC, "2026-08-05T23:45:00Z", file: file, line: line)
+        XCTAssertEqual(first.originalSTAUTC, "2026-08-06T04:36:00Z", file: file, line: line)
+        XCTAssertEqual(first.staUTC, "2026-08-06T04:36:00Z", file: file, line: line)
+        XCTAssertEqual(first.ataUTC, "2026-08-06T04:43:00Z", file: file, line: line)
+        XCTAssertNil(first.scheduledDepartureObservedAtUTC, file: file, line: line)
+        XCTAssertNil(first.scheduledArrivalObservedAtUTC, file: file, line: line)
+        XCTAssertEqual(first.actualDepartureObservedAtUTC, "2026-08-09T02:15:00Z", file: file, line: line)
+        XCTAssertEqual(first.actualArrivalObservedAtUTC, "2026-08-09T02:15:00Z", file: file, line: line)
+        XCTAssertEqual(first.block, "04:58", file: file, line: line)
+        XCTAssertEqual(first.aircraftType, "747", file: file, line: line)
+        XCTAssertNil(first.aircraftRegistration, file: file, line: line)
+
+        let second = try XCTUnwrap(sorted.dropFirst().first, file: file, line: line)
+        XCTAssertEqual(second.originalSTDUTC, "2026-08-07T09:10:00Z", file: file, line: line)
+        XCTAssertEqual(second.stdUTC, "2026-08-07T09:10:00Z", file: file, line: line)
+        XCTAssertEqual(second.atdUTC, "2026-08-07T09:26:00Z", file: file, line: line)
+        XCTAssertEqual(second.originalSTAUTC, "2026-08-07T14:19:00Z", file: file, line: line)
+        XCTAssertEqual(second.staUTC, "2026-08-07T14:19:00Z", file: file, line: line)
+        XCTAssertEqual(second.ataUTC, "2026-08-07T14:11:00Z", file: file, line: line)
+        XCTAssertNil(second.scheduledDepartureObservedAtUTC, file: file, line: line)
+        XCTAssertNil(second.scheduledArrivalObservedAtUTC, file: file, line: line)
+        XCTAssertEqual(second.actualDepartureObservedAtUTC, "2026-08-09T02:15:00Z", file: file, line: line)
+        XCTAssertEqual(second.actualArrivalObservedAtUTC, "2026-08-09T02:15:00Z", file: file, line: line)
+        XCTAssertEqual(second.block, "04:45", file: file, line: line)
+        XCTAssertEqual(second.aircraftType, "747", file: file, line: line)
+        XCTAssertNil(second.aircraftRegistration, file: file, line: line)
+    }
+
+    private static func assertA70393RExport(
+        _ events: [ExportEvent],
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let first = try XCTUnwrap(events.first, file: file, line: line)
+        XCTAssertEqual(first.start.instant, "2026-08-05T23:45:00Z", file: file, line: line)
+        XCTAssertEqual(first.end.instant, "2026-08-06T04:43:00Z", file: file, line: line)
+        XCTAssertEqual(first.departure?.originalScheduled?.instant, "2026-08-05T23:34:00Z", file: file, line: line)
+        XCTAssertEqual(first.departure?.scheduled?.instant, "2026-08-05T23:34:00Z", file: file, line: line)
+        XCTAssertNil(first.departure?.scheduled?.observedAt, file: file, line: line)
+        XCTAssertEqual(first.departure?.actual?.instant, "2026-08-05T23:45:00Z", file: file, line: line)
+        XCTAssertEqual(first.departure?.actual?.observedAt, "2026-08-09T02:15:00Z", file: file, line: line)
+        XCTAssertEqual(first.arrival?.originalScheduled?.instant, "2026-08-06T04:36:00Z", file: file, line: line)
+        XCTAssertEqual(first.arrival?.scheduled?.instant, "2026-08-06T04:36:00Z", file: file, line: line)
+        XCTAssertEqual(first.arrival?.actual?.instant, "2026-08-06T04:43:00Z", file: file, line: line)
+        XCTAssertEqual(first.arrival?.actual?.observedAt, "2026-08-09T02:15:00Z", file: file, line: line)
+        XCTAssertEqual(first.blockTime, "04:58", file: file, line: line)
+        XCTAssertEqual(first.aircraft, "747", file: file, line: line)
+        XCTAssertNil(first.aircraftRegistration, file: file, line: line)
+
+        let second = try XCTUnwrap(events.dropFirst().first, file: file, line: line)
+        XCTAssertEqual(second.start.instant, "2026-08-07T09:26:00Z", file: file, line: line)
+        XCTAssertEqual(second.end.instant, "2026-08-07T14:11:00Z", file: file, line: line)
+        XCTAssertEqual(second.departure?.originalScheduled?.instant, "2026-08-07T09:10:00Z", file: file, line: line)
+        XCTAssertEqual(second.departure?.scheduled?.instant, "2026-08-07T09:10:00Z", file: file, line: line)
+        XCTAssertEqual(second.departure?.actual?.instant, "2026-08-07T09:26:00Z", file: file, line: line)
+        XCTAssertEqual(second.arrival?.originalScheduled?.instant, "2026-08-07T14:19:00Z", file: file, line: line)
+        XCTAssertEqual(second.arrival?.scheduled?.instant, "2026-08-07T14:19:00Z", file: file, line: line)
+        XCTAssertEqual(second.arrival?.actual?.instant, "2026-08-07T14:11:00Z", file: file, line: line)
+        XCTAssertEqual(second.arrival?.actual?.observedAt, "2026-08-09T02:15:00Z", file: file, line: line)
+        XCTAssertEqual(second.blockTime, "04:45", file: file, line: line)
+        XCTAssertEqual(second.aircraft, "747", file: file, line: line)
+        XCTAssertNil(second.aircraftRegistration, file: file, line: line)
+    }
+
+    /// Both generations use the same pairing and overlap in UTC. Their departure times straddle
+    /// the BP26-04 / BP26-05 03:00 ANC boundary, and their information dates use different months,
+    /// so production identity classifies the old one as a different-ID time-overlap replacement.
+    private func crossBidPeriodOldTrip() -> CrewAccessTripJSON {
+        Self.trip(
+            tripID: "T910026",
+            tripInformationDate: "2026-06-30",
+            generatedAt: "2026-07-12T10:30:00Z",
+            items: [
+                Self.item(
+                    sequence: 1,
+                    from: "ANC",
+                    to: "SDF",
+                    flight: "71",
+                    startUtc: "2026-07-12T10:00:00Z",
+                    endUtc: "2026-07-12T12:30:00Z"
+                )
+            ]
+        )
+    }
+
+    private func crossBidPeriodReplacementTrip() -> CrewAccessTripJSON {
+        Self.trip(
+            tripID: "T910026",
+            tripInformationDate: "2026-07-02",
+            generatedAt: "2026-07-12T11:30:00Z",
+            items: [
+                Self.item(
+                    sequence: 1,
+                    from: "ANC",
+                    to: "SDF",
+                    flight: "72",
+                    startUtc: "2026-07-12T11:15:00Z",
+                    endUtc: "2026-07-12T14:00:00Z"
+                )
+            ]
+        )
+    }
 
     /// `ANC–SZX` then a deadhead `SZX–ANC`.
     private func originalTrip() -> CrewAccessTripJSON {
@@ -545,10 +900,11 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
     private func makeHarness(
         name: String = "A",
         cloud: ImportRaceCloud? = nil,
+        importsDirectory: URL? = nil,
         retentionReferenceDate: Date = CrewAccessInProgressTripReimportTests.date("2026-07-20T12:00:00Z")
     ) throws -> Harness {
         let cloud = cloud ?? ImportRaceCloud()
-        let directory = FileManager.default.temporaryDirectory
+        let directory = importsDirectory ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("CrewAccessReimportTests-\(name)-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let suiteName = "CrewAccessReimportTests.\(name).\(UUID().uuidString)"
@@ -668,6 +1024,10 @@ private actor ImportRaceCloud {
             .compactMap { try? JSONDecoder().decode(CrewAccessTripJSON.self, from: $0.jsonData) }
             .first { $0.tripId == tripID }?
             .generatedAt
+    }
+
+    func isTombstoned(fileName: String) -> Bool {
+        records[fileName]?.deletedAt != nil
     }
 
     func waitUntilLive(tripID: String) async {

@@ -25,6 +25,7 @@ struct TimelineTabView: View {
     @State private var tripJSONExportErrorMessage: String?
     @State private var showingAddEvent = false
     @State private var selectedManualOperationalEvent: ManualOperationalEvent?
+    @State private var selectedFlightLeg: TripLeg?
     // Caches updated in refreshLegData() — avoids recomputing expensive values on every body eval.
     @State private var cachedReportWindows: [NextReportTripWindow] = []
     @State private var cachedDaySections: [TimelineDaySection] = []
@@ -231,6 +232,14 @@ struct TimelineTabView: View {
             .sheet(item: $selectedManualOperationalEvent) { event in
                 ManualEventDetailSheet(operationalEvent: event)
                     .environmentObject(viewModel)
+            }
+            .sheet(item: $selectedFlightLeg) { leg in
+                FlightLegDetailSheet(leg: leg) { registration in
+                    try await viewModel.updateCrewAccessRegistration(
+                        for: leg,
+                        registration: registration
+                    )
+                }
             }
         }
     }
@@ -532,7 +541,7 @@ struct TimelineTabView: View {
         let hasFlightMatch = !flightMatches.isEmpty
         return TimelineFlightRow(
             leg: leg,
-            isPast: isPastFlightRow(leg),
+            isPast: leg.isCompleted || isPastFlightRow(leg),
             fontScale: fontScale,
             timeRangeText: timeRangeText(for: leg),
             dayDiff: dayShift(for: leg),
@@ -540,7 +549,8 @@ struct TimelineTabView: View {
             iconColor: hasFlightMatch ? friendMatchAmber : .primary,
             onFriendMatchTap: hasFlightMatch
                 ? { friendMatchAlert = flightMatchAlert(for: leg, matches: flightMatches) }
-                : nil
+                : nil,
+            onFlightTap: { selectedFlightLeg = leg }
         )
     }
 

@@ -21,7 +21,7 @@ final class TripJSONExportServiceTests: XCTestCase {
         XCTAssertEqual(Set(object.keys), Set([
             "schemaVersion", "exportedAt", "generator", "owner", "trip", "events"
         ]))
-        XCTAssertEqual(object["schemaVersion"] as? String, "1.2")
+        XCTAssertEqual(object["schemaVersion"] as? String, "1.3")
         XCTAssertNotNil(object["generator"] as? [String: Any])
         XCTAssertNotNil(object["owner"] as? [String: Any])
         XCTAssertNotNil(object["trip"] as? [String: Any])
@@ -455,7 +455,7 @@ final class TripJSONExportServiceTests: XCTestCase {
 
         XCTAssertEqual(decoded, original)
         XCTAssertTrue(text.contains("\n"))
-        XCTAssertTrue(text.contains(#""schemaVersion" : "1.2""#))
+        XCTAssertTrue(text.contains(#""schemaVersion" : "1.3""#))
     }
 
     func test_filenameIsDeterministicAndFilesystemSafe() throws {

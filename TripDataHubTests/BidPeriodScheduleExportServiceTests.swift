@@ -9,7 +9,7 @@ final class BidPeriodScheduleExportServiceTests: XCTestCase {
     func test_filenameAndEmbeddedIdentifierAgree() throws {
         let export = BidPeriodScheduleExportService.makeExport(input: try input())
 
-        XCTAssertEqual(export.schemaVersion, "1.0")
+        XCTAssertEqual(export.schemaVersion, "1.1")
         XCTAssertEqual(export.bidPeriod.identifier, "BP26-04")
         XCTAssertEqual(BidPeriodScheduleExportService.filename(for: export), "BP26-04.json")
         let object = try jsonObject(export)
@@ -208,6 +208,90 @@ final class BidPeriodScheduleExportServiceTests: XCTestCase {
         let encodedSummary = try XCTUnwrap(trips.first?["summary"] as? [String: Any])
         XCTAssertEqual((encodedSummary["dutyTime"] as? [String: Any])?["minutes"] as? Int, 975)
         XCTAssertEqual((encodedSummary["tripDays"] as? [String: Any])?["days"] as? Int, 3)
+    }
+
+    func test_richFlightPreservesEndpointHistoryAndRegistrationInBidPeriodJSON() throws {
+        let originalDeparture = "2026-06-01T12:00:00Z"
+        let originalArrival = "2026-06-01T16:00:00Z"
+        let revisedDeparture = "2026-06-01T12:20:00Z"
+        let revisedArrival = "2026-06-01T16:20:00Z"
+        let actualDeparture = "2026-06-01T12:27:00Z"
+        let actualArrival = "2026-06-01T16:31:00Z"
+        let displayed = schedule(
+            id: "history-rich",
+            pairing: "T7010",
+            departure: actualDeparture,
+            arrival: actualArrival
+        )
+        let richPayload = CrewAccessTripJSON(
+            schemaVersion: 2,
+            source: "fictional-test",
+            sourceVersion: "1",
+            mappingVersion: "test",
+            generatedAt: "2026-06-01T18:00:00Z",
+            pdfCreatedUtc: "2026-06-01T17:00:00Z",
+            tripId: "T7010",
+            tripInformationDate: "2026-06-01",
+            creditTime: nil,
+            tripDays: nil,
+            tafb: nil,
+            dutyTotals: [],
+            hotelDetails: [],
+            crew: [],
+            items: [
+                CrewAccessTripItemJSON(
+                    sequence: 1,
+                    depAirport: "ANC",
+                    arrAirport: "SEA",
+                    deadhead: false,
+                    flight: "5X101",
+                    startUtc: actualDeparture,
+                    endUtc: actualArrival,
+                    startLocalDisplay: actualDeparture,
+                    endLocalDisplay: actualArrival,
+                    originTz: "America/Anchorage",
+                    destinationTz: "America/Los_Angeles",
+                    timeDerivation: "from_utc",
+                    aircraft: "747",
+                    block: "04:04",
+                    stdUtc: revisedDeparture,
+                    staUtc: revisedArrival,
+                    atdUtc: actualDeparture,
+                    ataUtc: actualArrival,
+                    tailNumber: "N123EX",
+                    stableLegId: deterministicUUID("history-rich").uuidString,
+                    originalStdUtc: originalDeparture,
+                    originalStaUtc: originalArrival,
+                    scheduledDepartureObservedAtUtc: "2026-05-31T20:00:00Z",
+                    scheduledArrivalObservedAtUtc: "2026-05-31T20:00:00Z",
+                    actualDepartureObservedAtUtc: "2026-06-01T17:00:00Z",
+                    actualArrivalObservedAtUtc: "2026-06-01T17:00:00Z"
+                )
+            ]
+        )
+
+        let export = BidPeriodScheduleExportService.makeExport(input: try input(
+            schedules: [displayed],
+            crewAccessPayloads: [richPayload]
+        ))
+
+        let event = try XCTUnwrap(export.trips.first?.events.first)
+        XCTAssertEqual(event.aircraft, "747")
+        XCTAssertEqual(event.aircraftRegistration, "N123EX")
+        XCTAssertEqual(event.departure?.originalScheduled?.instant, originalDeparture)
+        XCTAssertEqual(event.departure?.scheduled?.instant, revisedDeparture)
+        XCTAssertEqual(event.departure?.actual?.instant, actualDeparture)
+        XCTAssertEqual(event.arrival?.originalScheduled?.instant, originalArrival)
+        XCTAssertEqual(event.arrival?.scheduled?.instant, revisedArrival)
+        XCTAssertEqual(event.arrival?.actual?.instant, actualArrival)
+
+        let object = try jsonObject(export)
+        let trips = try XCTUnwrap(object["trips"] as? [[String: Any]])
+        let events = try XCTUnwrap(trips.first?["events"] as? [[String: Any]])
+        let encoded = try XCTUnwrap(events.first)
+        XCTAssertEqual(encoded["aircraftRegistration"] as? String, "N123EX")
+        XCTAssertNotNil(encoded["departure"] as? [String: Any])
+        XCTAssertNotNil(encoded["arrival"] as? [String: Any])
     }
 
     func test_fallbackPreservesStoredLayoverAndHotelName() throws {

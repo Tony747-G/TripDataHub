@@ -1,0 +1,91 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 792 612] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>
+endobj
+5 0 obj
+<< /Length 2404 >>
+stream
+BT
+/F1 8 Tf
+10 TL
+36 570 Td
+(TripDataHub Classification Fixture) Tj
+T*
+() Tj
+T*
+(Trip Information) Tj
+T*
+(Date:         14Jun2026) Tj
+T*
+() Tj
+T*
+(Trip Id: C00001 14Jun2026) Tj
+T*
+(Day             Flight           Departure-Arrival                            Start               Start\(LT\)            End            End\(LT\)   Block A/C Cnx PNR DH Remark) Tj
+T*
+(                Duty start                                                    13:00               05:00) Tj
+T*
+(1 Su            001              ANC-CVG                                      13:00               05:00                19:00          15:00     06:00   747) Tj
+T*
+(                Duty end                                                                                               19:00          15:00) Tj
+T*
+(Duty totals     Time: 06:00       Block: 06:00                                 Rest: 14:30) Tj
+T*
+(Hotel details   Status: BOOKED   Hotel: Fixture Inn                          Hotel Transport:) Tj
+T*
+(                Duty start                                                    10:00               06:00) Tj
+T*
+(2 Mo            002              CVG-HND                                      10:00               06:00                22:00          07:00     12:00   747) Tj
+T*
+(                Duty end                                                                                               22:00          07:00) Tj
+T*
+(Duty totals     Time: 12:00       Block: 12:00                                 Rest: 14:30) Tj
+T*
+(Hotel details   Status: BOOKED   Hotel: Fixture Tokyu                        Hotel Transport:) Tj
+T*
+(                Duty start                                                    00:30               09:30) Tj
+T*
+(3 Tu            003              HND-ANC                                      00:30               09:30                09:30          01:30     09:00   747) Tj
+T*
+(                Duty end                                                                                               09:30          01:30) Tj
+T*
+(Duty totals     Time: 09:00       Block: 09:00                                 Rest: 14:30) Tj
+T*
+(Crew on trip - \(0\)) Tj
+T*
+(Pos Seniority Crew ID    Name) Tj
+T*
+(No crew assigned for this sample. GEMS ID and Name: None) Tj
+T*
+(Created 15Jun2026 10:00 \(UTC\) by TripDataHub) Tj
+T*
+() Tj
+T*
+(This PDF is synthetic fixture data for automated tests only.) Tj
+T*
+ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000247 00000 n 
+0000000315 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+2771
+%%EOF

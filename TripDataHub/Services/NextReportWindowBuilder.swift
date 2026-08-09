@@ -58,17 +58,22 @@ enum NextReportWindowBuilder {
                 return lhs.depLocal < rhs.depLocal
             }
 
+            // Report time is a property of the schedule, not of what happened (INV-012). Using
+            // the display value here would move the pilot's report time whenever an Actual
+            // departure was observed — a late ATD would silently push report time later.
             guard let firstDomicileDeparture = sorted.first(where: { $0.depAirport.uppercased() == domicileAirport }),
-                  let tripStartDomicile = parseUTC(firstDomicileDeparture.depUTC)
+                  let tripStartDomicile = parseUTC(firstDomicileDeparture.plannedDepartureUTC)
             else {
                 continue
             }
 
             let reportTime = tripStartDomicile.addingTimeInterval(-reportLeadTimeSeconds)
 
+            // Scheduled for the same reason: the suppression window must be derivable before the
+            // trip is flown, and must not shift underneath the countdown mid-trip.
             let domicileArrivals = sorted
                 .filter { $0.arrAirport.uppercased() == domicileAirport }
-                .compactMap { parseUTC($0.arrUTC) }
+                .compactMap { parseUTC($0.plannedArrivalUTC) }
 
             guard let tripEndDomicile = domicileArrivals.max() else {
                 continue
@@ -120,7 +125,8 @@ enum NextReportWindowBuilder {
     }
 
     private static func sortDate(for leg: TripLeg, localFormatter: DateFormatter) -> Date {
-        if let depUTC = parseUTC(leg.depUTC) {
+        // Scheduled ordering, so an observed delay cannot reorder the legs of a trip.
+        if let depUTC = parseUTC(leg.plannedDepartureUTC) {
             return depUTC
         }
         if let parsedLocal = localFormatter.date(from: leg.depLocal) {

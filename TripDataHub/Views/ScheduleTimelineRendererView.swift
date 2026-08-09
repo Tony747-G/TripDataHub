@@ -79,7 +79,7 @@ struct ScheduleTimelineRendererView: View {
     private func legRow(leg: TripLeg, nextLegByID: [UUID: TripLeg]) -> some View {
         TimelineFlightRow(
             leg: leg,
-            isPast: isPastFlightRow(leg),
+            isPast: leg.isCompleted || isPastFlightRow(leg),
             fontScale: fontScale,
             timeRangeText: timeRangeText(for: leg),
             dayDiff: dayShift(for: leg),

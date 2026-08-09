@@ -74,6 +74,8 @@ The local JSON file in `Documents/CrewAccessImports/{date}_{tripId}.json` is the
 
 **Implication:** A commit may not destroy any file before verification has passed. Stale same-trip JSONs are removed *before* the reconcile, so they are moved to a hidden stash rather than deleted, restored on every failure path, and discarded only after verification succeeds. Deleting them outright made the rollback partial — it restored the newly written file but not the superseded ones, which is itself the "no source for this trip" state.
 
+**Implication:** Time-overlap replacement cleanup is addressed only by immutable artifacts captured before the first write: exact old schedule IDs, Bid Period + normalized Trip ID keys, and JSON file URLs. Cleanup MUST NOT re-resolve targets from post-merge schedules by pairing or broad overlap. The incoming schedule ID, trip key, and final JSON URL are always protected. Exact old files are stashed, the directory is reconciled, and both "new trip present" and "old schedule absent" are verified before the stash is discarded or CloudKit tombstones are published.
+
 **Enforced by:** Init Task in `AppViewModel` calls `fetchCrewAccessImportFilesIfNeeded` before `applyCrewAccessRetentionPolicy`. `AppViewModel.verifyCrewAccessImportCommit` and `restoreCrewAccessStateAfterFailedImport`. Tests: `CrewAccessInProgressTripReimportTests`.
 
 ---
@@ -135,3 +137,33 @@ Timeline is not flight-only. It includes imported Trips/Flights/DH and Manual Op
 **Why:** Pilots need one chronological view of crew duty. Administrative and personal context must not dilute that duty chronology.
 
 **Enforced by:** `TimelineChronologySupportTests`, `CalendarLayerRegressionHardeningTests`, and `docs/MANUAL_EVENTS_LAYER_ARCHITECTURE.md`.
+
+---
+
+## INV-012: CrewAccess Flight History Is Leg-Scoped and Source-Persisted
+
+For each CrewAccess leg, Scheduled versus Actual is classified independently for departure and arrival by comparing the PDF's own `Created (UTC)` instant with that PDF's corresponding endpoint instant. The rule is exact and has no tolerance band:
+
+- `Created < endpoint` → Scheduled observation
+- `Created >= endpoint` → Actual observation
+
+A pre-endpoint observation updates the current Scheduled value while preserving the Original Scheduled value; a post-endpoint observation updates Actual and MUST NOT overwrite Scheduled.
+
+The canonical CrewAccess JSON stores the stable leg identity, Original/Current Scheduled values, Actual values, their observation timestamps, aircraft type, block time, and manual aircraft registration. Re-import, reconcile, relaunch, and CloudKit restoration rebuild `TripLeg` from that source without dropping the history or registration.
+
+**`nil` means unknown.** No field is ever back-filled from a neighbouring field. `originalSTDUTC == nil` means no original schedule was observed — not that the original equals the current — and a missing Scheduled value is never synthesized from an Actual one. `TripLeg.init` and the synthesized `Codable` conformance apply identical semantics, so a decoded leg equals the leg it was encoded from; a normalization in one and not the other would break `Equatable`-based change detection.
+
+**Two time resolutions, deliberately different.** Conflating them is a defect:
+
+| Question | Ordering | Accessor |
+| --- | --- | --- |
+| What happened / what to display | Actual → Current Scheduled → Original Scheduled | `TripLeg.depUTC` / `arrUTC` |
+| Identity, planning, Bid Period, report time | Current Scheduled → Original Scheduled | `TripLeg.plannedDepartureUTC` / `plannedArrivalUTC` |
+
+An Actual time MUST NOT move a trip across a Bid Period identity boundary, re-key a trip for deletion/tombstone/retention purposes, reorder a trip's legs, or shift a report time. Those are properties of the schedule.
+
+**Derived legs are copy-and-mutate.** Any transform producing a modified `TripLeg` copies the existing value and assigns the changed fields. Hand-written memberwise reconstruction is prohibited: it silently drops whatever the author forgets, which has already erased the full history block and the manual registration on every app launch via the UTC backfill.
+
+Timeline remains compact: Original Scheduled is the normal state, Revised Scheduled is amber **while the leg is still active or future**, and completed or past is gray. Completion outranks revision — a leg that was revised and has since been flown is gray, not amber. A leg with only an ATD is airborne, not completed. Detailed history and manual registration editing belong in the flight detail sheet, not extra Timeline labels.
+
+**Enforced by:** `CrewAccessLegHistoryTests` (merge, identity ladder, model guarantees), `TimelineFlightVisualStateTests` (the full colour matrix), `CrewAccessParserRegressionTests` (classification through the production parser against `sample_trip/crewaccess_classification_matrix.pdf` and `crewaccess_arrival_boundary.pdf`, plus golden JSON that pins `stdUtc`/`staUtc`/`atdUtc`/`ataUtc`), `AppViewModelDeviceSyncTests.test_scheduleWideTransformsPreserveLegHistoryAndRegistration`, and the existing `CrewAccessInProgressTripReimportTests` transaction regressions.

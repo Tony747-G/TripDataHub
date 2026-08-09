@@ -14,6 +14,7 @@ struct IPadTimelineSidebarView: View {
     @State private var friendScheduleMatches: FriendScheduleMatches = .empty
     @State private var friendMatchAlert: FriendMatchPresentation? = nil
     @State private var selectedManualOperationalEvent: ManualOperationalEvent?
+    @State private var selectedFlightLeg: TripLeg?
     // Cached per-schedule-update data — computed once in refreshLegData(), not on every body eval.
     @State private var legData = TimelineLegData(schedules: [])
     @State private var cachedTripStartLegIDs: Set<UUID> = []
@@ -143,25 +144,33 @@ struct IPadTimelineSidebarView: View {
                                                 )
                                         }
                                         Group {
-                                            Button {
-                                                guard focusedTripID == nil else { return }
-                                                selectedTripID = selectedTripID == tripID ? nil : tripID
-                                            } label: {
-                                                TimelineFlightRow(
-                                                    leg: leg,
-                                                    isPast: isPastFlightRow(leg),
-                                                    fontScale: timelineFontScale,
-                                                    timeRangeText: timeRangeText(for: leg),
-                                                    dayDiff: dayShift(for: leg),
-                                                    blockText: blockText(for: leg),
-                                                    iconColor: hasFlightMatch ? friendMatchAmber : .primary,
-                                                    onFriendMatchTap: hasFlightMatch ? {
-                                                        friendMatchAlert = flightMatchPresentation(for: leg, matches: flightMatches)
-                                                    } : nil
-                                                )
-                                            }
-                                            .buttonStyle(.plain)
-                                            .background(isHighlighted ? Color.red.opacity(0.10) : (isSelected ? Color.accentColor.opacity(0.12) : Color.clear))
+                                            TimelineFlightRow(
+                                                leg: leg,
+                                                isPast: leg.isCompleted || isPastFlightRow(leg),
+                                                fontScale: timelineFontScale,
+                                                timeRangeText: timeRangeText(for: leg),
+                                                dayDiff: dayShift(for: leg),
+                                                blockText: blockText(for: leg),
+                                                iconColor: hasFlightMatch ? friendMatchAmber : .primary,
+                                                // Selection and highlight are transient UI state and must win over the
+                                                // schedule-state tint. Passing them in keeps both backgrounds in the same
+                                                // layer; applying the highlight outside the row let the row's own amber /
+                                                // gray fill paint over the selection indicator.
+                                                backgroundOverride: isHighlighted
+                                                    ? Color.red.opacity(0.10)
+                                                    : (isSelected ? Color.accentColor.opacity(0.12) : nil),
+                                                onFriendMatchTap: hasFlightMatch ? {
+                                                    friendMatchAlert = flightMatchPresentation(for: leg, matches: flightMatches)
+                                                } : nil,
+                                                onFlightTap: {
+                                                    // Select, never deselect. Toggling here meant that opening the Flight
+                                                    // Log for the already-selected trip also cleared the selection.
+                                                    if focusedTripID == nil {
+                                                        selectedTripID = tripID
+                                                    }
+                                                    selectedFlightLeg = leg
+                                                }
+                                            )
                                             .overlay(alignment: .leading) {
                                                 if isSelected {
                                                     Rectangle()
@@ -390,6 +399,14 @@ struct IPadTimelineSidebarView: View {
         .sheet(item: $selectedManualOperationalEvent) { event in
             ManualEventDetailSheet(operationalEvent: event)
                 .environmentObject(viewModel)
+        }
+        .sheet(item: $selectedFlightLeg) { leg in
+            FlightLegDetailSheet(leg: leg) { registration in
+                try await viewModel.updateCrewAccessRegistration(
+                    for: leg,
+                    registration: registration
+                )
+            }
         }
     }
 

@@ -1196,6 +1196,154 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             try FileManager.default.removeItem(at: dir)
         }
     }
+
+    // MARK: - Leg-history preservation through schedule-wide transforms (INV-012)
+
+    /// Both of these transforms rebuild *every* leg of *every* schedule they touch, not just the
+    /// legs they actually change. They used to do it with a hand-written memberwise `TripLeg(...)`
+    /// that stopped at `ataUTC`, so each run silently erased Original Scheduled, all four
+    /// observation timestamps, the aircraft type and the manually entered registration.
+    ///
+    /// `backfillMissingUTCInCachedSchedulesIfNeeded()` runs on every launch and persists its result
+    /// to the cache, so the loss was durable and repeated.
+    func test_scheduleWideTransformsPreserveLegHistoryAndRegistration() throws {
+        let vm = makeMinimalViewModel()
+        let schedule = PayPeriodSchedule(
+            id: "CA26-08-A70393R",
+            label: "CA26-08-A70393R",
+            tripCount: 1,
+            legCount: 1,
+            openTimeCount: 0,
+            updatedAt: Date(),
+            legs: [Self.legWithFullHistory()],
+            openTimeTrips: []
+        )
+
+        let backfilled = vm.backfillMissingUTC(in: [schedule]).schedules
+        try Self.assertHistoryPreserved(in: backfilled, context: "backfillMissingUTC")
+
+        let refreshed = vm.refreshScheduleTimezones([schedule])
+        try Self.assertHistoryPreserved(in: refreshed, context: "refreshScheduleTimezones")
+    }
+
+    /// The backfill must not invent a Scheduled time. `depUTC` resolves Actual first, so the old
+    /// `stdUTC: leg.stdUTC ?? depUTC` turned an Actual departure into a fabricated Scheduled one
+    /// for legs whose schedule was never observed (a post-flight-only first import).
+    func test_backfillDoesNotSynthesizeScheduledTimesFromActuals() throws {
+        let vm = makeMinimalViewModel()
+        var actualOnly = Self.legWithFullHistory()
+        actualOnly.stdUTC = nil
+        actualOnly.staUTC = nil
+        actualOnly.originalSTDUTC = nil
+        actualOnly.originalSTAUTC = nil
+        actualOnly.scheduledDepartureObservedAtUTC = nil
+        actualOnly.scheduledArrivalObservedAtUTC = nil
+
+        let schedule = PayPeriodSchedule(
+            id: "CA26-08-A70393R",
+            label: "CA26-08-A70393R",
+            tripCount: 1,
+            legCount: 1,
+            openTimeCount: 0,
+            updatedAt: Date(),
+            legs: [actualOnly],
+            openTimeTrips: []
+        )
+
+        let result = vm.backfillMissingUTC(in: [schedule]).schedules
+        let leg = try XCTUnwrap(result.first?.legs.first)
+
+        XCTAssertNil(leg.stdUTC, "an unobserved Scheduled departure must stay unknown")
+        XCTAssertNil(leg.staUTC, "an unobserved Scheduled arrival must stay unknown")
+        XCTAssertNil(leg.originalSTDUTC)
+        XCTAssertEqual(leg.atdUTC, "2026-08-05T23:45:00Z", "actuals are untouched")
+        XCTAssertEqual(leg.aircraftRegistration, "N605UP")
+    }
+
+    private func makeMinimalViewModel() -> AppViewModel {
+        AppViewModel(
+            syncService: NoopSyncService(),
+            authService: NoopAuthService(),
+            cacheService: InMemoryCacheService(),
+            notificationService: NoopNotificationService(),
+            crewAccessImportService: NoopImportService(),
+            friendScheduleCloudKitService: NoopFriendCloudKitService(),
+            gemsVerificationCloudKitService: NoopGEMSVerificationService(),
+            deviceScheduleCloudKitService: FakeDeviceScheduleCloudKitService(),
+            crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService(),
+            keychainService: EmptyKeychainService()
+        )
+    }
+
+    private static func assertHistoryPreserved(
+        in schedules: [PayPeriodSchedule],
+        context: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let leg = try XCTUnwrap(schedules.first?.legs.first, file: file, line: line)
+        XCTAssertEqual(leg.originalSTDUTC, "2026-08-05T23:20:00Z", "\(context): originalSTDUTC", file: file, line: line)
+        XCTAssertEqual(leg.originalSTAUTC, "2026-08-06T04:30:00Z", "\(context): originalSTAUTC", file: file, line: line)
+        XCTAssertEqual(leg.stdUTC, "2026-08-05T23:34:00Z", "\(context): stdUTC", file: file, line: line)
+        XCTAssertEqual(leg.staUTC, "2026-08-06T04:36:00Z", "\(context): staUTC", file: file, line: line)
+        XCTAssertEqual(leg.atdUTC, "2026-08-05T23:45:00Z", "\(context): atdUTC", file: file, line: line)
+        XCTAssertEqual(leg.ataUTC, "2026-08-06T04:43:00Z", "\(context): ataUTC", file: file, line: line)
+        XCTAssertEqual(
+            leg.scheduledDepartureObservedAtUTC, "2026-08-05T18:42:00Z",
+            "\(context): scheduled departure observation", file: file, line: line
+        )
+        XCTAssertEqual(
+            leg.scheduledArrivalObservedAtUTC, "2026-08-05T18:42:00Z",
+            "\(context): scheduled arrival observation", file: file, line: line
+        )
+        XCTAssertEqual(
+            leg.actualDepartureObservedAtUTC, "2026-08-09T02:15:00Z",
+            "\(context): actual departure observation", file: file, line: line
+        )
+        XCTAssertEqual(
+            leg.actualArrivalObservedAtUTC, "2026-08-09T02:15:00Z",
+            "\(context): actual arrival observation", file: file, line: line
+        )
+        XCTAssertEqual(leg.aircraftType, "B748", "\(context): aircraft type", file: file, line: line)
+        XCTAssertEqual(
+            leg.aircraftRegistration, "N605UP",
+            "\(context): manual registration", file: file, line: line
+        )
+        XCTAssertEqual(leg.layoverHotelName, "Original Hotel", "\(context): hotel", file: file, line: line)
+    }
+
+    private static func legWithFullHistory() -> TripLeg {
+        TripLeg(
+            id: UUID(uuidString: "11111111-2222-3333-4444-555555555555") ?? UUID(),
+            payPeriod: "CA26-08-A70393R",
+            pairing: "A70393R",
+            leg: 1,
+            flight: "5X059",
+            depAirport: "ANC",
+            depLocal: "2026-08-05 15:45",
+            arrAirport: "ONT",
+            arrLocal: "2026-08-05 21:43",
+            depUTC: "2026-08-05T23:45:00Z",
+            arrUTC: "2026-08-06T04:43:00Z",
+            status: "-",
+            block: "04:58",
+            layoverStation: "ONT",
+            layoverHotelName: "Original Hotel",
+            layoverDuration: "18:00",
+            stdUTC: "2026-08-05T23:34:00Z",
+            staUTC: "2026-08-06T04:36:00Z",
+            atdUTC: "2026-08-05T23:45:00Z",
+            ataUTC: "2026-08-06T04:43:00Z",
+            originalSTDUTC: "2026-08-05T23:20:00Z",
+            originalSTAUTC: "2026-08-06T04:30:00Z",
+            scheduledDepartureObservedAtUTC: "2026-08-05T18:42:00Z",
+            scheduledArrivalObservedAtUTC: "2026-08-05T18:42:00Z",
+            actualDepartureObservedAtUTC: "2026-08-09T02:15:00Z",
+            actualArrivalObservedAtUTC: "2026-08-09T02:15:00Z",
+            aircraftType: "B748",
+            aircraftRegistration: "N605UP"
+        )
+    }
 }
 
 // MARK: - Fake DeviceScheduleCloudKitService
