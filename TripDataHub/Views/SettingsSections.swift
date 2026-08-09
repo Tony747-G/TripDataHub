@@ -84,11 +84,6 @@ struct SettingsTripBoardFetchSection: View {
 
     var body: some View {
         Section {
-            if AppEnvironment.isOpenTimeDemoModeControlVisible {
-                Toggle("Demo Mode", isOn: $viewModel.isOpenTimeDemoMode)
-                    .accessibilityIdentifier("settings.openTimeDemoMode")
-            }
-
             Toggle("Auto Fetch on App Open", isOn: $autoFetchOnOpen)
                 .disabled(viewModel.isOpenTimeDemoMode)
 
@@ -114,7 +109,7 @@ struct SettingsTripBoardFetchSection: View {
                     .foregroundStyle(.secondary)
             }
         } header: {
-            sectionHeader("TripBoard Fetch")
+            sectionHeader("TripBoard")
         }
     }
 
@@ -363,13 +358,11 @@ struct SettingsNotificationSection: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @Binding var notify48h: Bool
     @Binding var notify24h: Bool
-    @Binding var notify12h: Bool
 
     var body: some View {
         Section {
             Toggle("48 hours", isOn: $notify48h)
             Toggle("24 hours", isOn: $notify24h)
-            Toggle("12 hours", isOn: $notify12h)
 
             if let message = viewModel.notificationScheduleMessage {
                 Text(message)
@@ -377,7 +370,7 @@ struct SettingsNotificationSection: View {
                     .foregroundStyle(.orange)
             }
         } header: {
-            sectionHeader("Notification Setting")
+            sectionHeader("Notifications")
         }
     }
 }
@@ -1134,6 +1127,8 @@ struct SettingsProfileSection: View {
             }
             .buttonStyle(.plain)
             .listRowInsets(EdgeInsets(top: 6, leading: 24, bottom: 6, trailing: 16))
+        } header: {
+            sectionHeader("Profile")
         }
         .sheet(isPresented: $isShowingProfile) {
             ProfileTabView(showsCloseButton: true)
@@ -1160,7 +1155,7 @@ struct SettingsProfileSection: View {
 
 }
 
-private func sectionHeader(_ title: String) -> some View {
+func sectionHeader(_ title: String) -> some View {
     Text(title)
         .font(.subheadline.weight(.semibold))
         .foregroundStyle(Color.primary.opacity(0.95))
