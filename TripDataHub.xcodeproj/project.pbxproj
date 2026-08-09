@@ -38,6 +38,7 @@
 		560C6AC50CBE2C357746B607 /* TripScheduleSnapshotEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1682DE701661661F9C87C7D /* TripScheduleSnapshotEncoderTests.swift */; };
 		5A70473A2E93DD31CC462B37 /* SyncDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 183D9455703A069B1219B1E0 /* SyncDiagnosticsView.swift */; };
 		5C839E2F9397C27B75B962A9 /* BidPeriodService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B6FCCCA54583B5E8D70721D /* BidPeriodService.swift */; };
+		5DBC9261365351B322FC0116 /* FlightCountdownSharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58C18FF3A67E7E968B09F58E /* FlightCountdownSharedModels.swift */; };
 		657CE0BD8328A988EB6D9DAF /* TripScheduleSnapshotEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A29DAE34FE231561964648C1 /* TripScheduleSnapshotEncoder.swift */; };
 		659F96191E8496BC418E8015 /* CrewAccessParserRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6525000DBE9BF9003668EC3 /* CrewAccessParserRegressionTests.swift */; };
 		8A18503D37DE38141BD83F97 /* TimelineFlightVisualStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF4743B286D28846759D4FEC /* TimelineFlightVisualStateTests.swift */; };
@@ -65,9 +66,11 @@
 		9599AC8B5334199EAAC4FC49 /* FlightCountdownTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58EB09BC72A13BE9062573CC /* FlightCountdownTests.swift */; };
 		95B113CB364AA3060CA5D213 /* TimelineSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A53834B9B503F29F362404 /* TimelineSupport.swift */; };
 		95EA363B67369FCF2A615031 /* CrewAccessImportCloudKitServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41B93306AF0DF77C8A58D12F /* CrewAccessImportCloudKitServiceTests.swift */; };
+		96553879BF5110F396CC6CE6 /* AppGroupImportHandoff.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBE459E3CF25ACF48E17077F /* AppGroupImportHandoff.swift */; };
 		9A440A2F395319BE8FFF8DDC /* ExpandableFloatingMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC2084526B8C403A2D265F80 /* ExpandableFloatingMenu.swift */; };
 		9CC4DBFF8DD7A807E39DE379 /* RosterParsingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0A40DFB2EF7B9A57798ECF9 /* RosterParsingModels.swift */; };
 		9D0A859BE373BD64930F62E3 /* ProfileCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E95348863D32C465BA74266C /* ProfileCard.swift */; };
+		9D9D1ED78A86A240050626A9 /* TripDataShareActionExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 6DB6247591FD18389FEA8F71 /* TripDataShareActionExtension.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		A1D82A544C65FC9E6F2AB004 /* OpenTimeSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD991C2C233AF5AEE5AB9A42 /* OpenTimeSupport.swift */; };
 		A4ED9ABB8F67870FDF6DC827 /* PDFTripParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A472159ED43D1D3AE0B8922B /* PDFTripParser.swift */; };
 		A77C14C3F302B68419884766 /* ProfileModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABF8832C44179DC33693CE0E /* ProfileModels.swift */; };
@@ -85,6 +88,7 @@
 		C8D9B5BF0F2E0E10EFC1355F /* TripDataHubApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BDD762619119C64ED70F521 /* TripDataHubApp.swift */; };
 		CAAF487FE121E16E14A817A2 /* TripJSONExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC92941B770B36F5CA2CB758 /* TripJSONExportService.swift */; };
 		CABB746FF49354B5B9FB8445 /* MaterialIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9B6B161A74F14EA6BD7D4F1 /* MaterialIconView.swift */; };
+		CB8372AF342F61EBB9DAFEA0 /* TripDataCountdownWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 2715723CFCA0583F75104EF1 /* TripDataCountdownWidgetExtension.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		CE0849FD7F7F3F22C65211EE /* ImportPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF695C0A628B417D70BF6664 /* ImportPreviewView.swift */; };
 		CE14183F65070B2295103E1C /* iPadTimelineSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F613274D8F1AD32132CC8601 /* iPadTimelineSidebarView.swift */; };
 		CEDCA270F7DC7D9A4FBA10CF /* TripJSONExportServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10B50A4E5115BBBBEFE5B8D8 /* TripJSONExportServiceTests.swift */; };
@@ -114,19 +118,19 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		127FF9DDB7833EA6C3E6CF7E /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 5AE721792323228157DCB039 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 9CDD311DB999C310E3ADCC73;
-			remoteInfo = TripDataHub;
-		};
 		30A401B24E2279426942B203 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 5AE721792323228157DCB039 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 9CDD311DB999C310E3ADCC73;
 			remoteInfo = TripDataHub;
+		};
+		5EBFCE02872DDB4CEC31883D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5AE721792323228157DCB039 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DD875065125E525A79261256;
+			remoteInfo = TripDataShareActionExtension;
 		};
 		A1817BA7C7786FFF291C4F81 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -135,14 +139,29 @@
 			remoteGlobalIDString = 9CDD311DB999C310E3ADCC73;
 			remoteInfo = TripDataHub;
 		};
-		CF45968C2728032AE5858E80 /* PBXContainerItemProxy */ = {
+		A9FDFD585ECC90B3751E6BF5 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 5AE721792323228157DCB039 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 9CDD311DB999C310E3ADCC73;
-			remoteInfo = TripDataHub;
+			remoteGlobalIDString = 629B3D6DDB789EA0AAE1A672;
+			remoteInfo = TripDataCountdownWidgetExtension;
 		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		5CF69F885E45F6007F95BB21 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				9D9D1ED78A86A240050626A9 /* TripDataShareActionExtension.appex in Embed Foundation Extensions */,
+				CB8372AF342F61EBB9DAFEA0 /* TripDataCountdownWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		022B7246751D741B1792AE69 /* ScheduleTimelineRendererView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleTimelineRendererView.swift; sourceTree = "<group>"; };
@@ -538,7 +557,6 @@
 			buildRules = (
 			);
 			dependencies = (
-				7B3B1B256DEA999C438FDD88 /* PBXTargetDependency */,
 			);
 			name = TripDataCountdownWidgetExtension;
 			packageProductDependencies = (
@@ -553,10 +571,13 @@
 			buildPhases = (
 				B649BC6D86A43D9C51B54C5F /* Sources */,
 				A66D1306FD49CF6110E3DE61 /* Resources */,
+				5CF69F885E45F6007F95BB21 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				92A95AF55C21A13FDF224D45 /* PBXTargetDependency */,
+				BF103DA9D473834A9837A86A /* PBXTargetDependency */,
 			);
 			name = TripDataHub;
 			packageProductDependencies = (
@@ -574,7 +595,6 @@
 			buildRules = (
 			);
 			dependencies = (
-				2AF288003D06B79CDDB1F060 /* PBXTargetDependency */,
 			);
 			name = TripDataShareActionExtension;
 			packageProductDependencies = (
@@ -657,6 +677,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5DBC9261365351B322FC0116 /* FlightCountdownSharedModels.swift in Sources */,
 				94D6405C334A97CF691121BA /* TripDataCountdownWidget.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -695,6 +716,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				96553879BF5110F396CC6CE6 /* AppGroupImportHandoff.swift in Sources */,
 				67D77849AA568A57737B8039 /* ShareViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -791,20 +813,20 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		2AF288003D06B79CDDB1F060 /* PBXTargetDependency */ = {
+		92A95AF55C21A13FDF224D45 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 9CDD311DB999C310E3ADCC73 /* TripDataHub */;
-			targetProxy = CF45968C2728032AE5858E80 /* PBXContainerItemProxy */;
-		};
-		7B3B1B256DEA999C438FDD88 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 9CDD311DB999C310E3ADCC73 /* TripDataHub */;
-			targetProxy = 127FF9DDB7833EA6C3E6CF7E /* PBXContainerItemProxy */;
+			target = DD875065125E525A79261256 /* TripDataShareActionExtension */;
+			targetProxy = 5EBFCE02872DDB4CEC31883D /* PBXContainerItemProxy */;
 		};
 		ACCF85D1355AE5B839C9740B /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 9CDD311DB999C310E3ADCC73 /* TripDataHub */;
 			targetProxy = 30A401B24E2279426942B203 /* PBXContainerItemProxy */;
+		};
+		BF103DA9D473834A9837A86A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 629B3D6DDB789EA0AAE1A672 /* TripDataCountdownWidgetExtension */;
+			targetProxy = A9FDFD585ECC90B3751E6BF5 /* PBXContainerItemProxy */;
 		};
 		BF3D95AB0458FADD6102DF03 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;

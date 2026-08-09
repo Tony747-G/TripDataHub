@@ -48,6 +48,18 @@ targets:
         CODE_SIGN_ENTITLEMENTS: TripDataHub/TripDataHub.entitlements
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: 54WZM2U9MK
+    # The app owns its extensions. XcodeGen only emits the "Embed App Extensions" copy phase
+    # (PBXCopyFilesBuildPhase, dstSubfolderSpec 13 = PlugIns) on an application target that
+    # *depends on* an app-extension target. With the dependency declared the other way round the
+    # app had an empty build graph, so `xcodebuild archive` produced an .app with no PlugIns
+    # directory and neither .appex was built, embedded or signed.
+    dependencies:
+      - target: TripDataShareActionExtension
+        embed: true
+        codeSign: true
+      - target: TripDataCountdownWidgetExtension
+        embed: true
+        codeSign: true
     scheme:
       testTargets:
         - TripDataHubTests
@@ -58,6 +70,12 @@ targets:
     platform: iOS
     sources:
       - path: TripDataShareActionExtension
+      # Shared App Group handoff contract, compiled into both the app and this extension so the
+      # identifiers and the on-disk queue format cannot drift. Dual target membership of one file,
+      # not a copy: there is exactly one definition of `AppGroupImportHandoff` in the repository.
+      # The file imports only Foundation and references no app-only type, so nothing else is
+      # pulled into the extension.
+      - path: TripDataHub/Services/AppGroupImportHandoff.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.sfune.BidProSchedule.ShareAction
@@ -69,14 +87,22 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: 54WZM2U9MK
         SKIP_INSTALL: YES
-    dependencies:
-      - target: TripDataHub
+    # No dependency on TripDataHub. An extension must not depend on its host app to reach shared
+    # code — that inverts the embed relationship and would now also be a dependency cycle, since
+    # the app depends on this target. Shared code is reached by file membership above.
 
   TripDataCountdownWidgetExtension:
     type: app-extension
     platform: iOS
     sources:
       - path: TripDataCountdownWidgetExtension
+      # Shared countdown models (`FlightCountdownSnapshot`, `FlightCountdownAttributes`,
+      # `CountdownPresentationPhase`, `FlightCountdownSharedStore`) compiled into both the app and
+      # this extension. Dual target membership of one file, not a copy — the phase computation and
+      # the Live Activity attributes must stay byte-identical on both sides of the App Group.
+      # The file imports only Foundation and ActivityKit; `FlightCountdownSnapshotStore` is
+      # private to the widget, so no further app source is required.
+      - path: TripDataHub/Models/FlightCountdownSharedModels.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.sfune.BidProSchedule.CountdownWidget
@@ -88,8 +114,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: 54WZM2U9MK
         SKIP_INSTALL: YES
-    dependencies:
-      - target: TripDataHub
+    # No dependency on TripDataHub — see the note on the Share Action target.
 
   TripDataHubTests:
     type: bundle.unit-test
