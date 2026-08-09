@@ -22,7 +22,7 @@
     {
       "aircraft" : "747",
       "arrAirport" : "SDF",
-      "block" : "6:05",
+      "block" : "06:05",
       "deadhead" : false,
       "depAirport" : "ANC",
       "destinationTz" : "America\/Kentucky\/Louisville",
@@ -58,7 +58,7 @@
     {
       "aircraft" : "747",
       "arrAirport" : "ANC",
-      "block" : "6:33",
+      "block" : "06:33",
       "deadhead" : true,
       "depAirport" : "NRT",
       "destinationTz" : "America\/Anchorage",

@@ -20,7 +20,7 @@
     {
       "aircraft" : "747",
       "arrAirport" : "ICN",
-      "block" : "8:31",
+      "block" : "08:31",
       "deadhead" : false,
       "depAirport" : "ANC",
       "destinationTz" : "Asia\/Seoul",
@@ -38,7 +38,7 @@
     {
       "aircraft" : "747",
       "arrAirport" : "ANC",
-      "block" : "8:02",
+      "block" : "08:02",
       "deadhead" : false,
       "depAirport" : "ICN",
       "destinationTz" : "America\/Anchorage",

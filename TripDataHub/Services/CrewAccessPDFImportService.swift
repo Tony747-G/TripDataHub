@@ -880,7 +880,7 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         guard let minutes = parseBlockMinutes(trimmed) else { return nil }
         let hh = minutes / 60
         let mm = minutes % 60
-        return "\(hh):\(String(format: "%02d", mm))"
+        return String(format: "%02d:%02d", hh, mm)
     }
 
     private func calculateBlock(depUTC: Date, arrUTC: Date) -> String? {
@@ -892,7 +892,7 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
         guard minutes >= 0, minutes <= 24 * 60 else { return nil }
         let hh = minutes / 60
         let mm = minutes % 60
-        return "\(hh):\(String(format: "%02d", mm))"
+        return String(format: "%02d:%02d", hh, mm)
     }
 
     private func normalizeWhitespace(_ text: String) -> String {
