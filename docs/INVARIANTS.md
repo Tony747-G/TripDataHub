@@ -58,7 +58,7 @@ Shared components should be used where practical. The same `TimelineFlightRow` a
 
 **Why:** Repeated regressions where one path got a polish update and the other didn't (e.g. iPad layover card was missing the date label; iOS Timeline/Friends changes missed iPad-specific sidebar/sheet implementations).
 
-**Enforced by:** Reviewing equivalent iOS/iPad entry points before marking work complete. Known paired surfaces include `TimelineTabView.swift` / `Views/iPad/iPadTimelineSidebarView.swift`, `FriendsTabView.swift` / `Views/iPad/iPadOperationalWorkspaceView.swift`, and shared Settings/Import flows through `SettingsTabView.swift`, `BrowserTabView.swift`, and `ImportPreviewView.swift`.
+**Enforced by:** Reviewing equivalent iOS/iPad entry points before marking work complete. Known paired surfaces include `TimelineTabView.swift` / `Views/iPad/iPadTimelineSidebarView.swift`, `FriendsTabView.swift` / `Views/iPad/iPadOperationalWorkspaceView.swift`, and shared Settings/Import flows through `SettingsTabView.swift`, `BrowserTabView.swift`, and `ImportPreviewView.swift`. Timeline block/connection rows use the shared structured `BlockConnectionDisplay` and `BlockConnectionDisplayView`; T-15 verifies the same fixed two-line component at iPhone, iPhone Pro Max, and iPad content widths.
 
 ---
 
@@ -167,3 +167,89 @@ An Actual time MUST NOT move a trip across a Bid Period identity boundary, re-ke
 Timeline remains compact: Original Scheduled is the normal state, Revised Scheduled is amber **while the leg is still active or future**, and completed or past is gray. Completion outranks revision — a leg that was revised and has since been flown is gray, not amber. A leg with only an ATD is airborne, not completed. Detailed history and manual registration editing belong in the flight detail sheet, not extra Timeline labels.
 
 **Enforced by:** `CrewAccessLegHistoryTests` (merge, identity ladder, model guarantees), `TimelineFlightVisualStateTests` (the full colour matrix), `CrewAccessParserRegressionTests` (classification through the production parser against `sample_trip/crewaccess_classification_matrix.pdf` and `crewaccess_arrival_boundary.pdf`, plus golden JSON that pins `stdUtc`/`staUtc`/`atdUtc`/`ataUtc`), `AppViewModelDeviceSyncTests.test_scheduleWideTransformsPreserveLegHistoryAndRegistration`, and the existing `CrewAccessInProgressTripReimportTests` transaction regressions.
+
+---
+
+## INV-013: Flight Operational State Uses Planning, Actual, and Report Instants Only
+
+**Rule:** Countdown and operational-state decisions take only `plannedDepartureUTC`, `plannedArrivalUTC`, `atdUTC`, `ataUTC`, and the optional trip-level `reportTimeUTC`. All duration math is an absolute `Date` difference. `depUTC` and `arrUTC` are resolved display/history values and MUST NOT be read directly by the countdown engine or operational-state builder.
+
+If a required planning instant or presentation timezone cannot be resolved, no operational state or presentation payload is created for that leg. The leg is excluded from current-leg selection, the reason is recorded through `SyncDiagnosticsLog`, and selection continues with the next valid leg. There is no `.unknown` operational state and no default timestamp is synthesized.
+
+**Why:** INV-012 deliberately gives display/history and planning different resolution orders. Feeding a resolved Actual display value into schedule-based countdown math moves the target when an ATD or ATA is observed. Treating an insufficient input as a state would also give an unknowable leg a user-facing status, contrary to the fail-closed product rule.
+
+**Forbidden:** Reading `depUTC` / `arrUTC` in the countdown or state-decision path; using device-local wall-clock math for durations; backfilling a missing planning instant or timezone; silently dropping an invalid leg; adding an `.unknown` state or an operational error banner.
+
+**Enforced by:** `FlightOperationalState`, the single operational-state builder, and reason-coded `SyncDiagnosticsLog` events. Tests: T-1, T-2, T-3, T-6, T-16, and T-22.
+
+**See also:** INV-001, INV-002, INV-012, and `docs/ADR/ADR-004-flight-operational-state-model.md`.
+
+---
+
+## INV-014: Time Passage Does Not Prove an Actual Operational Event
+
+**Rule:** Time passage alone MUST NOT produce `Delayed`, `Departed`, or `Completed`. When schedule instants are known but Actual departure or arrival is not, the product reports only the neutral schedule-based states `.scheduledDeparturePassed` or `.scheduledArrivalPassed`. Only an observed ATA produces `.completed`.
+
+**Why:** A passed STD or STA says what the schedule predicted, not what the aircraft did. Claiming an unobserved event is worse than showing less information.
+
+**Forbidden:** Mapping `now >= STD` to `Delayed` or `Departed`; mapping a fixed offset after STD or STA to `Completed`; using a future leg, connection, location, or elapsed time to infer an Actual event; retaining legacy `Delayed` / schedule-derived `Completed` copy in any surface.
+
+**Enforced by:** `FlightOperationalState`, shared presentation payload formatting, current-leg selection, and lifecycle reconciliation. Tests: T-6, T-10, T-11, T-12, T-17, T-20, and T-21.
+
+**See also:** `docs/ADR/ADR-004-flight-operational-state-model.md`.
+
+---
+
+## INV-015: Derived Operational Presentation Has One Builder and Two Explicit Refresh Modes
+
+**Rule:** Live Activity, Dynamic Island, Home Screen Widget snapshot, notification scheduling, Timeline operational presentation, current-leg cache, and launch reconstruction derive from one operational-state builder output. Normal operation uses explicit `reconcile` semantics: update an Activity while the current leg remains the same, and end/create only when the current leg changes or disappears. A Trip Revision or Replacement alone uses explicit `destructiveRebuild` semantics: cancel old derived artifacts, end all old Activities, invalidate snapshots/caches, persist the revision, then rebuild.
+
+**Why:** Independent derivation paths drift and leave obsolete operational information alive. Conversely, rebuilding every normal refresh consumes ActivityKit request budget and causes visible churn. Replacement and ordinary state progression have different lifecycle requirements and must remain distinct.
+
+**Forbidden:** Surface-specific state builders; notification and Activity state computed independently; coordinator-side guessing of refresh mode; unconditional Activity end/request during launch, scene activation, periodic refresh, or same-leg state transitions; patching an old Activity through a Trip Replacement.
+
+**Enforced by:** the single operational-state builder and shared countdown presentation payload; caller-selected `LiveActivityRefreshMode`; a coordinator-owned, one-time initial Activity population barrier shared by every refresh entry point; boundary-driven report/STD/STA/STA+1h evaluation; and the replacement-only, timeout-bounded destructive invalidation seam. Tests: T-4 through T-8, T-18, T-19, and T-22.
+
+**See also:** INV-006, INV-007, INV-008, and `docs/ADR/ADR-004-flight-operational-state-model.md`.
+
+---
+
+## INV-016: Presentation Windows Do Not Define Operational State
+
+**Rule:** T-12h, T-6h, and other surface visibility windows belong only to Presentation Policy. They determine whether and where a valid operational state is shown; they MUST NOT participate in `FlightOperationalState` evaluation.
+
+**Why:** A leg's operational meaning does not change because a Widget or Live Activity has entered its display window. Combining the two concepts caused STD-relative UI phases to masquerade as flight state.
+
+**Forbidden:** A state case whose meaning is a Widget/Live Activity window; using a visibility lead/tail constant to decide `Delayed`, `inFlight`, `completed`, or `stale`; adding `.preTrip` to represent “not visible yet.”
+
+**Enforced by:** separate `FlightOperationalState` and Presentation Policy types, with no presentation-window input in the operational-state evaluator signature. Test: T-23 is the dedicated enforcing regression; it requires the same valid operational state outside the T-12h presentation window and regardless of surface visibility.
+
+**See also:** `docs/ADR/ADR-004-flight-operational-state-model.md`.
+
+---
+
+## INV-017: In-Flight Requires Observed ATD and Ends at Scheduled Arrival
+
+**Rule:** `.inFlight` requires `atdUTC != nil`, `ataUTC == nil`, and `now < plannedArrivalUTC`. ATD is the only accepted evidence of departure in this Build. At STA, `.inFlight` ends even when ATD is known; ATD proves departure, not continuing airborne status.
+
+**Why:** Inferring airborne state from schedule passage is an unsupported operational claim. Keeping `.inFlight` after STA would make the schedule-based arrival countdown zero or negative and imply knowledge the app does not have.
+
+**Forbidden:** Inferring `.inFlight` from STD passage, next-leg existence, connection feasibility, location, or any non-ATD signal; treating `atdUTC != nil && ataUTC == nil` as sufficient without the STA bound; clamping a non-positive `Arriving in` duration to hide an invalid state.
+
+**Enforced by:** ordered `FlightOperationalState` evaluation and a positive-duration assertion for `Arriving in`. Tests: T-9, T-11, T-12, T-17, T-20, and T-21.
+
+**See also:** INV-014, INV-018, and `docs/ADR/ADR-004-flight-operational-state-model.md`.
+
+---
+
+## INV-018: STA Boundaries Precede In-Flight When ATA Is Unobserved
+
+**Rule:** Operational state is evaluated in this exact order: observed ATA → `.completed`; ATA absent and `now >= STA + 1h` → `.stale`; ATA absent and `now >= STA` → `.scheduledArrivalPassed`; observed ATD with `now < STA` → `.inFlight`; `now >= STD` → `.scheduledDeparturePassed`; `reportTimeUTC != nil` and now before report time → `.preReport`; otherwise before STD → `.postReportPreDeparture`. Boundary equality belongs to the later state: STA is `.scheduledArrivalPassed`, and STA+1h is `.stale`.
+
+**Why:** Placing the ATD branch before STA checks makes `.scheduledArrivalPassed` and `.stale` unreachable for the flights most likely to have an ATD. Evaluation order is part of the product contract, not an implementation-style choice.
+
+**Forbidden:** Reordering the branches for readability; allowing ATD-known/ATA-unknown legs to remain `.inFlight` at or after STA; using strict `>` at the STA or STA+1h boundaries; allowing `.completed` without ATA.
+
+**Enforced by:** the pure state evaluator, current-leg selector, shared presentation payload, and lifecycle end/update handling. Tests: T-11, T-12, T-18, T-20, and T-21.
+
+**See also:** INV-014, INV-017, and `docs/ADR/ADR-004-flight-operational-state-model.md`.

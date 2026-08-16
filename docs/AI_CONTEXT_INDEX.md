@@ -18,6 +18,9 @@ This is the routing layer for AI sessions working on TripDataHub. It tells you w
 
 - `docs/INVARIANTS.md` — especially the import-file source-of-truth and cross-device rules
 - `docs/ADR/ADR-003-crewaccess-file-cloudkit-sync.md`
+- `docs/RCA_SEQUENTIAL_IMPORT_FAILURE.md` — sequential in-app Browser import popup leak RCA
+- `docs/RCA_V2_IMPORT_PREVIEW_STUCK.md` — bidirectional Preview dismissal and CrewAccess report-window teardown RCA
+- `docs/SWE_INSTRUCTION_POPUP_LIFECYCLE.md` — coordinator-owned popup teardown scope and T-26 through T-28
 - `TripDataHub/Services/AppGroupImportHandoff.swift`
 - `TripDataHub/Services/CrewAccessPDFImportService.swift`
 - `TripDataHubTests/AppGroupImportHandoffTests.swift`
@@ -30,6 +33,12 @@ This is the routing layer for AI sessions working on TripDataHub. It tells you w
 - `docs/BID_PERIODS.md`
 - `docs/MANUAL_EVENTS_LAYER_ARCHITECTURE.md`
 - `docs/ADR/ADR-002-utc-source-of-truth.md`
+
+## If Touching Flight State / Countdown / Live Activity / Notification
+
+- `docs/INVARIANTS.md` — especially INV-013 through INV-018
+- `docs/ADR/ADR-004-flight-operational-state-model.md`
+- `docs/BUILD_WEEK_TDH_RELIABILITY_SWE_INSTRUCTION.md` — phased scope, T-1 through T-25, and acceptance requirements
 
 ## If Touching Manual Operational / Personal Events
 
