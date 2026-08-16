@@ -351,13 +351,17 @@ struct PDFTripParser {
         return raw
     }
 
-    private static func addDays(_ days: Int, to dateStr: String) -> String {
+    static func addDays(_ days: Int, to dateStr: String) -> String {
         guard days >= 0, !dateStr.isEmpty else { return dateStr }
         let fmt = DateFormatter()
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        fmt.calendar = calendar
         fmt.dateFormat = "dd MMM yyyy"
         fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.timeZone = calendar.timeZone
         guard let base = fmt.date(from: dateStr),
-              let result = Calendar.current.date(byAdding: .day, value: days, to: base)
+              let result = calendar.date(byAdding: .day, value: days, to: base)
         else { return dateStr }
         return fmt.string(from: result)
     }

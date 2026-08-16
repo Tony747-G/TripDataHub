@@ -83,7 +83,7 @@ struct ScheduleTimelineRendererView: View {
             fontScale: fontScale,
             timeRangeText: timeRangeText(for: leg),
             dayDiff: dayShift(for: leg),
-            blockText: blockText(for: leg, nextLegByID: nextLegByID)
+            blockConnectionDisplay: blockConnectionDisplay(for: leg, nextLegByID: nextLegByID)
             // iconColor and onFriendMatchTap omitted: Friends Timeline uses defaults (no highlights)
         )
     }
@@ -160,14 +160,18 @@ struct ScheduleTimelineRendererView: View {
         return Calendar(identifier: .gregorian).dateComponents([.day], from: depDay, to: arrDay).day ?? 0
     }
 
-    private func blockText(for leg: TripLeg, nextLegByID: [UUID: TripLeg]) -> String {
-        let text = LegConnectionTextBuilder.blockAndConnectionText(for: leg, nextLegByID: nextLegByID)
-        // Layover cards are shown separately; trim the connection suffix to avoid duplication.
-        if shouldShowLayover(leg: leg, connectionMap: nextLegByID),
-           let slashRange = text.range(of: " / ") {
-            return String(text[..<slashRange.lowerBound])
-        }
-        return text
+    private func blockConnectionDisplay(
+        for leg: TripLeg,
+        nextLegByID: [UUID: TripLeg]
+    ) -> BlockConnectionDisplay {
+        let display = LegConnectionTextBuilder.blockAndConnectionDisplay(
+            for: leg,
+            nextLegByID: nextLegByID
+        )
+        // Layover cards are shown separately; suppress the duplicate connection line.
+        return shouldShowLayover(leg: leg, connectionMap: nextLegByID)
+            ? display.blockOnly
+            : display
     }
 
     private func isPastLeg(_ leg: TripLeg, nextLeg: TripLeg? = nil) -> Bool {

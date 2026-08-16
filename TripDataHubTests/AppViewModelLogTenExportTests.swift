@@ -274,6 +274,7 @@ private final class FakeNextReportNotificationService: NextReportNotificationSer
 
     func authorizationStatus() async -> UNAuthorizationStatus { status }
     func requestAuthorization() async throws -> Bool { status == .authorized }
+    func invalidateNextReportNotifications() async {}
     func reschedule(
         schedules: [PayPeriodSchedule],
         notify48h: Bool,

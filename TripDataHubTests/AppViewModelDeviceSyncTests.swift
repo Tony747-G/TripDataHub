@@ -1,4 +1,5 @@
 import CloudKit
+import CryptoKit
 import UIKit
 import UserNotifications
 import XCTest
@@ -573,6 +574,9 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         defer { try? removeCrewAccessImportDirectory() }
 
         let deviceService = FakeDeviceScheduleCloudKitService()
+        let syncStateDefaults = try XCTUnwrap(UserDefaults(
+            suiteName: "AppViewModelDeviceSyncTests.Import.\(UUID().uuidString)"
+        ))
         let vm = AppViewModel(
             syncService: NoopSyncService(),
             authService: NoopAuthService(),
@@ -583,7 +587,8 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             gemsVerificationCloudKitService: NoopGEMSVerificationService(),
             deviceScheduleCloudKitService: deviceService,
             crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService(),
-            keychainService: EmptyKeychainService()
+            keychainService: EmptyKeychainService(),
+            syncStateDefaults: syncStateDefaults
         )
 
         let sampleURL = repositoryRootURL()
@@ -941,6 +946,9 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             errors: [],
             rawExtractStats: RawExtractStats(pageCount: 1, characterCount: 1, lineCount: 1)
         ))
+        let syncStateDefaults = try XCTUnwrap(UserDefaults(
+            suiteName: "AppViewModelDeviceSyncTests.Import.\(UUID().uuidString)"
+        ))
         let vm = AppViewModel(
             syncService: NoopSyncService(),
             authService: NoopAuthService(),
@@ -951,7 +959,8 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             gemsVerificationCloudKitService: NoopGEMSVerificationService(),
             deviceScheduleCloudKitService: FakeDeviceScheduleCloudKitService(),
             crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService(),
-            keychainService: EmptyKeychainService()
+            keychainService: EmptyKeychainService(),
+            syncStateDefaults: syncStateDefaults
         )
         setVerifiedIdentity(on: vm)
         vm.crewAccessSchedules = [
@@ -978,6 +987,216 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         XCTAssertTrue(crewAccessImportJSONFilesContainTripID("B00001", tripInformationDate: "01Dec2025"))
         XCTAssertTrue(crewAccessImportJSONFilesContainTripID("B00001", tripInformationDate: "02Jun2026"))
         XCTAssertFalse(crewAccessImportJSONFilesContainTripID("B00001", tripInformationDate: "01Jun2026"))
+    }
+
+    func test_T5_samePDFAcrossDirectAndQueuedDeliveryProducesOnePreview() async throws {
+        let schedule = makeSchedule(
+            id: "CA26-06-T50001",
+            pairing: "T50001",
+            depUTC: "2026-06-02T08:00:00Z",
+            arrUTC: "2026-06-02T10:00:00Z"
+        )
+        let json = makeCrewAccessJSON(
+            tripId: "T50001",
+            tripInformationDate: "02Jun2026",
+            startUtc: "2026-06-02T08:00:00Z",
+            endUtc: "2026-06-02T10:00:00Z"
+        )
+        let suite = "AppViewModelDeviceSyncTests.T5.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        let coordinator = ExternalOpenImportCoordinator(dedupTTL: 30)
+        let ledger = ImportFingerprintLedger(defaults: defaults)
+        let vm = makeImportViewModel(
+            schedule: schedule,
+            json: json,
+            sourceFileName: "T50001.pdf",
+            syncStateDefaults: defaults,
+            externalOpenCoordinator: coordinator,
+            importFingerprintLedger: ledger
+        )
+
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("T5DuplicateDelivery-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let data = Data("%PDF-1.7 synthetic duplicate".utf8)
+        let secondURL = directory.appendingPathComponent("inbox-copy.pdf")
+        try data.write(to: secondURL)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 2_000)],
+            ofItemAtPath: secondURL.path
+        )
+
+        let accepted = await vm.importCrewAccessPDFData(data, sourceFileName: "browser-download.pdf")
+        XCTAssertTrue(accepted)
+        let previewID = try XCTUnwrap(vm.pendingImport?.id)
+
+        // External-open and App Group handoffs both enter this queued sink. The direct browser
+        // delivery above and this queued delivery must therefore consult the same content ledger.
+        vm.queueExternalOpenURL(secondURL)
+        for _ in 0..<500 {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(vm.pendingImport?.id, previewID)
+        XCTAssertFalse(vm.hasQueuedImport, "a content duplicate is consumed, not parked")
+
+        await vm.discardPendingImport()
+        for _ in 0..<200 { await Task.yield() }
+        XCTAssertNil(vm.pendingImport, "the duplicate must not reopen after the first preview closes")
+    }
+
+    func test_T26_distinctImportImmediatelyAfterConfirmedImportProducesOneNewPreview() async throws {
+        let dataA = Data("%PDF synthetic sequential A".utf8)
+        let dataB = Data("%PDF synthetic sequential B".utf8)
+        let context = try makeSequentialImportContext([
+            dataA: makeSequentialDraft(
+                tripID: "A26001",
+                tripInformationDate: "02Jun2026",
+                startUTC: "2026-06-02T08:00:00Z",
+                endUTC: "2026-06-02T10:00:00Z"
+            ),
+            dataB: makeSequentialDraft(
+                tripID: "B26001",
+                tripInformationDate: "06Jun2026",
+                startUTC: "2026-06-06T08:00:00Z",
+                endUTC: "2026-06-06T10:00:00Z"
+            )
+        ])
+        defer { cleanupSequentialImportContext(context) }
+
+        let acceptedA = await context.viewModel.importCrewAccessPDFData(dataA, sourceFileName: "A.pdf")
+        XCTAssertTrue(acceptedA)
+        let previewA = try XCTUnwrap(context.viewModel.pendingImport?.id)
+        let confirmedA = await context.viewModel.confirmPendingImport(expectedReplacementIDs: [])
+        XCTAssertTrue(confirmedA)
+        XCTAssertNil(context.viewModel.pendingImport)
+        XCTAssertEqual(context.ledger.suppressionState(for: fingerprint(dataA)), .consumed)
+
+        let acceptedB = await context.viewModel.importCrewAccessPDFData(dataB, sourceFileName: "B.pdf")
+        XCTAssertTrue(acceptedB)
+        let previewB = try XCTUnwrap(context.viewModel.pendingImport?.id)
+        XCTAssertNotEqual(previewB, previewA)
+        XCTAssertEqual(context.viewModel.pendingImport?.tripId, "B26001")
+        XCTAssertEqual(context.ledger.suppressionState(for: fingerprint(dataB)), .active)
+
+        let duplicateB = await context.viewModel.importCrewAccessPDFData(dataB, sourceFileName: "B-copy.pdf")
+        XCTAssertFalse(duplicateB)
+        XCTAssertEqual(context.viewModel.pendingImport?.id, previewB)
+        await context.viewModel.discardPendingImport()
+    }
+
+    func test_T27_threeDistinctImportsTransitionPreviewAndLedgerExactlyOnceInOneSession() async throws {
+        let inputs: [(data: Data, fileName: String, tripID: String, date: String, start: String, end: String)] = [
+            (Data("%PDF synthetic sequential A".utf8), "A.pdf", "A27001", "02Jun2026", "2026-06-02T08:00:00Z", "2026-06-02T10:00:00Z"),
+            (Data("%PDF synthetic sequential B".utf8), "B.pdf", "B27001", "06Jun2026", "2026-06-06T08:00:00Z", "2026-06-06T10:00:00Z"),
+            (Data("%PDF synthetic sequential C".utf8), "C.pdf", "C27001", "10Jun2026", "2026-06-10T08:00:00Z", "2026-06-10T10:00:00Z")
+        ]
+        let drafts = Dictionary(uniqueKeysWithValues: inputs.map { input in
+            (
+                input.data,
+                makeSequentialDraft(
+                    tripID: input.tripID,
+                    tripInformationDate: input.date,
+                    startUTC: input.start,
+                    endUTC: input.end
+                )
+            )
+        })
+        let context = try makeSequentialImportContext(drafts)
+        defer { cleanupSequentialImportContext(context) }
+        var previewIDs: Set<UUID> = []
+
+        for input in inputs {
+            let accepted = await context.viewModel.importCrewAccessPDFData(
+                input.data,
+                sourceFileName: input.fileName
+            )
+            XCTAssertTrue(accepted)
+            let previewID = try XCTUnwrap(context.viewModel.pendingImport?.id)
+            XCTAssertTrue(previewIDs.insert(previewID).inserted)
+            XCTAssertEqual(context.viewModel.pendingImport?.tripId, input.tripID)
+            XCTAssertEqual(context.ledger.suppressionState(for: fingerprint(input.data)), .active)
+
+            let duplicate = await context.viewModel.importCrewAccessPDFData(
+                input.data,
+                sourceFileName: "duplicate-\(input.fileName)"
+            )
+            XCTAssertFalse(duplicate)
+            XCTAssertEqual(context.viewModel.pendingImport?.id, previewID)
+
+            let confirmed = await context.viewModel.confirmPendingImport(expectedReplacementIDs: [])
+            XCTAssertTrue(confirmed)
+            XCTAssertNil(context.viewModel.pendingImport)
+            XCTAssertEqual(context.ledger.suppressionState(for: fingerprint(input.data)), .consumed)
+        }
+
+        XCTAssertEqual(previewIDs.count, 3)
+        XCTAssertEqual(
+            Set(context.viewModel.crewAccessSchedules.flatMap { $0.legs.map(\.pairing) }),
+            Set(inputs.map(\.tripID))
+        )
+    }
+
+    func test_distinctPDFIsParkedFIFOWhilePreviewIsActive() async throws {
+        let schedule = makeSchedule(
+            id: "CA26-06-Q00001",
+            pairing: "Q00001",
+            depUTC: "2026-06-02T08:00:00Z",
+            arrUTC: "2026-06-02T10:00:00Z"
+        )
+        let json = makeCrewAccessJSON(
+            tripId: "Q00001",
+            tripInformationDate: "02Jun2026",
+            startUtc: "2026-06-02T08:00:00Z",
+            endUtc: "2026-06-02T10:00:00Z"
+        )
+        let suite = "AppViewModelDeviceSyncTests.Queue.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        let vm = makeImportViewModel(
+            schedule: schedule,
+            json: json,
+            sourceFileName: "Q00001.pdf",
+            syncStateDefaults: defaults,
+            externalOpenCoordinator: ExternalOpenImportCoordinator(dedupTTL: 30),
+            importFingerprintLedger: ImportFingerprintLedger(defaults: defaults)
+        )
+
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DistinctImportQueue-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let firstURL = directory.appendingPathComponent("first.pdf")
+        let secondURL = directory.appendingPathComponent("second.pdf")
+        try Data("%PDF-1.7 first".utf8).write(to: firstURL)
+        try Data("%PDF-1.7 second".utf8).write(to: secondURL)
+
+        vm.queueExternalOpenURL(firstURL)
+        for _ in 0..<500 {
+            if vm.pendingImport != nil { break }
+            await Task.yield()
+        }
+        let firstPreviewID = try XCTUnwrap(vm.pendingImport?.id)
+
+        vm.queueExternalOpenURL(secondURL)
+        for _ in 0..<500 {
+            if vm.hasQueuedImport { break }
+            await Task.yield()
+        }
+        XCTAssertTrue(vm.hasQueuedImport)
+        XCTAssertEqual(vm.pendingImport?.id, firstPreviewID)
+
+        await vm.discardPendingImport()
+        for _ in 0..<500 {
+            if let id = vm.pendingImport?.id, id != firstPreviewID { break }
+            await Task.yield()
+        }
+
+        XCTAssertNotNil(vm.pendingImport)
+        XCTAssertNotEqual(vm.pendingImport?.id, firstPreviewID)
+        await vm.discardPendingImport()
     }
 
     // MARK: - Helpers
@@ -1009,7 +1228,11 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
     private func makeImportViewModel(
         schedule: PayPeriodSchedule,
         json: CrewAccessTripJSON,
-        sourceFileName: String
+        sourceFileName: String,
+        syncStateDefaults: UserDefaults? = nil,
+        externalOpenCoordinator: ExternalOpenImportCoordinator = .shared,
+        importFingerprintLedger: ImportFingerprintLedger? = nil,
+        replacementDerivedStateInvalidator: @escaping @Sendable () async throws -> Void = {}
     ) -> AppViewModel {
         let importService = FixedImportService(draft: CrewAccessImportDraft(
             sourceFileName: sourceFileName,
@@ -1021,6 +1244,9 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             errors: [],
             rawExtractStats: RawExtractStats(pageCount: 1, characterCount: 1, lineCount: 1)
         ))
+        let resolvedSyncStateDefaults = syncStateDefaults ?? UserDefaults(
+            suiteName: "AppViewModelDeviceSyncTests.Import.\(UUID().uuidString)"
+        )!
         return AppViewModel(
             syncService: NoopSyncService(),
             authService: NoopAuthService(),
@@ -1031,8 +1257,96 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             gemsVerificationCloudKitService: NoopGEMSVerificationService(),
             deviceScheduleCloudKitService: FakeDeviceScheduleCloudKitService(),
             crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService(),
-            keychainService: EmptyKeychainService()
+            keychainService: EmptyKeychainService(),
+            syncStateDefaults: resolvedSyncStateDefaults,
+            externalOpenCoordinator: externalOpenCoordinator,
+            importFingerprintLedger: importFingerprintLedger,
+            replacementDerivedStateInvalidator: replacementDerivedStateInvalidator
         )
+    }
+
+    private func makeSequentialImportContext(
+        _ draftsByData: [Data: CrewAccessImportDraft]
+    ) throws -> SequentialImportContext {
+        let suiteName = "AppViewModelDeviceSyncTests.Sequential.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        let ledger = ImportFingerprintLedger(defaults: defaults)
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SequentialCrewAccessImports-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let viewModel = AppViewModel(
+            syncService: NoopSyncService(),
+            authService: NoopAuthService(),
+            cacheService: InMemoryCacheService(),
+            notificationService: NoopNotificationService(),
+            crewAccessImportService: RoutedImportService(draftsByData: draftsByData),
+            friendScheduleCloudKitService: NoopFriendCloudKitService(),
+            gemsVerificationCloudKitService: NoopGEMSVerificationService(),
+            deviceScheduleCloudKitService: FakeDeviceScheduleCloudKitService(),
+            crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService(),
+            keychainService: EmptyKeychainService(),
+            syncStateDefaults: defaults,
+            externalOpenCoordinator: ExternalOpenImportCoordinator(dedupTTL: 30),
+            importFingerprintLedger: ledger,
+            replacementDerivedStateInvalidator: {},
+            crewAccessImportsDirectory: directory
+        )
+        setVerifiedIdentity(on: viewModel)
+        return SequentialImportContext(
+            viewModel: viewModel,
+            ledger: ledger,
+            defaults: defaults,
+            defaultsSuiteName: suiteName,
+            importsDirectory: directory
+        )
+    }
+
+    private func cleanupSequentialImportContext(_ context: SequentialImportContext) {
+        try? FileManager.default.removeItem(at: context.importsDirectory)
+        context.defaults.removePersistentDomain(forName: context.defaultsSuiteName)
+    }
+
+    private func makeSequentialDraft(
+        tripID: String,
+        tripInformationDate: String,
+        startUTC: String,
+        endUTC: String
+    ) -> CrewAccessImportDraft {
+        let schedule = makeSchedule(
+            id: "CA26-06-\(tripID)",
+            pairing: tripID,
+            depUTC: startUTC,
+            arrUTC: endUTC
+        )
+        let json = makeCrewAccessJSON(
+            tripId: tripID,
+            tripInformationDate: tripInformationDate,
+            startUtc: startUTC,
+            endUtc: endUTC
+        )
+        return CrewAccessImportDraft(
+            sourceFileName: "\(tripID).pdf",
+            tripId: tripID,
+            tripDate: tripInformationDate,
+            parsedSchedule: schedule,
+            jsonPayload: json,
+            warnings: [],
+            errors: [],
+            rawExtractStats: RawExtractStats(pageCount: 1, characterCount: 1, lineCount: 1)
+        )
+    }
+
+    private func fingerprint(_ data: Data) -> String {
+        "sha256:" + SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private struct SequentialImportContext {
+        let viewModel: AppViewModel
+        let ledger: ImportFingerprintLedger
+        let defaults: UserDefaults
+        let defaultsSuiteName: String
+        let importsDirectory: URL
     }
 
     private func setVerifiedIdentity(on vm: AppViewModel, gemsID: String = "7793942") {
@@ -1521,6 +1835,7 @@ private final class InMemoryCacheService: ScheduleCacheServiceProtocol {
 private struct NoopNotificationService: NextReportNotificationServiceProtocol {
     func authorizationStatus() async -> UNAuthorizationStatus { .notDetermined }
     func requestAuthorization() async throws -> Bool { false }
+    func invalidateNextReportNotifications() async {}
     func reschedule(
         schedules: [PayPeriodSchedule],
         notify48h: Bool,
@@ -1544,6 +1859,7 @@ private actor RecordingNotificationService: NextReportNotificationServiceProtoco
 
     func authorizationStatus() async -> UNAuthorizationStatus { .authorized }
     func requestAuthorization() async throws -> Bool { true }
+    func invalidateNextReportNotifications() async {}
 
     func reschedule(
         schedules: [PayPeriodSchedule],
@@ -1576,6 +1892,30 @@ private struct FixedImportService: CrewAccessPDFImportServiceProtocol {
 
     func analyzeTrip(pdfData: Data, sourceFileName: String?) -> CrewAccessImportDraft {
         draft
+    }
+}
+
+private struct RoutedImportService: CrewAccessPDFImportServiceProtocol {
+    let draftsByData: [Data: CrewAccessImportDraft]
+
+    func analyzeTrip(pdfData: Data, sourceFileName: String?) -> CrewAccessImportDraft {
+        guard let draft = draftsByData[pdfData] else {
+            return CrewAccessImportDraft(
+                sourceFileName: sourceFileName,
+                tripId: "",
+                tripDate: "",
+                parsedSchedule: nil,
+                jsonPayload: nil,
+                warnings: [],
+                errors: [ImportErrorItem(
+                    code: .schemaMismatch,
+                    message: "Unexpected synthetic PDF payload",
+                    remediation: "Add the payload to the routed test fixture."
+                )],
+                rawExtractStats: RawExtractStats(pageCount: 0, characterCount: 0, lineCount: 0)
+            )
+        }
+        return draft
     }
 }
 

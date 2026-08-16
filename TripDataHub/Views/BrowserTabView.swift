@@ -6,22 +6,19 @@
 
 import SwiftUI
 import WebKit
-import SafariServices
 
 struct BrowserTabView: View {
 
     @EnvironmentObject private var appViewModel: AppViewModel
     @State private var browserViewModel = BrowserViewModel()
     @State private var showingImportPreview = false
-    @State private var showingSafariView = false
     @State private var browserResetID = UUID()
     @State private var isResettingBrowser = false
     @State private var showingResetConfirmation = false
 
     /// When true, this view presents ImportPreviewView itself when pendingImport
-    /// is set. iPad workspace uses this because BrowserTabView is presented as a
-    /// sheet there — a separate sheet on the workspace would conflict. iPhone
-    /// uses the tab-based RootTabView which presents the preview at the root.
+    /// is set. Both the iPhone and iPad browser flows present BrowserTabView as a
+    /// sheet, so both callers pass true to avoid competing root-level sheets.
     let presentsImportPreview: Bool
 
     init(presentsImportPreview: Bool = false) {
@@ -39,10 +36,9 @@ struct BrowserTabView: View {
                 // WebView 本体
                 BrowserWebView(url: portalURL, viewModel: browserViewModel)
                     .id(browserResetID)
-                    .ignoresSafeArea(edges: .bottom)
 
                 // ステータスバー
-                statusBar
+                BrowserStatusBar(viewModel: browserViewModel)
             }
             .navigationTitle("Browser")
             .navigationBarTitleDisplayMode(.inline)
@@ -59,11 +55,11 @@ struct BrowserTabView: View {
             // Zscaler Print ポップアップシート
             .sheet(isPresented: Binding(
                 get: { browserViewModel.popupWebView != nil },
-                set: { if !$0 { browserViewModel.popupWebView = nil } }
+                set: { if !$0 { browserViewModel.teardownPopups() } }
             )) {
                 if let popupWV = browserViewModel.popupWebView {
-                    BrowserPopupSheet(webView: popupWV) {
-                        browserViewModel.popupWebView = nil
+                    BrowserPopupSheet(webView: popupWV, viewModel: browserViewModel) {
+                        browserViewModel.teardownPopups()
                     }
                 }
             }
@@ -73,29 +69,22 @@ struct BrowserTabView: View {
             browserViewModel.appViewModel = appViewModel
         }
         .onChange(of: appViewModel.pendingImport?.id) { _, newValue in
-            if presentsImportPreview, newValue != nil {
-                showingImportPreview = true
-            }
+            showingImportPreview = ImportPreviewPresentationPolicy.browserPreviewIsPresented(
+                pendingImportID: newValue,
+                presentsImportPreview: presentsImportPreview
+            )
         }
             .sheet(isPresented: $showingImportPreview) {
             NavigationStack { ImportPreviewView() }
                 .environmentObject(appViewModel)
         }
-            .sheet(isPresented: $showingSafariView) {
-            SafariView(url: portalURL)
-                .ignoresSafeArea()
-        }
-        .confirmationDialog(
-            "Reset Browser?",
-            isPresented: $showingResetConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Reset Browser", role: .destructive) {
+        .alert("Reset Browser?", isPresented: $showingResetConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset", role: .destructive) {
                 resetBrowser()
             }
-            Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This clears the in-app browser cookies and cache. You will need to sign in to CrewAccess again.")
+            Text("This will clear the in-app browser session and require you to sign in again.")
         }
     }
 
@@ -121,18 +110,6 @@ struct BrowserTabView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(Color(.systemGray6))
-    }
-
-    // MARK: - ステータスバー
-
-    private var statusBar: some View {
-        Text(browserViewModel.statusMessage)
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
-            .background(Color(.systemGray6))
     }
 
     // MARK: - ツールバー
@@ -161,36 +138,20 @@ struct BrowserTabView: View {
             }
         }
         ToolbarItem(placement: .navigationBarTrailing) {
-            Menu {
-                Button {
-                    showingSafariView = true
-                    browserViewModel.statusMessage = "Opened CrewAccess in Safari view. Use Zscaler Print, then share the PDF to TripData."
-                } label: {
-                    Label("Open Safari View", systemImage: "safari")
-                }
-
-                Button(role: .destructive) {
-                    showingResetConfirmation = true
-                } label: {
-                    Label("Reset Browser", systemImage: "eraser")
-                }
-                .disabled(isResettingBrowser)
+            Button(role: .destructive) {
+                showingResetConfirmation = true
             } label: {
-                Image(systemName: "ellipsis.circle")
+                Image(systemName: "eraser.fill")
+                    .foregroundStyle(.primary)
             }
-            .accessibilityLabel("Browser Options")
+            .disabled(isResettingBrowser)
+            .accessibilityLabel("Reset Browser")
         }
     }
 
     private func resetBrowser() {
         isResettingBrowser = true
-        browserViewModel.webView?.stopLoading()
-        browserViewModel.popupWebView = nil
-        browserViewModel.webView = nil
-        browserViewModel.currentURL = ""
-        browserViewModel.isLoading = true
-        browserViewModel.errorMessage = nil
-        browserViewModel.statusMessage = "Resetting browser..."
+        browserViewModel.prepareForBrowserReset()
 
         let dataTypes = WKWebsiteDataStore.allWebsiteDataTypes()
         WKWebsiteDataStore.default().removeData(ofTypes: dataTypes, modifiedSince: .distantPast) {
@@ -204,16 +165,6 @@ struct BrowserTabView: View {
     }
 }
 
-private struct SafariView: UIViewControllerRepresentable {
-    let url: URL
-
-    func makeUIViewController(context: Context) -> SFSafariViewController {
-        SFSafariViewController(url: url)
-    }
-
-    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
-}
-
 // MARK: - 既存 WKWebView を SwiftUI にラップ
 
 private struct ExistingWebViewWrapper: UIViewRepresentable {
@@ -222,23 +173,68 @@ private struct ExistingWebViewWrapper: UIViewRepresentable {
     func updateUIView(_ webView: WKWebView, context: Context) {}
 }
 
+struct BrowserStatusBar: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let viewModel: BrowserViewModel
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: viewModel.statusIsError ? "exclamationmark.circle.fill" : "circle.fill")
+                .font(.system(size: 8, weight: .semibold))
+            Text(viewModel.statusMessage)
+                .font(.footnote)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(statusColor)
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, minHeight: 30, maxHeight: 30, alignment: .leading)
+        .background(.bar)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Browser status: \(viewModel.statusMessage)")
+    }
+
+    private var statusColor: Color {
+        if viewModel.statusIsError {
+            return .red
+        }
+        return colorScheme == .dark ? .white : .secondary
+    }
+}
+
 // MARK: - Zscaler Print ポップアップシート
 
 struct BrowserPopupSheet: View {
     let webView: WKWebView
+    let viewModel: BrowserViewModel
     let onDismiss: () -> Void
 
     var body: some View {
         NavigationStack {
-            ExistingWebViewWrapper(webView: webView)
-                .ignoresSafeArea(edges: .bottom)
-                .navigationTitle("Print Preview")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Close") { onDismiss() }
-                    }
+            VStack(spacing: 0) {
+                ExistingWebViewWrapper(webView: webView)
+                BrowserStatusBar(viewModel: viewModel)
+            }
+            .navigationTitle("Print Preview")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { onDismiss() }
                 }
+                #if DEBUG
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        viewModel.sendDiagnosticFocusPulse()
+                    } label: {
+                        Image(systemName: "scope")
+                    }
+                    .accessibilityLabel("Diagnostic Focus Pulse")
+                    .help("Send one diagnostic WebView focus pulse")
+                }
+                #endif
+            }
         }
     }
 }

@@ -140,18 +140,13 @@ actor ExternalOpenImportCoordinator {
         }
     }
 
-    func requeueFront(_ item: QueueItem) {
-        guard !queuedKeys.contains(item.key), !inflightKeys.contains(item.key) else { return }
+    /// Returns a distinct import to the front without classifying the wait as a read/import
+    /// failure. The item remains accepted and FIFO ordering is preserved while a preview is open.
+    func parkFront(_ item: QueueItem) {
+        inflightKeys.remove(item.key)
+        guard !queuedKeys.contains(item.key) else { return }
         queuedKeys.insert(item.key)
         queue.insert(item, at: 0)
-    }
-
-    /// Clears all dedup history so the same file can be re-shared immediately
-    /// after an import is confirmed or discarded.
-    /// `inflightKeys` is intentionally not reset here; active jobs are released by `finish`.
-    func reset() {
-        recentAcceptedKeys.removeAll()
-        recentProcessedKeys.removeAll()
     }
 
     private func pruneRecentAccepted(now: Date) {
@@ -188,15 +183,11 @@ final class AppViewModel: ObservableObject {
     static let openTimeDemoModeKey = "opentime_demo_mode_enabled_v1"
     static let lastTripSyncCompletedAtKey = "crewaccess_trip_sync_completed_at_v1"
 
-    // MARK: - Import dedup (4-layer architecture)
-    // Layer 1: ExternalOpenLaunchGate (BidProScheduleApp.swift) — catches iOS triple-delivery at onOpenURL
-    // Layer 2: ExternalOpenImportCoordinator — queue management, single source of truth
-    // Layer 3: importInProgress (instance var below) — primary execution gate, prevents re-entrancy
-    // Layer 4: UserDefaults fingerprint — cross-launch content dedup only
-    private static let importMethodDedupLock = NSLock()
-    private static let persistentFingerprintKey = "import_dedup_fingerprint_v1"
-    private static let persistentFingerprintTSKey = "import_dedup_fingerprint_ts_v1"
-    private static let persistentFingerprintTTL: TimeInterval = 30
+    // MARK: - Import delivery gates
+    // Layer 1: URL/file-name burst signatures — cheap delivery filters only
+    // Layer 2: ExternalOpenImportCoordinator — FIFO queue and per-delivery execution state
+    // Layer 3: ImportFingerprintLedger — authoritative content identity across every delivery path
+    // Layer 4: importInProgress — synchronous re-entrancy protection around parsing and preview
     /// Primary execution gate. Set before any system call; cleared on confirm/discard.
     private var importInProgress = false
     private var isProfileCloudKitSyncing = false
@@ -285,13 +276,21 @@ final class AppViewModel: ObservableObject {
     private let keychainService: KeychainServiceProtocol
     private let manualEventStore: ManualEventStoring
     private let externalOpenCoordinator: ExternalOpenImportCoordinator
-    private let flightCountdownCoordinator = FlightCountdownCoordinator()
+    private let importFingerprintLedger: ImportFingerprintLedger
+    private let replacementDerivedStateInvalidator: (@Sendable () async throws -> Void)?
+    private let replacementInvalidationTimeoutNanoseconds: UInt64
+    private let importCommitVerificationFaultInjector: (@MainActor @Sendable (URL) throws -> Void)?
+    private let flightCountdownCoordinator: FlightCountdownCoordinator
+    private var flightCountdownBoundaryTask: Task<Void, Never>?
     private var sessionCookies: [HTTPCookie] = []
     private var lastAutoFetchAt: Date?
     private var externalConsumerTask: Task<Void, Never>?
+    private var externalConsumerRestartRequested = false
     private var pendingProfileUploadTask: Task<Void, Never>?
-    private var recentlyConsumedHandoffFileNames: Set<String> = []
+    private static let handoffFileNameBurstWindow: TimeInterval = 5
+    private var recentlyConsumedHandoffFileNames: [String: Date] = [:]
     private var isConsumingAppGroupHandoff = false
+    private var pendingImportFingerprint: String?
     /// Import timestamps backing the LogTen export backlog. Readable internally so tests can
     /// assert it survives a rolled-back Timeline rebuild; only this type may mutate it.
     private(set) var crewAccessLegImportReferenceTimes: [String: Date] = [:]
@@ -357,6 +356,7 @@ final class AppViewModel: ObservableObject {
     /// apply tombstones or reconcile, because every one of those steps can delete the JSON the
     /// transaction just wrote and leave the Timeline empty.
     private var crewAccessImportTransactionDepth = 0
+    private(set) var crewAccessImportTransactionStartCount = 0
 
     /// Sync reasons that arrived while an import transaction was open. Coalesced into one run so a
     /// deferred request is never lost and never replayed N times.
@@ -489,6 +489,12 @@ final class AppViewModel: ObservableObject {
         keychainService: KeychainServiceProtocol = KeychainService(),
         manualEventStore: ManualEventStoring = ManualEventStore(),
         syncStateDefaults: UserDefaults = .standard,
+        externalOpenCoordinator: ExternalOpenImportCoordinator = .shared,
+        importFingerprintLedger: ImportFingerprintLedger? = nil,
+        replacementDerivedStateInvalidator: (@Sendable () async throws -> Void)? = nil,
+        replacementInvalidationTimeoutNanoseconds: UInt64 = 2_000_000_000,
+        importCommitVerificationFaultInjector: (@MainActor @Sendable (URL) throws -> Void)? = nil,
+        flightCountdownCoordinator: FlightCountdownCoordinator = FlightCountdownCoordinator(),
         crewAccessImportsDirectory: URL? = AppViewModel.defaultCrewAccessImportsDirectory(),
         retentionReferenceDate: @escaping @Sendable () -> Date = { Date() },
         diagnostics: SyncDiagnosticsLog? = nil
@@ -509,6 +515,13 @@ final class AppViewModel: ObservableObject {
         self.keychainService = keychainService
         self.manualEventStore = manualEventStore
         self.syncStateDefaults = syncStateDefaults
+        self.externalOpenCoordinator = externalOpenCoordinator
+        self.importFingerprintLedger = importFingerprintLedger
+            ?? ImportFingerprintLedger(defaults: syncStateDefaults)
+        self.replacementDerivedStateInvalidator = replacementDerivedStateInvalidator
+        self.replacementInvalidationTimeoutNanoseconds = replacementInvalidationTimeoutNanoseconds
+        self.importCommitVerificationFaultInjector = importCommitVerificationFaultInjector
+        self.flightCountdownCoordinator = flightCountdownCoordinator
         self.crewAccessImportsDirectory = crewAccessImportsDirectory
         self.retentionReferenceDate = retentionReferenceDate
         // The production Settings surface no longer exposes the sample OpenTime toggle. Clear
@@ -520,7 +533,6 @@ final class AppViewModel: ObservableObject {
         }
         let resolvedDiagnostics = diagnostics ?? SyncDiagnosticsLog.shared
         self.diagnostics = resolvedDiagnostics
-        self.externalOpenCoordinator = ExternalOpenImportCoordinator.shared
         let loadedAdminPolicy = Self.loadAdminPolicy()
         self.adminPolicy = loadedAdminPolicy
         self.adminPolicyFingerprint = Self.fingerprint(for: loadedAdminPolicy)
@@ -895,16 +907,15 @@ final class AppViewModel: ObservableObject {
                 Self.readPendingAppGroupHandoffs()
             }).value
 
+            let handoffNow = Date()
+            recentlyConsumedHandoffFileNames = recentlyConsumedHandoffFileNames.filter {
+                handoffNow.timeIntervalSince($0.value) < Self.handoffFileNameBurstWindow
+            }
+
             guard !handoffs.isEmpty else {
-                // Nothing left to consume and nothing awaiting review: previously
-                // queued PDFs have been imported (and deleted by cleanup), so the
-                // session dedup set can reset instead of growing forever.
-                if pendingImport == nil {
-                    recentlyConsumedHandoffFileNames.removeAll()
-                }
                 // No pending share: opportunistically clear PDFs that were never
                 // consumed so the App Group container does not grow unbounded.
-                let protected = recentlyConsumedHandoffFileNames
+                let protected = Set(recentlyConsumedHandoffFileNames.keys)
                 await Task.detached(priority: .utility, operation: {
                     Self.sweepStaleAppGroupImportFilesBestEffort(excludingFileNames: protected)
                 }).value
@@ -926,8 +937,8 @@ final class AppViewModel: ObservableObject {
                     }
                 }
 
-                if recentlyConsumedHandoffFileNames.contains(handoff.fileName) {
-                    logger.info("[Import] appGroup handoff skipped (already consumed) file=\(handoff.fileName, privacy: .private)")
+                if recentlyConsumedHandoffFileNames[handoff.fileName] != nil {
+                    logger.info("[Import] appGroup handoff skipped (file-name burst duplicate) file=\(handoff.fileName, privacy: .private)")
                     continue
                 }
 
@@ -941,13 +952,13 @@ final class AppViewModel: ObservableObject {
                 }
 
                 logger.info("[Import] appGroup handoff queued file=\(handoff.fileName, privacy: .private)")
-                recentlyConsumedHandoffFileNames.insert(handoff.fileName)
+                recentlyConsumedHandoffFileNames[handoff.fileName] = handoffNow
                 queueExternalOpenURL(handoff.fileURL)
             }
 
             // Never sweep a PDF that was queued for import (this pass or earlier in
             // the session) — the import pipeline reads it asynchronously.
-            let protected = recentlyConsumedHandoffFileNames
+            let protected = Set(recentlyConsumedHandoffFileNames.keys)
             await Task.detached(priority: .utility, operation: {
                 Self.sweepStaleAppGroupImportFilesBestEffort(excludingFileNames: protected)
             }).value
@@ -1863,7 +1874,11 @@ final class AppViewModel: ObservableObject {
     /// CloudKit. Exposed for tests and for the sync entry points that must stand down.
     var isCrewAccessImportTransactionActive: Bool { crewAccessImportTransactionDepth > 0 }
 
+    /// Read-only lifecycle state used by import regression tests and diagnostics.
+    var isCrewAccessImportInProgress: Bool { importInProgress }
+
     private func beginCrewAccessImportTransaction() {
+        crewAccessImportTransactionStartCount += 1
         crewAccessImportTransactionDepth += 1
     }
 
@@ -1885,6 +1900,65 @@ final class AppViewModel: ObservableObject {
             deferredCrewAccessSyncReasons.append(reason)
         }
         logNonFatal("CrewAccess sync deferred by in-flight import transaction: \(reason)")
+    }
+
+    /// The local source is already durable and verified when this runs. Timeout or failure must
+    /// never roll back the import or leave the CrewAccess sync transaction blocked.
+    private enum ReplacementInvalidationOutcome {
+        case completed
+        case failed(String)
+        case timedOut
+    }
+
+    private func runReplacementDerivedStateInvalidationBestEffort() async {
+        let timeoutNanoseconds = replacementInvalidationTimeoutNanoseconds
+        let (stream, continuation) = AsyncStream<ReplacementInvalidationOutcome>.makeStream()
+
+        let invalidationTask = Task { [weak self] in
+            do {
+                guard let self else { return }
+                if let invalidator = self.replacementDerivedStateInvalidator {
+                    try await invalidator()
+                } else {
+                    await self.invalidateReplacementDerivedState()
+                }
+                continuation.yield(.completed)
+            } catch {
+                continuation.yield(.failed(error.localizedDescription))
+            }
+        }
+        let timeoutTask = Task {
+            try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+            guard !Task.isCancelled else { return }
+            continuation.yield(.timedOut)
+        }
+
+        var iterator = stream.makeAsyncIterator()
+        let outcome = await iterator.next() ?? .timedOut
+        invalidationTask.cancel()
+        timeoutTask.cancel()
+        continuation.finish()
+
+        switch outcome {
+        case .completed:
+            logger.info("[Import] replacement derived-state seam completed")
+        case .failed(let description):
+            logNonFatal("Replacement derived-state invalidation failed; Phase 3 reconcile will retry: \(description)")
+        case .timedOut:
+            logNonFatal("Replacement derived-state invalidation timed out; Phase 3 reconcile will retry")
+        }
+    }
+
+    private func invalidateReplacementDerivedState() async {
+        await notificationService.invalidateNextReportNotifications()
+        let nowUTC = Date()
+        let output = nextFlightCountdownOutput(nowUTC: nowUTC)
+        await flightCountdownCoordinator.refresh(
+            output: output,
+            mode: .destructiveRebuild,
+            nowUTC: nowUTC
+        )
+        scheduleFlightCountdownBoundary(for: output, after: nowUTC)
     }
 
     /// Trip key for a CrewAccess trip id and information date, using this device's domicile.
@@ -2839,19 +2913,23 @@ final class AppViewModel: ObservableObject {
 
     @discardableResult
     func importCrewAccessPDFData(_ data: Data, sourceFileName: String?) async -> Bool {
-        guard !importInProgress else { return false }
-        importInProgress = true
+        let fingerprint = importPayloadFingerprint(data: data)
 
-        let fingerprint = importPayloadFingerprint(data: data, sourceFileName: sourceFileName)
-
-        guard pendingImport == nil else {
-            logger.info("[Import] importCrewAccessPDFData skipped (pendingImport already set) file=\(sourceFileName ?? "unknown", privacy: .private)")
-            importInProgress = false
+        if importInProgress || pendingImport != nil {
+            let state = importFingerprintLedger.suppressionState(for: fingerprint)
+            if fingerprint == pendingImportFingerprint || state != nil {
+                logger.info("[Import] direct delivery suppressed by content ledger state=\(state?.rawValue ?? "active", privacy: .public) file=\(sourceFileName ?? "unknown", privacy: .private)")
+            } else {
+                logger.info("[Import] direct delivery rejected while another preview is active file=\(sourceFileName ?? "unknown", privacy: .private)")
+                crewAccessImportMessage = "Another import is waiting for review. Confirm or dismiss the current import first."
+            }
             return false
         }
+        importInProgress = true
 
-        guard Self.claimPersistentFingerprint(fingerprint) else {
-            logger.info("[Import] importCrewAccessPDFData skipped (cross-launch dedup) file=\(sourceFileName ?? "unknown", privacy: .private)")
+        let claimResult = importFingerprintLedger.claim(fingerprint)
+        guard claimResult == .accepted else {
+            logger.info("[Import] importCrewAccessPDFData suppressed by content ledger state=\(String(describing: claimResult), privacy: .public) file=\(sourceFileName ?? "unknown", privacy: .private)")
             importInProgress = false
             return false
         }
@@ -2875,6 +2953,7 @@ final class AppViewModel: ObservableObject {
             createdAt: Date(),
             rawExtractStats: draft.rawExtractStats
         )
+        pendingImportFingerprint = fingerprint
         let pendingImportID = pendingImport?.id.uuidString ?? "nil"
         logger.info("[Import] pendingImport set id=\(pendingImportID, privacy: .public) tripId=\(draft.tripId, privacy: .private) errors=\(draft.errors.count, privacy: .public) warnings=\(draft.warnings.count, privacy: .public)")
 
@@ -2903,6 +2982,9 @@ final class AppViewModel: ObservableObject {
 
     private func startExternalConsumerIfNeeded() {
         guard externalConsumerTask == nil else {
+            if pendingImport == nil {
+                externalConsumerRestartRequested = true
+            }
             logger.info("[Import] consumeExternalOpenURL skipped (already running)")
             return
         }
@@ -2911,6 +2993,10 @@ final class AppViewModel: ObservableObject {
                 // Always clear the task reference so startExternalConsumerIfNeeded
                 // can create a new one, even if this Task exits via cancellation.
                 self?.externalConsumerTask = nil
+                if self?.externalConsumerRestartRequested == true {
+                    self?.externalConsumerRestartRequested = false
+                    self?.startExternalConsumerIfNeeded()
+                }
             }
             guard let self else { return }
             await self.externalConsumerLoop()
@@ -2937,17 +3023,6 @@ final class AppViewModel: ObservableObject {
             var isSuccess = false
             logger.info("[Import] consumeExternalOpenURL begin key=\(key, privacy: .private)")
 
-            if pendingImport != nil {
-                logger.info("[Import] consumeExternalOpenURL skipped (pending import exists)")
-                crewAccessImportMessage = "Another import is waiting for review. Confirm or dismiss the current import first."
-                hasQueuedImport = true
-                await externalOpenCoordinator.finish(key: key, success: false)
-                await externalOpenCoordinator.requeueFront(nextItem)
-                pendingExternalOpenURL = nil
-                logger.info("[Import] consumeExternalOpenURL done key=\(key, privacy: .private) ok=\(isSuccess, privacy: .public)")
-                break
-            }
-
             guard url.isFileURL else {
                 crewAccessImportMessage = "Import failed: shared item is not a file URL."
                 await externalOpenCoordinator.finish(key: key, success: false)
@@ -2970,6 +3045,40 @@ final class AppViewModel: ObservableObject {
                     logger.info("[Import] consumeExternalOpenURL done key=\(key, privacy: .private) ok=false (not PDF)")
                     continue
                 }
+
+                let fingerprint = importPayloadFingerprint(data: data)
+
+                if pendingImport != nil {
+                    let suppressionState = importFingerprintLedger.suppressionState(for: fingerprint)
+                    if fingerprint == pendingImportFingerprint || suppressionState != nil {
+                        logger.info("[Import] duplicate delivery consumed state=\(suppressionState?.rawValue ?? "active", privacy: .public) fingerprint=\(SyncDiagnosticsLog.shortFingerprint(fingerprint), privacy: .public)")
+                        cleanupImportedExternalFileBestEffort(at: url)
+                        isSuccess = true
+                        await externalOpenCoordinator.finish(key: key, success: true)
+                        pendingExternalOpenURL = nil
+                        logger.info("[Import] consumeExternalOpenURL done key=\(key, privacy: .private) ok=true (content duplicate)")
+                        continue
+                    }
+
+                    logger.info("[Import] distinct delivery parked while preview is active fingerprint=\(SyncDiagnosticsLog.shortFingerprint(fingerprint), privacy: .public)")
+                    crewAccessImportMessage = "Another import is queued. Confirm or dismiss the current import first."
+                    hasQueuedImport = true
+                    await externalOpenCoordinator.parkFront(nextItem)
+                    pendingExternalOpenURL = nil
+                    logger.info("[Import] consumeExternalOpenURL parked key=\(key, privacy: .private)")
+                    break
+                }
+
+                if let suppressionState = importFingerprintLedger.suppressionState(for: fingerprint) {
+                    logger.info("[Import] recent delivery consumed state=\(suppressionState.rawValue, privacy: .public) fingerprint=\(SyncDiagnosticsLog.shortFingerprint(fingerprint), privacy: .public)")
+                    cleanupImportedExternalFileBestEffort(at: url)
+                    isSuccess = true
+                    await externalOpenCoordinator.finish(key: key, success: true)
+                    pendingExternalOpenURL = nil
+                    logger.info("[Import] consumeExternalOpenURL done key=\(key, privacy: .private) ok=true (recent content)")
+                    continue
+                }
+
                 let importAccepted = await importCrewAccessPDFData(data, sourceFileName: url.lastPathComponent)
                 if pendingImport != nil {
                     cleanupImportedExternalFileBestEffort(at: url)
@@ -2987,18 +3096,33 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func confirmPendingImport() async {
+    @discardableResult
+    func confirmPendingImport(expectedReplacementIDs: Set<String>? = nil) async -> Bool {
         guard let pendingImport else {
             crewAccessImportMessage = "No pending CrewAccess import to confirm."
-            return
+            return false
         }
         guard pendingImport.canConfirm,
               let schedule = pendingImport.parsedSchedule,
               let parsedJSON = pendingImport.jsonPayload else {
             crewAccessImportMessage = "Cannot confirm import while errors exist."
+            logger.error(
+                "[ImportConfirm] rejected reason=invalid_preview canConfirm=\(pendingImport.canConfirm, privacy: .public) schedulePresent=\(pendingImport.parsedSchedule != nil, privacy: .public) jsonPresent=\(pendingImport.jsonPayload != nil, privacy: .public)"
+            )
             // importInProgress stays true; user must discard to reset.
-            return
+            return false
         }
+
+        let preWriteReplacementCandidates = pendingImportReplacementCandidates
+        let currentReplacementIDs = Set(preWriteReplacementCandidates.map(\.id))
+        if let expectedReplacementIDs, expectedReplacementIDs != currentReplacementIDs {
+            crewAccessImportMessage = "The replacement targets changed. Review the updated import details before confirming."
+            logger.error(
+                "[ImportConfirm] rejected reason=replacement_drift expectedCount=\(expectedReplacementIDs.count, privacy: .public) currentCount=\(currentReplacementIDs.count, privacy: .public) expected=\(expectedReplacementIDs.sorted().joined(separator: ","), privacy: .private) current=\(currentReplacementIDs.sorted().joined(separator: ","), privacy: .private)"
+            )
+            return false
+        }
+        let isReplacement = !preWriteReplacementCandidates.isEmpty
 
         let existingPayloads = Self.loadCrewAccessTripJSONPayloadsFromImportFilesSync(
             directory: crewAccessImportsDirectory
@@ -3029,8 +3153,6 @@ final class AppViewModel: ObservableObject {
             let overlapPayloadFingerprints = Self.crewAccessPayloadFingerprints(
                 at: overlapArtifacts.map(\.url)
             )
-
-            let replacing = crewAccessSchedules.contains(where: { $0.id == schedule.id })
 
             // Everything from here to the CloudKit upload is one Import transaction. Foreground and
             // startup CrewAccess sync stand down for its duration (see `syncCrewAccessDeviceData`),
@@ -3078,7 +3200,13 @@ final class AppViewModel: ObservableObject {
                 overlapStashes = stashStaleCrewAccessJSONFilesBestEffort(
                     protectedOverlapArtifacts.map(\.url)
                 )
-                await applyCrewAccessRetentionPolicy()
+                // Retention still applies to every other source artifact, but the canonical JSON
+                // owned by this transaction must survive until the commit verifier has re-read it.
+                // The protection is scoped to this call; ordinary retention runs remain unchanged.
+                await applyCrewAccessRetentionPolicy(
+                    protectedURLs: [jsonWriteContext.finalURL]
+                )
+                try importCommitVerificationFaultInjector?(jsonWriteContext.finalURL)
                 // The reconcile above rebuilds the Timeline from the JSON directory. If the trip
                 // the user just confirmed is not in the result, the import did not succeed no
                 // matter how well the individual steps reported — persisting or uploading that
@@ -3124,15 +3252,22 @@ final class AppViewModel: ObservableObject {
                 )
             }
 
-            lastImportDidReplaceExistingTrip = replacing
-            if replacing {
+            if isReplacement {
+                await runReplacementDerivedStateInvalidationBestEffort()
+            }
+
+            lastImportDidReplaceExistingTrip = isReplacement
+            if isReplacement {
                 lastImportSummaryMessage = "Updated existing CrewAccess trip \(schedule.id)."
             } else {
                 lastImportSummaryMessage = "Imported new CrewAccess trip \(schedule.id)."
             }
+            if let pendingImportFingerprint {
+                importFingerprintLedger.markConsumed(pendingImportFingerprint)
+            }
             self.pendingImport = nil
+            pendingImportFingerprint = nil
             hasQueuedImport = false
-            await resetExternalOpenDedup()
             importInProgress = false
             startExternalConsumerIfNeeded()
             crewAccessImportMessage = "CrewAccess import complete: \(json.tripId) (\(schedule.legCount) legs)."
@@ -3179,17 +3314,43 @@ final class AppViewModel: ObservableObject {
                     self.markTripSyncCompleted()
                 }
             }
+            return true
         } catch let error as CrewAccessImportCommitError {
             // Reached only after the rollback above restored the pre-import state, so "no changes
-            // were applied" is accurate and the user can retry the same Confirm.
+            // were applied" is accurate. This attempt is then released so the same PDF or a
+            // distinct delivery can be retried immediately.
             crewAccessImportMessage = "Import failed: \(error.userFacingDescription) No changes were applied."
+            logger.error(
+                "[ImportConfirm] rejected reason=commit_verification error=\(error.diagnosticDescription, privacy: .public)"
+            )
             logNonFatal("CrewAccess confirm verification failed: \(error.diagnosticDescription)")
-            importInProgress = false
+            finishTerminalCrewAccessImportFailure()
+            return false
         } catch {
             crewAccessImportMessage = "Import failed: unable to write CrewAccess JSON. No changes were applied."
+            logger.error(
+                "[ImportConfirm] rejected reason=transaction_failure error=\(error.localizedDescription, privacy: .public)"
+            )
             logNonFatal("CrewAccess confirm transaction failed: \(error.localizedDescription)")
-            importInProgress = false
+            finishTerminalCrewAccessImportFailure()
+            return false
         }
+    }
+
+    /// Ends a failed import attempt after rollback has restored the prior durable state.
+    ///
+    /// A commit failure is terminal for this Preview, not an active delivery and not a dismissal.
+    /// Releasing the active claim instead of marking it dismissed preserves immediate same-PDF
+    /// retry while clearing the Preview gate lets a distinct queued or browser import proceed.
+    private func finishTerminalCrewAccessImportFailure() {
+        if let pendingImportFingerprint {
+            importFingerprintLedger.releaseActiveClaim(pendingImportFingerprint)
+        }
+        pendingImport = nil
+        pendingImportFingerprint = nil
+        hasQueuedImport = false
+        importInProgress = false
+        startExternalConsumerIfNeeded()
     }
 
     // MARK: - Import Commit Verification
@@ -3341,10 +3502,13 @@ final class AppViewModel: ObservableObject {
     }
 
     func discardPendingImport() async {
+        if let pendingImportFingerprint {
+            importFingerprintLedger.markDismissed(pendingImportFingerprint)
+        }
         pendingImport = nil
+        pendingImportFingerprint = nil
         hasQueuedImport = false
         crewAccessImportMessage = "CrewAccess import preview discarded."
-        await resetExternalOpenDedup()
         importInProgress = false
         startExternalConsumerIfNeeded()
     }
@@ -3668,13 +3832,14 @@ final class AppViewModel: ObservableObject {
         }.value
     }
 
-    func applyCrewAccessRetentionPolicy() async {
+    func applyCrewAccessRetentionPolicy(protectedURLs: Set<URL> = []) async {
         let directory = crewAccessImportsDirectory
         let deletedFileCount: Int
         if let retainedOrders = retainedCrewAccessBidPeriodOrders() {
             deletedFileCount = await Task.detached(priority: .utility) {
                 Self.deleteCrewAccessImportFilesOutsideRetainedBidPeriods(
                     retainedOrders: retainedOrders,
+                    protectedURLs: protectedURLs,
                     directory: directory
                 )
             }.value
@@ -4254,14 +4419,92 @@ final class AppViewModel: ObservableObject {
     }
 
     func nextFlightCountdownOutput(nowUTC: Date = Date()) -> CountdownEngineOutput? {
-        let countdownLegs = schedules.countdownLegs(tzResolver: tzResolver)
-        return FlightCountdownEngine.buildCountdownOutput(from: countdownLegs, nowUTC: nowUTC)
+        let crewBase = CrewBase(normalizing: verifiedIdentity?.domicile)
+        let referenceTimeDisplay = FlightReferenceTimeDisplay(
+            rawValue: UserDefaults.standard.string(forKey: "timeline_clock_display") ?? ""
+        ) ?? .lcl
+        return OperationalStateBuilder.build(
+            schedules: schedules,
+            domicileAirportCode: crewBase.reportAirportCode,
+            domicileTimeZone: crewBase.timeZone,
+            nowUTC: nowUTC,
+            referenceTimeDisplay: referenceTimeDisplay,
+            tzResolver: tzResolver
+        ) { [diagnostics] exclusion in
+            diagnostics.record(
+                .flightStateInputExcluded,
+                [
+                    "leg": SyncDiagnosticsLog.tag(exclusion.legID),
+                    "reason": exclusion.reason.rawValue
+                ]
+            )
+        }
     }
 
-    func refreshFlightCountdownPresentation(nowUTC: Date = Date()) {
+    func prepareFlightCountdownPresentationForLaunch(nowUTC: Date = Date()) async {
+        await refreshFlightCountdownPresentation(
+            mode: .reconcile,
+            nowUTC: nowUTC
+        )
+    }
+
+    func refreshFlightCountdownPresentation(
+        mode: LiveActivityRefreshMode,
+        nowUTC: Date = Date()
+    ) async {
         let output = nextFlightCountdownOutput(nowUTC: nowUTC)
-        Task { [weak self] in
-            await self?.flightCountdownCoordinator.refresh(output: output, nowUTC: nowUTC)
+        await flightCountdownCoordinator.refresh(
+            output: output,
+            mode: mode,
+            nowUTC: nowUTC
+        )
+        scheduleFlightCountdownBoundary(for: output, after: nowUTC)
+    }
+
+    static func nextFlightCountdownEvaluationBoundary(
+        for output: CountdownEngineOutput?,
+        after nowUTC: Date
+    ) -> Date? {
+        guard let leg = output?.leg else { return nil }
+        let candidates = [
+            leg.reportTimeUTC,
+            Optional(leg.plannedDepartureUTC),
+            Optional(leg.plannedArrivalUTC),
+            Optional(leg.plannedArrivalUTC.addingTimeInterval(60 * 60)),
+            FlightPresentationPolicy.nextVisibilityBoundary(
+                plannedDepartureUTC: leg.plannedDepartureUTC,
+                nowUTC: nowUTC
+            )
+        ]
+        return candidates.compactMap { $0 }
+            .filter { $0 > nowUTC }
+            .min()
+    }
+
+    private func scheduleFlightCountdownBoundary(
+        for output: CountdownEngineOutput?,
+        after nowUTC: Date
+    ) {
+        flightCountdownBoundaryTask?.cancel()
+        guard let boundary = Self.nextFlightCountdownEvaluationBoundary(
+            for: output,
+            after: nowUTC
+        ) else {
+            flightCountdownBoundaryTask = nil
+            return
+        }
+
+        let delayNanoseconds = UInt64(
+            max(0, boundary.timeIntervalSince(nowUTC) + 0.05) * 1_000_000_000
+        )
+        flightCountdownBoundaryTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: delayNanoseconds)
+            } catch {
+                return
+            }
+            guard let self else { return }
+            await self.refreshFlightCountdownPresentation(mode: .reconcile, nowUTC: Date())
         }
     }
 
@@ -4714,16 +4957,8 @@ final class AppViewModel: ObservableObject {
         case timedOut
     }
 
-    /// Resets all import dedup state so the user can re-share the same PDF immediately
-    /// after confirming or discarding. Awaits coordinator.reset() for guaranteed ordering.
-    private func resetExternalOpenDedup() async {
-        ExternalOpenLaunchGate.reset()
-        await externalOpenCoordinator.reset()
-        Self.clearPersistentImportFingerprint()
-    }
-
-    private func importPayloadFingerprint(data: Data, sourceFileName: String?) -> String {
-        // Key ONLY on content (SHA-256 + byte count). Exclude sourceFileName because iOS can deliver
+    private func importPayloadFingerprint(data: Data) -> String {
+        // Key ONLY on content (SHA-256). Exclude sourceFileName because iOS can deliver
         // the same PDF via different paths with different lastPathComponents (e.g. "Unknown-1.pdf"
         // vs "Unknown-1 2.pdf" for Inbox copies), which would produce distinct fingerprints and
         // defeat the dedup guard even though the file bytes are identical.
@@ -4907,37 +5142,6 @@ final class AppViewModel: ObservableObject {
         let escaped = value.replacingOccurrences(of: "\"", with: "\"\"")
         let shouldQuote = alwaysQuote || escaped.contains(",") || escaped.contains("\"") || escaped.contains("\n")
         return shouldQuote ? "\"\(escaped)\"" : escaped
-    }
-
-    /// Claims a cross-launch fingerprint in UserDefaults. Returns false if the same content
-    /// was already imported in this launch or a recent previous launch (TTL 30s).
-    /// `importInProgress` handles same-launch re-entrancy; this handles app-restart edge cases.
-    ///
-    /// NSLock safety: although callers run on @MainActor, this is a synchronous (non-async)
-    /// method with no suspension points inside the lock, so there is no risk of deadlock
-    /// or actor re-entrancy while the lock is held.
-    private static func claimPersistentFingerprint(_ fingerprint: String) -> Bool {
-        importMethodDedupLock.lock()
-        defer { importMethodDedupLock.unlock() }
-        let now = Date()
-        let defaults = UserDefaults.standard
-        if let stored = defaults.string(forKey: persistentFingerprintKey),
-           stored == fingerprint,
-           let ts = defaults.object(forKey: persistentFingerprintTSKey) as? Date,
-           now.timeIntervalSince(ts) < persistentFingerprintTTL {
-            return false
-        }
-        defaults.set(fingerprint, forKey: persistentFingerprintKey)
-        defaults.set(now, forKey: persistentFingerprintTSKey)
-        return true
-    }
-
-    private static func clearPersistentImportFingerprint() {
-        importMethodDedupLock.lock()
-        defer { importMethodDedupLock.unlock() }
-        let defaults = UserDefaults.standard
-        defaults.removeObject(forKey: persistentFingerprintKey)
-        defaults.removeObject(forKey: persistentFingerprintTSKey)
     }
 
     private nonisolated static func readExternalPDFDataDirect(from originalURL: URL) throws -> Data {
@@ -5403,6 +5607,7 @@ final class AppViewModel: ObservableObject {
 
     private nonisolated static func deleteCrewAccessImportFilesOutsideRetainedBidPeriods(
         retainedOrders: Set<Int>,
+        protectedURLs: Set<URL> = [],
         directory: URL?
     ) -> Int {
         let fm = FileManager.default
@@ -5417,8 +5622,12 @@ final class AppViewModel: ObservableObject {
             return 0
         }
 
+        let protectedPaths = Set(protectedURLs.map { $0.standardizedFileURL.path })
         var deletedCount = 0
         for url in urls {
+            guard !protectedPaths.contains(url.standardizedFileURL.path) else {
+                continue
+            }
             guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
                   values.isRegularFile == true,
                   url.pathExtension.lowercased() == "json" else {

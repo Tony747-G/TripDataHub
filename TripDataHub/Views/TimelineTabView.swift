@@ -545,7 +545,7 @@ struct TimelineTabView: View {
             fontScale: fontScale,
             timeRangeText: timeRangeText(for: leg),
             dayDiff: dayShift(for: leg),
-            blockText: blockAndLayoverText(for: leg, nextLegByID: nextLegByID),
+            blockConnectionDisplay: blockConnectionDisplay(for: leg, nextLegByID: nextLegByID),
             iconColor: hasFlightMatch ? friendMatchAmber : .primary,
             onFriendMatchTap: hasFlightMatch
                 ? { friendMatchAlert = flightMatchAlert(for: leg, matches: flightMatches) }
@@ -1255,16 +1255,22 @@ struct TimelineTabView: View {
         return "\(safeMinutes / 60)h \(safeMinutes % 60)m"
     }
 
-    private func blockAndLayoverText(for leg: TripLeg, nextLegByID: [UUID: TripLeg]) -> String {
-        let text = LegConnectionTextBuilder.blockAndConnectionText(for: leg, nextLegByID: nextLegByID)
-        // レイオーバーカードを表示する場合は " / LO at ..." 部分を削除して Block のみ残す
-        if shouldShowLayover(leg: leg, connectionMap: nextLegByID),
-           let slashRange = text.range(of: " / ") {
-            return String(text[..<slashRange.lowerBound])
+    private func blockConnectionDisplay(
+        for leg: TripLeg,
+        nextLegByID: [UUID: TripLeg]
+    ) -> BlockConnectionDisplay {
+        let display = LegConnectionTextBuilder.blockAndConnectionDisplay(
+            for: leg,
+            nextLegByID: nextLegByID
+        )
+        // レイオーバーカードを表示する場合は connection 行を重複表示しない。
+        if shouldShowLayover(leg: leg, connectionMap: nextLegByID) {
+            return display.blockOnly
         }
-        return text
-            .replacingOccurrences(of: "Layover at ", with: "LO at ")
-            .replacingOccurrences(of: "Layover:", with: "LO:")
+        return display.mappingConnection {
+            $0.replacingOccurrences(of: "Layover at ", with: "LO at ")
+                .replacingOccurrences(of: "Layover:", with: "LO:")
+        }
     }
 
     private func isTripBoundary(current: TripLeg, next: TripLeg) -> Bool {

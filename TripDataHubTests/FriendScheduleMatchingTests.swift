@@ -67,7 +67,7 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertEqual(snapshot.restWindows[0].durationMinutes, 630)
     }
 
-    func test_timelineRestInfo_usesSixtyMinuteReportForAsiaAndEuropeFlights() {
+    func test_timelineRestInfo_usesNinetyMinuteReportForAsiaAndEuropeFlights() {
         let arrDate = iso("2026-05-01T10:00:00Z")
         let asiaLeg = makeLeg(
             leg: 2,
@@ -90,13 +90,13 @@ final class FriendScheduleMatchingTests: XCTestCase {
         let europeInfo = TimelineLayoverSupport.restInfo(arrDate: arrDate, nextLeg: europeLeg)
 
         XCTAssertEqual(asiaInfo?.dutyEndUTC, iso("2026-05-01T10:30:00Z"))
-        XCTAssertEqual(asiaInfo?.dutyStartUTC, iso("2026-05-01T21:00:00Z"))
-        XCTAssertEqual(asiaInfo?.totalMinutes, 630)
-        XCTAssertEqual(europeInfo?.dutyStartUTC, iso("2026-05-01T21:00:00Z"))
-        XCTAssertEqual(europeInfo?.totalMinutes, 630)
+        XCTAssertEqual(asiaInfo?.dutyStartUTC, iso("2026-05-01T20:30:00Z"))
+        XCTAssertEqual(asiaInfo?.totalMinutes, 600)
+        XCTAssertEqual(europeInfo?.dutyStartUTC, iso("2026-05-01T20:30:00Z"))
+        XCTAssertEqual(europeInfo?.totalMinutes, 600)
     }
 
-    func test_timelineRestInfo_usesNinetyMinuteReportWhenFlightLeavesReducedReportRegion() {
+    func test_timelineRestInfo_usesNinetyMinuteReportWhenRouteIsNotWhollyLower48() {
         let nextLeg = makeLeg(
             leg: 2,
             flight: "101",

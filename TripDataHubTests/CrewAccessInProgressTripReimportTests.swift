@@ -1,4 +1,5 @@
 import CloudKit
+import UserNotifications
 import XCTest
 @testable import TripDataHub
 
@@ -440,6 +441,295 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
         XCTAssertEqual(liveGeneration, Self.revisedGeneratedAt, "CloudKit must end on the new generation")
     }
 
+    func test_T4_replacementUsesOneConfirmationOneTransactionAndOneInvalidationSeam() async throws {
+        let spy = ReplacementInvalidationSpy()
+        let harness = try makeHarness(
+            replacementDerivedStateInvalidator: { await spy.recordCall() }
+        )
+        let vm = harness.device.viewModel
+        await harness.confirm(payload: originalTrip())
+        let callsAfterNewImport = await spy.callCount()
+        XCTAssertEqual(callsAfterNewImport, 0, "new import must not use the replacement seam")
+
+        vm.pendingImport = Self.pendingImport(for: revisedTrip())
+        let expectedIDs = Set(vm.pendingImportReplacementCandidates.map(\.id))
+        XCTAssertFalse(expectedIDs.isEmpty, "precondition: the revision is a replacement")
+        let transactionsBefore = vm.crewAccessImportTransactionStartCount
+
+        let confirmed = await vm.confirmPendingImport(expectedReplacementIDs: expectedIDs)
+        await harness.settle()
+
+        XCTAssertTrue(confirmed)
+        XCTAssertEqual(vm.crewAccessImportTransactionStartCount - transactionsBefore, 1)
+        let replacementCalls = await spy.callCount()
+        XCTAssertEqual(replacementCalls, 1)
+        XCTAssertNil(vm.pendingImport)
+        XCTAssertEqual(legs(in: vm, pairing: tripID).map(\.flight), ["61", "GND", "62"])
+    }
+
+    func test_T25_replacementUsesCenteredAlertWithCapturedCandidatesAndOneFinalConfirmation() throws {
+        let sameTrip = AppViewModel.TripImportReplacementCandidate(
+            id: "schedule-12165",
+            tripId: "12165",
+            pairings: ["12165"],
+            reason: .sameTripID
+        )
+        let overlap = AppViewModel.TripImportReplacementCandidate(
+            id: "schedule-44321",
+            tripId: "44321",
+            pairings: ["44321"],
+            reason: .timeOverlap
+        )
+        let confirmation = try XCTUnwrap(ImportReplacementConfirmation(
+            candidates: [sameTrip, overlap]
+        ))
+
+        XCTAssertEqual(
+            confirmation.expectedReplacementIDs,
+            ["schedule-12165", "schedule-44321"]
+        )
+        XCTAssertTrue(confirmation.message.contains("Trip 12165 already exists."))
+        XCTAssertTrue(confirmation.message.contains("Trip 44321 overlaps this import."))
+        XCTAssertTrue(confirmation.message.contains("will replace the current version"))
+        XCTAssertTrue(confirmation.message.contains("removed from Timeline and synced devices"))
+        XCTAssertNil(ImportReplacementConfirmation(candidates: []))
+
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("TripDataHub/Views/ImportPreviewView.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        XCTAssertTrue(source.contains("Button(\"Confirm Import\")"))
+        XCTAssertTrue(source.contains("if replacements.isEmpty"))
+        XCTAssertTrue(source.contains(".alert(item: $replacementConfirmation)"))
+        XCTAssertFalse(source.contains(".confirmationDialog"))
+
+        let previewButtonStart = try XCTUnwrap(
+            source.range(of: "Button(\"Replace and Import\", role: .destructive)")
+        ).lowerBound
+        let previewButtonEnd = try XCTUnwrap(
+            source.range(of: ".disabled(!pending.canConfirm)", range: previewButtonStart..<source.endIndex)
+        ).upperBound
+        let previewButtonSource = source[previewButtonStart..<previewButtonEnd]
+        XCTAssertFalse(previewButtonSource.contains("confirmPendingImport"))
+        XCTAssertTrue(previewButtonSource.contains("replacementConfirmation ="))
+
+        let alertStart = try XCTUnwrap(
+            source.range(of: ".alert(item: $replacementConfirmation)")
+        ).lowerBound
+        let alertSource = source[alertStart...]
+        XCTAssertEqual(alertSource.components(separatedBy: "confirmPendingImport").count - 1, 1)
+        XCTAssertTrue(alertSource.contains("expectedReplacementIDs: confirmation.expectedReplacementIDs"))
+    }
+
+    func test_confirmFailureDiagnosticsAreVisibleAndBranchSpecific() throws {
+        let projectRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let previewSource = try String(
+            contentsOf: projectRoot.appendingPathComponent("TripDataHub/Views/ImportPreviewView.swift"),
+            encoding: .utf8
+        )
+        let viewModelSource = try String(
+            contentsOf: projectRoot.appendingPathComponent("TripDataHub/ViewModels/AppViewModel.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(previewSource.contains("Section(\"Import Status\")"))
+        XCTAssertTrue(previewSource.contains("viewModel.crewAccessImportMessage"))
+        for reason in [
+            "reason=invalid_preview",
+            "reason=replacement_drift",
+            "reason=commit_verification",
+            "reason=transaction_failure"
+        ] {
+            XCTAssertEqual(
+                viewModelSource.components(separatedBy: reason).count - 1,
+                1,
+                "confirm exit reason must have exactly one dedicated logger line: \(reason)"
+            )
+        }
+    }
+
+    func test_T7_replacementInvalidatesAllOldNextReportNotifications() async throws {
+        let notifications = ReimportNotificationSpy()
+        let harness = try makeHarness(
+            replacementDerivedStateInvalidator: nil,
+            notificationService: notifications,
+            flightCountdownCoordinator: FlightCountdownCoordinator(
+                activityClient: ReimportActivitySpy(activities: []),
+                snapshotClient: ReimportSnapshotNoop()
+            )
+        )
+        let vm = harness.device.viewModel
+        await harness.confirm(payload: originalTrip())
+        await notifications.seedOldNotifications([
+            "nextreport.12165.old.pending",
+            "nextreport.12165.old.delivered"
+        ])
+
+        vm.pendingImport = Self.pendingImport(for: revisedTrip())
+        let expectedIDs = Set(vm.pendingImportReplacementCandidates.map(\.id))
+        let confirmed = await vm.confirmPendingImport(expectedReplacementIDs: expectedIDs)
+        await harness.settle()
+
+        XCTAssertTrue(confirmed)
+        let invalidationCount = await notifications.invalidationCount()
+        let oldNotificationIDs = await notifications.oldNotificationIDs()
+        XCTAssertEqual(invalidationCount, 1)
+        XCTAssertEqual(oldNotificationIDs, [])
+    }
+
+    func test_T8_replacementEndsOldLiveActivityRegardlessOfLegIdentity() async throws {
+        let activityClient = ReimportActivitySpy(
+            activities: [FlightCountdownActivityRecord(id: "old-activity", legID: "old-leg")]
+        )
+        let harness = try makeHarness(
+            replacementDerivedStateInvalidator: nil,
+            flightCountdownCoordinator: FlightCountdownCoordinator(
+                activityClient: activityClient,
+                snapshotClient: ReimportSnapshotNoop()
+            )
+        )
+        let vm = harness.device.viewModel
+        await harness.confirm(payload: originalTrip())
+
+        vm.pendingImport = Self.pendingImport(for: revisedTrip())
+        let expectedIDs = Set(vm.pendingImportReplacementCandidates.map(\.id))
+        let confirmed = await vm.confirmPendingImport(expectedReplacementIDs: expectedIDs)
+        await harness.settle()
+
+        XCTAssertTrue(confirmed)
+        let containsOldActivity = await activityClient.contains(activityID: "old-activity")
+        let endCount = await activityClient.endCount()
+        XCTAssertFalse(containsOldActivity)
+        XCTAssertEqual(endCount, 1)
+    }
+
+    func test_T30_pendingImportNilClosesPreviewWhileNotificationRescheduleIsStillSuspended() async throws {
+        let notifications = SuspendedRescheduleNotificationService()
+        let harness = try makeHarness(notificationService: notifications)
+        let vm = harness.device.viewModel
+        await harness.confirm(payload: originalTrip())
+
+        // Replacement reconcile performs one reschedule before pendingImport is cleared.
+        // Suspend the following reschedule, which is the explicit post-nil call in confirm.
+        await notifications.suspendReschedule(afterPassingCalls: 1)
+        vm.pendingImport = Self.pendingImport(for: revisedTrip())
+        let expectedIDs = Set(vm.pendingImportReplacementCandidates.map(\.id))
+        let confirmation = Task {
+            await vm.confirmPendingImport(expectedReplacementIDs: expectedIDs)
+        }
+
+        await notifications.waitUntilRescheduleIsSuspended()
+
+        XCTAssertNil(vm.pendingImport, "the durable local commit clears pendingImport before notification reschedule returns")
+        XCTAssertFalse(
+            ImportPreviewPresentationPolicy.browserPreviewIsPresented(
+                pendingImportID: vm.pendingImport?.id,
+                presentsImportPreview: true
+            ),
+            "Browser Preview must close from pendingImport state without waiting for dismiss()"
+        )
+        XCTAssertFalse(
+            ImportPreviewPresentationPolicy.externalPreviewIsPresented(
+                pendingImportID: vm.pendingImport?.id,
+                browserIsPresented: false
+            ),
+            "external Preview must close while confirmPendingImport is still awaiting notifications"
+        )
+
+        await notifications.resumeSuspendedReschedule()
+        let confirmed = await confirmation.value
+        XCTAssertTrue(confirmed)
+    }
+
+    func test_replacementInvalidationSeamIsNotCalledWhenLocalCommitRollsBack() async throws {
+        let spy = ReplacementInvalidationSpy()
+        let verificationFailure = CommitVerificationFileRemover()
+        let harness = try makeHarness(
+            retentionReferenceDate: Self.date("2026-07-20T12:00:00Z"),
+            replacementDerivedStateInvalidator: { await spy.recordCall() },
+            importCommitVerificationFaultInjector: { try verificationFailure.removeIfArmed($0) }
+        )
+        let vm = harness.device.viewModel
+
+        await harness.confirm(payload: Self.outOfRetentionTrip())
+        verificationFailure.arm()
+        vm.pendingImport = Self.pendingImport(
+            for: Self.outOfRetentionTrip(generatedAt: "2026-07-20T09:00:00Z")
+        )
+        let expectedIDs = Set(vm.pendingImportReplacementCandidates.map(\.id))
+        XCTAssertFalse(expectedIDs.isEmpty, "precondition: the failing import replaces an existing trip")
+
+        let confirmed = await vm.confirmPendingImport(expectedReplacementIDs: expectedIDs)
+
+        XCTAssertFalse(confirmed)
+        let calls = await spy.callCount()
+        XCTAssertEqual(calls, 0)
+        XCTAssertNil(vm.pendingImport, "a terminal rollback must release the failed Preview")
+    }
+
+    func test_replacementCandidateDriftFailsClosedBeforeTransaction() async throws {
+        let spy = ReplacementInvalidationSpy()
+        let harness = try makeHarness(
+            replacementDerivedStateInvalidator: { await spy.recordCall() }
+        )
+        let vm = harness.device.viewModel
+        await harness.confirm(payload: originalTrip())
+        vm.pendingImport = Self.pendingImport(for: revisedTrip())
+        let transactionsBefore = vm.crewAccessImportTransactionStartCount
+
+        let confirmed = await vm.confirmPendingImport(expectedReplacementIDs: ["stale-ui-target"])
+
+        XCTAssertFalse(confirmed)
+        XCTAssertEqual(vm.crewAccessImportTransactionStartCount, transactionsBefore)
+        let calls = await spy.callCount()
+        XCTAssertEqual(calls, 0)
+        XCTAssertNotNil(vm.pendingImport)
+        XCTAssertTrue((vm.crewAccessImportMessage ?? "").contains("changed"))
+    }
+
+    func test_replacementInvalidationTimeoutDoesNotFailVerifiedImport() async throws {
+        let spy = ReplacementInvalidationSpy(delayNanoseconds: 1_000_000_000)
+        let harness = try makeHarness(
+            replacementDerivedStateInvalidator: { await spy.recordCall() },
+            replacementInvalidationTimeoutNanoseconds: 1_000_000
+        )
+        let vm = harness.device.viewModel
+        await harness.confirm(payload: originalTrip())
+
+        vm.pendingImport = Self.pendingImport(for: revisedTrip())
+        let expectedIDs = Set(vm.pendingImportReplacementCandidates.map(\.id))
+        let confirmed = await vm.confirmPendingImport(expectedReplacementIDs: expectedIDs)
+        await harness.settle()
+
+        XCTAssertTrue(confirmed)
+        XCTAssertNil(vm.pendingImport)
+        XCTAssertTrue((vm.crewAccessImportMessage ?? "").hasPrefix("CrewAccess import complete"))
+        XCTAssertFalse(vm.isCrewAccessImportTransactionActive)
+    }
+
+    func test_replacementInvalidationFailureDoesNotFailVerifiedImport() async throws {
+        struct ExpectedFailure: Error {}
+        let harness = try makeHarness(
+            replacementDerivedStateInvalidator: { throw ExpectedFailure() }
+        )
+        let vm = harness.device.viewModel
+        await harness.confirm(payload: originalTrip())
+
+        vm.pendingImport = Self.pendingImport(for: revisedTrip())
+        let expectedIDs = Set(vm.pendingImportReplacementCandidates.map(\.id))
+        let confirmed = await vm.confirmPendingImport(expectedReplacementIDs: expectedIDs)
+        await harness.settle()
+
+        XCTAssertTrue(confirmed)
+        XCTAssertNil(vm.pendingImport)
+        XCTAssertTrue((vm.crewAccessImportMessage ?? "").hasPrefix("CrewAccess import complete"))
+        XCTAssertFalse(vm.isCrewAccessImportTransactionActive)
+    }
+
     /// The tombstone arrives immediately after Confirm, before any sync has acknowledged the new
     /// record. The explicitly confirmed generation wins and is republished.
     func test_tombstoneAfterConfirm_doesNotDeleteExplicitReimport() async throws {
@@ -495,53 +785,113 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
 
     // MARK: - 3. Reconcile failure protection
 
-    /// The source JSON is gone by the time reconcile runs (here: the retention policy prunes it,
-    /// which is the production path that deletes a just-written import file). The import must
-    /// report failure, restore the previous state, and upload nothing.
-    ///
-    /// The retention window is pinned via the injected reference date, so the outcome does not
-    /// depend on the machine date or on where today falls in the Bid Period table.
-    func test_sourceJSONLostBeforeReconcile_rollsBackAndUploadsNothing() async throws {
-        // Inside BP26-05 (starts 2026-07-12). With "1 previous" retention, BP26-04 and BP26-05 are
-        // retained and BP26-01 is not — fixed facts about the Bid Period table, not about today.
-        let harness = try makeHarness(retentionReferenceDate: Self.date("2026-07-20T12:00:00Z"))
+    /// T-32: the input PDF may be discarded once Preview owns the parsed value, while the canonical
+    /// JSON written at Confirm remains protected from retention until verification completes.
+    func test_T32_confirmTimeSourceLifetimeProtectsIncomingCanonicalJSONThroughVerification() async throws {
+        let revisedPayload = Self.outOfRetentionTrip(generatedAt: "2026-07-20T09:00:00Z")
+        let pdfData = Data("synthetic-replacement-pdf".utf8)
+        let importService = ReimportRoutedImportService(payloadsByData: [pdfData: revisedPayload])
+        let harness = try makeHarness(
+            retentionReferenceDate: Self.date("2026-07-20T12:00:00Z"),
+            crewAccessImportService: importService
+        )
         let vm = harness.device.viewModel
+
+        await harness.confirm(payload: Self.outOfRetentionTrip())
         pinRetentionSelection("1")
 
-        await harness.confirm(payload: revisedTrip())
-        let timelineBefore = vm.crewAccessSchedules
-        XCTAssertFalse(timelineBefore.isEmpty, "precondition: a retained trip is on the Timeline")
+        let inputURL = harness.device.importsDirectory.appendingPathComponent("incoming.pdf")
+        try pdfData.write(to: inputURL)
+        let materializedPDF = try Data(contentsOf: inputURL)
+        let previewAccepted = await vm.importCrewAccessPDFData(
+            materializedPDF,
+            sourceFileName: inputURL.lastPathComponent
+        )
+        XCTAssertTrue(previewAccepted)
+        let expectedIDs = Set(vm.pendingImportReplacementCandidates.map(\.id))
+        XCTAssertFalse(expectedIDs.isEmpty, "precondition: this is a same-trip replacement")
+        try FileManager.default.removeItem(at: inputURL)
 
-        let uploadsBefore = await harness.deviceSchedules.uploadCount()
-        vm.pendingImport = Self.pendingImport(for: Self.outOfRetentionTrip())
-        await vm.confirmPendingImport()
+        let confirmed = await vm.confirmPendingImport(expectedReplacementIDs: expectedIDs)
         await harness.settle()
 
+        XCTAssertTrue(confirmed)
+        XCTAssertNil(vm.pendingImport)
+        let finalURL = harness.device.importsDirectory.appendingPathComponent(
+            Self.fileName(tripID: Self.outOfRetentionTripID, date: revisedPayload.tripInformationDate)
+        )
+        let committedData = try Data(contentsOf: finalURL)
+        let committed = try JSONDecoder().decode(CrewAccessTripJSON.self, from: committedData)
+        XCTAssertEqual(committed.generatedAt, revisedPayload.generatedAt)
+        XCTAssertTrue(vm.crewAccessSchedules.flatMap(\.legs).contains { $0.pairing == Self.outOfRetentionTripID })
+    }
+
+    func test_T33_confirmSourceReadFailureReleasesProcessingStateAndAllowsSamePDFRetry() async throws {
+        let pdfData = Data("synthetic-failing-pdf".utf8)
+        let payload = revisedTrip()
+        let importService = ReimportRoutedImportService(payloadsByData: [pdfData: payload])
+        let verificationFailure = CommitVerificationFileRemover()
+        let harness = try makeHarness(
+            crewAccessImportService: importService,
+            importCommitVerificationFaultInjector: { try verificationFailure.removeIfArmed($0) }
+        )
+        let vm = harness.device.viewModel
+
+        let firstAccepted = await vm.importCrewAccessPDFData(pdfData, sourceFileName: "trip-a.pdf")
+        XCTAssertTrue(firstAccepted)
+        verificationFailure.arm()
+        let confirmed = await vm.confirmPendingImport()
+        XCTAssertFalse(confirmed)
+
+        XCTAssertFalse(vm.isCrewAccessImportInProgress)
+        XCTAssertNil(vm.pendingImport)
+        XCTAssertFalse(vm.isCrewAccessImportTransactionActive)
+        let retryAccepted = await vm.importCrewAccessPDFData(
+            pdfData,
+            sourceFileName: "trip-a-retry.pdf"
+        )
         XCTAssertTrue(
-            (vm.crewAccessImportMessage ?? "").hasPrefix("Import failed"),
-            "an import whose trip vanished from the rebuilt Timeline must not report success"
+            retryAccepted,
+            "terminal verification failure must release the same PDF fingerprint immediately"
         )
-        XCTAssertEqual(
-            vm.crewAccessSchedules,
-            timelineBefore,
-            "the previous Timeline must be restored verbatim"
+        XCTAssertEqual(vm.pendingImport?.tripId, payload.tripId)
+    }
+
+    func test_T34_distinctImportCreatesExactlyOnePreviewAfterPriorConfirmFailure() async throws {
+        let pdfA = Data("synthetic-trip-a".utf8)
+        let pdfB = Data("synthetic-trip-b".utf8)
+        let payloadA = revisedTrip()
+        let payloadB = Self.outOfRetentionTrip()
+        let importService = ReimportRoutedImportService(payloadsByData: [
+            pdfA: payloadA,
+            pdfB: payloadB
+        ])
+        let verificationFailure = CommitVerificationFileRemover()
+        let harness = try makeHarness(
+            crewAccessImportService: importService,
+            importCommitVerificationFaultInjector: { try verificationFailure.removeIfArmed($0) }
         )
-        XCTAssertFalse(
-            vm.crewAccessSchedules.isEmpty,
-            "the fail-closed path must never leave the Timeline empty"
+        let vm = harness.device.viewModel
+
+        let tripAAccepted = await vm.importCrewAccessPDFData(pdfA, sourceFileName: "trip-a.pdf")
+        XCTAssertTrue(tripAAccepted)
+        verificationFailure.arm()
+        let tripAConfirmed = await vm.confirmPendingImport()
+        XCTAssertFalse(tripAConfirmed)
+
+        let tripBAccepted = await vm.importCrewAccessPDFData(pdfB, sourceFileName: "trip-b.pdf")
+        XCTAssertTrue(tripBAccepted)
+        let tripBPreviewID = try XCTUnwrap(vm.pendingImport?.id)
+        XCTAssertEqual(vm.pendingImport?.tripId, payloadB.tripId)
+        XCTAssertEqual(importService.callCount(for: pdfB), 1)
+
+        let duplicateAccepted = await vm.importCrewAccessPDFData(
+            pdfB,
+            sourceFileName: "trip-b-duplicate.pdf"
         )
-        XCTAssertFalse(
-            harness.device.localFileNames().contains(where: { $0.contains(Self.outOfRetentionTripID) }),
-            "the rolled-back JSON must not remain on disk"
-        )
-        let uploadsAfter = await harness.deviceSchedules.uploadCount()
-        XCTAssertEqual(
-            uploadsAfter,
-            uploadsBefore,
-            "no schedule snapshot may be uploaded for a failed import"
-        )
-        let liveOutOfRetention = await harness.cloud.liveGeneratedAt(tripID: Self.outOfRetentionTripID)
-        XCTAssertNil(liveOutOfRetention, "the failed import must not reach CloudKit")
+        XCTAssertFalse(duplicateAccepted)
+        XCTAssertEqual(vm.pendingImport?.id, tripBPreviewID)
+        XCTAssertEqual(importService.callCount(for: pdfB), 1, "Trip B Preview must be generated exactly once")
     }
 
     /// A stale same-trip JSON stored under a *different* file name is removed before verification
@@ -549,7 +899,11 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
     /// file's path would leave the trip with no source at all, which is the very state the
     /// fail-closed path exists to prevent.
     func test_failedImport_restoresStaleSameTripJSONRemovedBeforeVerification() async throws {
-        let harness = try makeHarness(retentionReferenceDate: Self.date("2026-07-20T12:00:00Z"))
+        let verificationFailure = CommitVerificationFileRemover()
+        let harness = try makeHarness(
+            retentionReferenceDate: Self.date("2026-07-20T12:00:00Z"),
+            importCommitVerificationFaultInjector: { try verificationFailure.removeIfArmed($0) }
+        )
         let vm = harness.device.viewModel
         pinRetentionSelection("1")
 
@@ -563,7 +917,8 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
             "precondition: the stale duplicate exists"
         )
 
-        // This import is pruned by retention, so it fails verification and rolls back.
+        // Retention keeps the transaction-owned source; the injected read failure exercises rollback.
+        verificationFailure.arm()
         vm.pendingImport = Self.pendingImport(for: Self.outOfRetentionTrip(generatedAt: "2026-07-20T09:00:00Z"))
         await vm.confirmPendingImport()
         await harness.settle()
@@ -974,6 +1329,7 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
         let device: Device
         let cloud: ImportRaceCloud
         let deviceSchedules: RecordingDeviceScheduleService
+        let importFingerprintLedger: ImportFingerprintLedger
 
         /// Drives a full Confirm and waits for its CloudKit upload to land, so the import
         /// transaction is closed before the test asserts.
@@ -1002,7 +1358,13 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
         name: String = "A",
         cloud: ImportRaceCloud? = nil,
         importsDirectory: URL? = nil,
-        retentionReferenceDate: Date = CrewAccessInProgressTripReimportTests.date("2026-07-20T12:00:00Z")
+        retentionReferenceDate: Date = CrewAccessInProgressTripReimportTests.date("2026-07-20T12:00:00Z"),
+        replacementDerivedStateInvalidator: (@Sendable () async throws -> Void)? = {},
+        replacementInvalidationTimeoutNanoseconds: UInt64 = 2_000_000_000,
+        crewAccessImportService: CrewAccessPDFImportServiceProtocol = CrewAccessPDFImportService(),
+        importCommitVerificationFaultInjector: (@MainActor @Sendable (URL) throws -> Void)? = nil,
+        notificationService: NextReportNotificationServiceProtocol = ReimportNotificationNoop(),
+        flightCountdownCoordinator: FlightCountdownCoordinator = FlightCountdownCoordinator()
     ) throws -> Harness {
         let cloud = cloud ?? ImportRaceCloud()
         let directory = importsDirectory ?? FileManager.default.temporaryDirectory
@@ -1011,13 +1373,21 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
         let suiteName = "CrewAccessReimportTests.\(name).\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         let deviceSchedules = RecordingDeviceScheduleService()
+        let importFingerprintLedger = ImportFingerprintLedger(defaults: defaults)
 
         let viewModel = AppViewModel(
             cacheService: ReimportTestCacheService(),
+            notificationService: notificationService,
+            crewAccessImportService: crewAccessImportService,
             friendScheduleCloudKitService: ReimportTestFriendService(),
             deviceScheduleCloudKitService: deviceSchedules,
             crewAccessImportCloudKitService: ImportRaceService(cloud: cloud),
             syncStateDefaults: defaults,
+            importFingerprintLedger: importFingerprintLedger,
+            replacementDerivedStateInvalidator: replacementDerivedStateInvalidator,
+            replacementInvalidationTimeoutNanoseconds: replacementInvalidationTimeoutNanoseconds,
+            importCommitVerificationFaultInjector: importCommitVerificationFaultInjector,
+            flightCountdownCoordinator: flightCountdownCoordinator,
             crewAccessImportsDirectory: directory,
             retentionReferenceDate: { retentionReferenceDate }
         )
@@ -1037,7 +1407,12 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
 
         let device = Device(viewModel: viewModel, importsDirectory: directory, defaultsSuiteName: suiteName)
         devices.append(device)
-        return Harness(device: device, cloud: cloud, deviceSchedules: deviceSchedules)
+        return Harness(
+            device: device,
+            cloud: cloud,
+            deviceSchedules: deviceSchedules,
+            importFingerprintLedger: importFingerprintLedger
+        )
     }
 
     /// Failure guard so a never-satisfied continuation fails the test instead of hanging CI.
@@ -1061,6 +1436,26 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
         if !finished {
             XCTFail("Timed out after \(timeout)s waiting for \(description)", file: file, line: line)
         }
+    }
+}
+
+private actor ReplacementInvalidationSpy {
+    private var calls = 0
+    private let delayNanoseconds: UInt64
+
+    init(delayNanoseconds: UInt64 = 0) {
+        self.delayNanoseconds = delayNanoseconds
+    }
+
+    func recordCall() async {
+        calls += 1
+        if delayNanoseconds > 0 {
+            try? await Task.sleep(nanoseconds: delayNanoseconds)
+        }
+    }
+
+    func callCount() -> Int {
+        calls
     }
 }
 
@@ -1190,6 +1585,198 @@ private struct ImportRaceService: CrewAccessImportCloudKitServicing {
 }
 
 // MARK: - Stubs
+
+private final class ReimportRoutedImportService: CrewAccessPDFImportServiceProtocol, @unchecked Sendable {
+    private let lock = NSLock()
+    private let payloadsByData: [Data: CrewAccessTripJSON]
+    private var callCounts: [Data: Int] = [:]
+
+    init(payloadsByData: [Data: CrewAccessTripJSON]) {
+        self.payloadsByData = payloadsByData
+    }
+
+    func analyzeTrip(pdfData: Data, sourceFileName: String?) -> CrewAccessImportDraft {
+        lock.lock()
+        callCounts[pdfData, default: 0] += 1
+        lock.unlock()
+
+        guard let payload = payloadsByData[pdfData] else {
+            return CrewAccessImportDraft(
+                sourceFileName: sourceFileName,
+                tripId: "",
+                tripDate: "",
+                parsedSchedule: nil,
+                jsonPayload: nil,
+                warnings: [],
+                errors: [ImportErrorItem(
+                    code: .schemaMismatch,
+                    message: "Unexpected synthetic PDF payload",
+                    remediation: "Register the payload in the routed test service."
+                )],
+                rawExtractStats: RawExtractStats(pageCount: 0, characterCount: 0, lineCount: 0)
+            )
+        }
+        return CrewAccessImportDraft(
+            sourceFileName: sourceFileName,
+            tripId: payload.tripId,
+            tripDate: payload.tripInformationDate,
+            parsedSchedule: AppViewModel.buildCrewAccessSchedule(from: payload, modifiedAt: Date()),
+            jsonPayload: payload,
+            warnings: [],
+            errors: [],
+            rawExtractStats: RawExtractStats(pageCount: 1, characterCount: pdfData.count, lineCount: 1)
+        )
+    }
+
+    func callCount(for data: Data) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return callCounts[data, default: 0]
+    }
+}
+
+private final class CommitVerificationFileRemover: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isArmed = false
+
+    func arm() {
+        lock.lock()
+        isArmed = true
+        lock.unlock()
+    }
+
+    func removeIfArmed(_ url: URL) throws {
+        lock.lock()
+        let shouldRemove = isArmed
+        isArmed = false
+        lock.unlock()
+        guard shouldRemove else { return }
+        try FileManager.default.removeItem(at: url)
+    }
+}
+
+private struct ReimportNotificationNoop: NextReportNotificationServiceProtocol {
+    func authorizationStatus() async -> UNAuthorizationStatus { .notDetermined }
+    func requestAuthorization() async throws -> Bool { false }
+    func invalidateNextReportNotifications() async {}
+    func reschedule(
+        schedules: [PayPeriodSchedule],
+        notify48h: Bool,
+        notify24h: Bool,
+        notify12h: Bool
+    ) async -> NotificationRescheduleResult {
+        NotificationRescheduleResult(requested: 0, scheduled: 0, failed: 0)
+    }
+}
+
+private actor ReimportNotificationSpy: NextReportNotificationServiceProtocol {
+    private var oldIDs: Set<String> = []
+    private var invalidations = 0
+
+    func authorizationStatus() async -> UNAuthorizationStatus { .authorized }
+    func requestAuthorization() async throws -> Bool { true }
+
+    func invalidateNextReportNotifications() async {
+        invalidations += 1
+        oldIDs.removeAll()
+    }
+
+    func reschedule(
+        schedules: [PayPeriodSchedule],
+        notify48h: Bool,
+        notify24h: Bool,
+        notify12h: Bool
+    ) async -> NotificationRescheduleResult {
+        NotificationRescheduleResult(requested: 0, scheduled: 0, failed: 0)
+    }
+
+    func seedOldNotifications(_ ids: Set<String>) {
+        oldIDs = ids
+    }
+
+    func invalidationCount() -> Int { invalidations }
+    func oldNotificationIDs() -> Set<String> { oldIDs }
+}
+
+private actor SuspendedRescheduleNotificationService: NextReportNotificationServiceProtocol {
+    private var reschedulesToPassBeforeSuspension: Int?
+    private var suspendedRescheduleContinuation: CheckedContinuation<Void, Never>?
+    private var suspensionObservedContinuations: [CheckedContinuation<Void, Never>] = []
+
+    func authorizationStatus() async -> UNAuthorizationStatus { .authorized }
+    func requestAuthorization() async throws -> Bool { true }
+    func invalidateNextReportNotifications() async {}
+
+    func reschedule(
+        schedules: [PayPeriodSchedule],
+        notify48h: Bool,
+        notify24h: Bool,
+        notify12h: Bool
+    ) async -> NotificationRescheduleResult {
+        if let remaining = reschedulesToPassBeforeSuspension, remaining > 0 {
+            reschedulesToPassBeforeSuspension = remaining - 1
+        } else if reschedulesToPassBeforeSuspension != nil {
+            reschedulesToPassBeforeSuspension = nil
+            let observers = suspensionObservedContinuations
+            suspensionObservedContinuations.removeAll()
+            for observer in observers { observer.resume() }
+            await withCheckedContinuation { continuation in
+                suspendedRescheduleContinuation = continuation
+            }
+        }
+        return NotificationRescheduleResult(requested: 0, scheduled: 0, failed: 0)
+    }
+
+    func suspendReschedule(afterPassingCalls callCount: Int) {
+        reschedulesToPassBeforeSuspension = callCount
+    }
+
+    func waitUntilRescheduleIsSuspended() async {
+        if suspendedRescheduleContinuation != nil { return }
+        await withCheckedContinuation { continuation in
+            suspensionObservedContinuations.append(continuation)
+        }
+    }
+
+    func resumeSuspendedReschedule() {
+        suspendedRescheduleContinuation?.resume()
+        suspendedRescheduleContinuation = nil
+    }
+}
+
+private actor ReimportActivitySpy: FlightCountdownActivityClient {
+    private var records: [FlightCountdownActivityRecord]
+    private var ended = 0
+
+    init(activities: [FlightCountdownActivityRecord]) {
+        records = activities
+    }
+
+    func waitForInitialActivityPopulation() async {}
+    func activitiesEnabled() async -> Bool { true }
+    func activities() async -> [FlightCountdownActivityRecord] { records }
+    func update(activityID: String, snapshot: FlightCountdownSnapshot) async {}
+
+    func request(snapshot: FlightCountdownSnapshot) async throws {
+        records.append(FlightCountdownActivityRecord(id: UUID().uuidString, legID: snapshot.legID))
+    }
+
+    func end(activityID: String) async {
+        ended += 1
+        records.removeAll { $0.id == activityID }
+    }
+
+    func contains(activityID: String) -> Bool {
+        records.contains { $0.id == activityID }
+    }
+
+    func endCount() -> Int { ended }
+}
+
+private actor ReimportSnapshotNoop: FlightCountdownSnapshotClient {
+    func persist(_ snapshot: FlightCountdownSnapshot?) async {}
+    func reloadWidgets() async {}
+}
 
 /// Counts snapshot uploads so a test can assert that a failed import published nothing.
 private actor RecordingDeviceScheduleService: DeviceScheduleCloudKitServicing {

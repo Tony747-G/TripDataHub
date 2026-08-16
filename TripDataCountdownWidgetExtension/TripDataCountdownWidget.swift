@@ -1,15 +1,7 @@
+import ActivityKit
 import SwiftUI
 import WidgetKit
-import ActivityKit
 
-// MARK: - Shared helpers (file-private)
-
-/// Single flight number formatter used by both the live activity view and compact Dynamic Island.
-/// Falls back to "DH" for deadhead legs with no number, or `unknownFallback` for non-deadhead.
-/// Handles three cases:
-///   - Already prefixed (e.g. "5X76")  → kept as-is ("5X76")
-///   - Other airline prefix (e.g. "UA123") → uppercased ("UA123")
-///   - Numeric only (e.g. "76") → UPS prefix prepended ("5X76")
 private func formattedFlightNumber(
     _ number: String?,
     isDeadhead: Bool,
@@ -31,35 +23,70 @@ private func formattedFlightNumber(
     return isDeadhead ? "DH \(normalized)" : normalized
 }
 
-/// Compact "H:MM" format for narrow Dynamic Island slots where "Xh Xm" doesn't fit.
-private func compactDurationText(from start: Date, to end: Date) -> String {
-    let mins = max(0, Int(end.timeIntervalSince(start)) / 60)
-    return "\(mins / 60):\(String(format: "%02d", mins % 60))"
-}
-
-/// Lock covers both dictionary access and the formatting call so no formatter
-/// is ever used outside the lock — avoiding the DateFormatter thread-safety ambiguity.
 private let liveActivityFormatterLock = NSLock()
 private var liveActivityDateFormatterCache: [String: DateFormatter] = [:]
 
 private func liveActivityLocalDateText(_ date: Date, tzID: String) -> String {
     liveActivityFormatterLock.lock(); defer { liveActivityFormatterLock.unlock() }
-    let f: DateFormatter
+    let formatter: DateFormatter
     if let existing = liveActivityDateFormatterCache[tzID] {
-        f = existing
+        formatter = existing
     } else {
-        let newF = DateFormatter()
-        newF.calendar = Calendar(identifier: .gregorian)
-        newF.locale = Locale(identifier: "en_US_POSIX")
-        newF.dateFormat = "MMM d (EEE)"
-        newF.timeZone = TimeZone(identifier: tzID) ?? TimeZone(secondsFromGMT: 0)
-        liveActivityDateFormatterCache[tzID] = newF
-        f = newF
+        let newFormatter = DateFormatter()
+        newFormatter.calendar = Calendar(identifier: .gregorian)
+        newFormatter.locale = Locale(identifier: "en_US_POSIX")
+        newFormatter.dateFormat = "MMM d (EEE)"
+        newFormatter.timeZone = TimeZone(identifier: tzID) ?? TimeZone(secondsFromGMT: 0)
+        liveActivityDateFormatterCache[tzID] = newFormatter
+        formatter = newFormatter
     }
-    return f.string(from: date)
+    return formatter.string(from: date)
 }
 
-// MARK: - Snapshot store
+private struct OperationalStatusView: View {
+    let state: FlightOperationalState
+    let plannedDepartureUTC: Date
+    let plannedArrivalUTC: Date
+    let reportTimeUTC: Date?
+
+    var body: some View {
+        switch state {
+        case .preReport:
+            if let reportTimeUTC, reportTimeUTC > Date.now {
+                countdownLine(prefix: "Report in", target: reportTimeUTC)
+            }
+        case .postReportPreDeparture:
+            if plannedDepartureUTC > Date.now {
+                countdownLine(prefix: "Dep in", target: plannedDepartureUTC)
+            }
+        case .scheduledDeparturePassed:
+            Text("Scheduled Departure Time Passed")
+        case .inFlight:
+            if plannedArrivalUTC > Date.now {
+                countdownLine(prefix: "Arriving in", target: plannedArrivalUTC)
+            }
+        case .scheduledArrivalPassed:
+            let staleBoundary = plannedArrivalUTC.addingTimeInterval(60 * 60)
+            if Date.now < staleBoundary {
+                HStack(spacing: 4) {
+                    Text("Scheduled Arrival Time Passed")
+                    Text(timerInterval: plannedArrivalUTC...staleBoundary, countsDown: false)
+                }
+                .monospacedDigit()
+            }
+        case .completed, .stale:
+            EmptyView()
+        }
+    }
+
+    private func countdownLine(prefix: String, target: Date) -> some View {
+        HStack(spacing: 4) {
+            Text(prefix)
+            Text(timerInterval: Date.now...target, countsDown: true)
+        }
+        .monospacedDigit()
+    }
+}
 
 private struct FlightCountdownEntry: TimelineEntry {
     let date: Date
@@ -83,27 +110,29 @@ private enum FlightCountdownSnapshotStore {
     }
 
     static func placeholderSnapshot(now: Date = Date()) -> FlightCountdownSnapshot {
-        FlightCountdownSnapshot(
+        let departure = now.addingTimeInterval(2 * 60 * 60 + 11 * 60)
+        return FlightCountdownSnapshot(
             updatedAtUTC: now,
-            phase: .widget,
+            state: .postReportPreDeparture,
+            visibility: .widget,
             legID: "preview",
             flightNumber: "5X750",
             isDeadhead: false,
             departureAirportIATA: "SGN",
             arrivalAirportIATA: "NRT",
-            scheduledDepartureUTC: now.addingTimeInterval(2 * 60 * 60 + 11 * 60),
-            scheduledArrivalUTC: now.addingTimeInterval(9 * 60 * 60 + 41 * 60),
+            plannedDepartureUTC: departure,
+            plannedArrivalUTC: now.addingTimeInterval(9 * 60 * 60 + 41 * 60),
+            reportTimeUTC: nil,
             departureTimeZoneID: "Asia/Ho_Chi_Minh",
             arrivalTimeZoneID: "Asia/Tokyo",
             departureDateText: "Mar 13",
             departureTimeText: "07:50",
             arrivalDateText: "Mar 13",
-            arrivalTimeText: "15:20"
+            arrivalTimeText: "15:20",
+            referenceText: nil
         )
     }
 }
-
-// MARK: - Timeline provider
 
 private struct FlightCountdownProvider: TimelineProvider {
     func placeholder(in context: Context) -> FlightCountdownEntry {
@@ -123,33 +152,23 @@ private struct FlightCountdownProvider: TimelineProvider {
         }
 
         let current = FlightCountdownEntry(date: now, snapshot: snapshot)
-        let effectivePhase = FlightCountdownSharedStore.phase(
-            scheduledDepartureUTC: snapshot.scheduledDepartureUTC,
-            now: now
-        )
-        let refreshDate: Date
-        switch effectivePhase {
-        case .widget:
-            // Refresh just after the widget-to-live-activity transition boundary
-            refreshDate = snapshot.scheduledDepartureUTC.addingTimeInterval(-FlightCountdownSharedStore.liveLeadTime + 1)
-        case .liveCountdown, .liveDelayed, .finished, .none:
-            refreshDate = now.addingTimeInterval(30 * 60)
-        }
-
+        let refreshDate = FlightPresentationPolicy.nextVisibilityBoundary(
+            plannedDepartureUTC: snapshot.plannedDepartureUTC,
+            nowUTC: now
+        )?.addingTimeInterval(1) ?? now.addingTimeInterval(30 * 60)
         completion(Timeline(entries: [current], policy: .after(refreshDate)))
     }
 }
-
-// MARK: - Widget view
 
 private struct FlightCountdownWidgetEntryView: View {
     let entry: FlightCountdownEntry
 
     var body: some View {
         if let snapshot = entry.snapshot,
-           FlightCountdownSharedStore.phase(
-               scheduledDepartureUTC: snapshot.scheduledDepartureUTC,
-               now: entry.date
+           FlightPresentationPolicy.visibility(
+               for: snapshot.state,
+               plannedDepartureUTC: snapshot.plannedDepartureUTC,
+               nowUTC: entry.date
            ) == .widget {
             VStack(alignment: .leading, spacing: 8) {
                 Text(snapshot.departureDateText.uppercased())
@@ -161,11 +180,16 @@ private struct FlightCountdownWidgetEntryView: View {
                         .font(.headline)
                         .lineLimit(2)
                         .minimumScaleFactor(0.85)
-                    statusLine(snapshot)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.green)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.9)
+                    OperationalStatusView(
+                        state: snapshot.state,
+                        plannedDepartureUTC: snapshot.plannedDepartureUTC,
+                        plannedArrivalUTC: snapshot.plannedArrivalUTC,
+                        reportTimeUTC: snapshot.reportTimeUTC
+                    )
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.green)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.9)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -197,94 +221,67 @@ private struct FlightCountdownWidgetEntryView: View {
     private func routeText(_ snapshot: FlightCountdownSnapshot) -> String {
         "\(snapshot.departureAirportIATA) \(snapshot.departureTimeText) -> \(snapshot.arrivalDateText) \(snapshot.arrivalTimeText) \(snapshot.arrivalAirportIATA)"
     }
-
-    @ViewBuilder
-    private func statusLine(_ snapshot: FlightCountdownSnapshot) -> some View {
-        HStack(spacing: 4) {
-            Text("Departure in")
-            Text(timerInterval: entry.date...snapshot.scheduledDepartureUTC, countsDown: true)
-        }
-        .monospacedDigit()
-    }
 }
-
-// MARK: - Live activity view
 
 private struct FlightCountdownLiveActivityView: View {
     let state: FlightCountdownAttributes.ContentState
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 60)) { timeline in
-            let displayMode = mode(at: timeline.date)
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Flight: \(formattedFlightNumber(state.flightNumber, isDeadhead: state.isDeadhead, unknownFallback: "UNKNOWN"))")
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-
-                HStack(spacing: 8) {
-                    Text("\(state.departureAirportIATA) \(state.departureTimeText)")
-                    Spacer(minLength: 0)
-                    Text("・・・✈・・・")
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                    Text("\(state.arrivalAirportIATA) \(state.arrivalTimeText)")
-                }
-                .font(.title3.weight(.semibold))
-                .monospacedDigit()
-
-                HStack(spacing: 8) {
-                    Text(localDateText(date: state.scheduledDepartureUTC, timeZoneID: state.departureTimeZoneID))
-                    Spacer(minLength: 12)
-                    Text(localDateText(date: state.scheduledArrivalUTC, timeZoneID: state.arrivalTimeZoneID))
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Flight: \(formattedFlightNumber(state.flightNumber, isDeadhead: state.isDeadhead, unknownFallback: "UNKNOWN"))")
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .lineLimit(1)
 
-                Text(activityStatusText(mode: displayMode, now: timeline.date))
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(displayMode == .delayed ? .red : .green)
+            FlightCountdownRouteLineView(
+                departureAirport: state.departureAirportIATA,
+                departureTime: state.departureTimeText,
+                arrivalAirport: state.arrivalAirportIATA,
+                arrivalTime: state.arrivalTimeText
+            )
+
+            HStack(spacing: 8) {
+                Text(liveActivityLocalDateText(state.plannedDepartureUTC, tzID: state.departureTimeZoneID))
+                Spacer(minLength: 12)
+                Text(liveActivityLocalDateText(state.plannedArrivalUTC, tzID: state.arrivalTimeZoneID))
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.secondary)
+
+            OperationalStatusView(
+                state: state.state,
+                plannedDepartureUTC: state.plannedDepartureUTC,
+                plannedArrivalUTC: state.plannedArrivalUTC,
+                reportTimeUTC: state.reportTimeUTC
+            )
+            .font(.title3.weight(.bold))
+            .foregroundStyle(statusColor)
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
+
+            if state.state == .scheduledArrivalPassed, let referenceText = state.referenceText {
+                Text(referenceText)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.leading, 14)
-            .padding(.trailing, 10)
-            .padding(.vertical, 6)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, 14)
+        .padding(.trailing, 10)
+        .padding(.vertical, 6)
     }
 
-    private func mode(at date: Date) -> CountdownMode {
-        if date >= state.scheduledDepartureUTC.addingTimeInterval(FlightCountdownSharedStore.delayedTailTime) {
-            return .finished
-        }
-        if date >= state.scheduledDepartureUTC {
-            return .delayed
-        }
-        return .countdown
-    }
-
-    private enum CountdownMode {
-        case countdown
-        case delayed
-        case finished
-    }
-
-    private func localDateText(date: Date, timeZoneID: String) -> String {
-        liveActivityLocalDateText(date, tzID: timeZoneID)
-    }
-
-    private func activityStatusText(mode: CountdownMode, now: Date) -> String {
-        switch mode {
-        case .countdown:
-            return "Departure in \(FlightCountdownSharedStore.durationText(from: now, to: state.scheduledDepartureUTC))"
-        case .delayed:
-            return "Delayed \(FlightCountdownSharedStore.durationText(from: state.scheduledDepartureUTC, to: now))"
-        case .finished:
-            return "Completed"
+    private var statusColor: Color {
+        switch state.state {
+        case .scheduledDeparturePassed, .scheduledArrivalPassed:
+            return .orange
+        case .preReport, .postReportPreDeparture, .inFlight:
+            return .green
+        case .completed, .stale:
+            return .secondary
         }
     }
 }
-
-// MARK: - Widget declarations
 
 struct TripDataCountdownWidget: Widget {
     let kind = "TripDataCountdownWidget"
@@ -316,22 +313,15 @@ struct FlightCountdownLiveActivityWidget: Widget {
                     .lineLimit(1)
                     .minimumScaleFactor(0.9)
             } compactTrailing: {
-                TimelineView(.periodic(from: .now, by: 60)) { timeline in
-                    if timeline.date >= context.state.scheduledDepartureUTC {
-                        Text("+\(compactDurationText(from: context.state.scheduledDepartureUTC, to: timeline.date)) STD")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.red)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
-                    } else {
-                        Text("Dep in \(compactDurationText(from: timeline.date, to: context.state.scheduledDepartureUTC))")
-                            .font(.caption2.weight(.bold))
-                            .monospacedDigit()
-                            .foregroundStyle(.green)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
-                    }
-                }
+                OperationalStatusView(
+                    state: context.state.state,
+                    plannedDepartureUTC: context.state.plannedDepartureUTC,
+                    plannedArrivalUTC: context.state.plannedArrivalUTC,
+                    reportTimeUTC: context.state.reportTimeUTC
+                )
+                .font(.caption2.weight(.bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.45)
             } minimal: {
                 Text("✈ \(formattedFlightNumber(context.state.flightNumber, isDeadhead: context.state.isDeadhead, unknownFallback: "Flight"))")
                     .font(.caption2.weight(.bold))

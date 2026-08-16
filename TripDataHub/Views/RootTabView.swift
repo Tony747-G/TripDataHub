@@ -12,6 +12,7 @@ struct RootTabView: View {
     @AppStorage("appearance_mode") private var appearanceModeRawValue = AppearanceMode.system.rawValue
     @AppStorage("app_font_size_option") private var appFontSizeOptionRawValue = AppFontSizeOption.medium.rawValue
     @AppStorage("app_font_size_migrated_to_medium") private var didMigrateFontSizeToMedium = false
+    @AppStorage("timeline_clock_display") private var timelineClockDisplayRawValue = TimelineClockDisplay.lcl.rawValue
     @State private var isShowingImportPreviewFromExternalOpen = false
     @State private var primaryScreen: IPhonePrimaryScreen = .timeline
     @State private var hasLoadedCalendar = false
@@ -107,7 +108,6 @@ struct RootTabView: View {
             UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: ProfileStorageKeys.lastSeenAt)
             migrateFontSizeDefaultIfNeeded()
             viewModel.consumePendingAppGroupImportIfAvailable()
-            viewModel.refreshFlightCountdownPresentation()
             Task {
                 await viewModel.autoFetchOnAppActiveIfEnabled(autoFetchOnOpen)
             }
@@ -121,8 +121,8 @@ struct RootTabView: View {
             if newPhase == .active {
                 UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: ProfileStorageKeys.lastSeenAt)
                 viewModel.consumePendingAppGroupImportIfAvailable()
-                viewModel.refreshFlightCountdownPresentation()
                 Task {
+                    await viewModel.refreshFlightCountdownPresentation(mode: .reconcile)
                     await viewModel.autoFetchOnAppActiveIfEnabled(autoFetchOnOpen)
                 }
                 if AppEnvironment.isFriendSharingVisible {
@@ -133,13 +133,21 @@ struct RootTabView: View {
             }
         }
         .onChange(of: viewModel.scheduleDataRevision) { _, _ in
-            viewModel.refreshFlightCountdownPresentation()
+            Task {
+                await viewModel.refreshFlightCountdownPresentation(mode: .reconcile)
+            }
             viewModel.handleSchedulesChangedForSharing()
         }
-        .onChange(of: viewModel.pendingImport?.id) { _, newValue in
-            if newValue != nil, !showingBrowser {
-                isShowingImportPreviewFromExternalOpen = true
+        .onChange(of: timelineClockDisplayRawValue) { _, _ in
+            Task {
+                await viewModel.refreshFlightCountdownPresentation(mode: .reconcile)
             }
+        }
+        .onChange(of: viewModel.pendingImport?.id) { _, newValue in
+            isShowingImportPreviewFromExternalOpen = ImportPreviewPresentationPolicy.externalPreviewIsPresented(
+                pendingImportID: newValue,
+                browserIsPresented: showingBrowser
+            )
         }
         .onChange(of: primaryScreen) { _, newScreen in
             if newScreen == .calendar {

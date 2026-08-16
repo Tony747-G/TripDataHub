@@ -150,7 +150,7 @@ struct IPadTimelineSidebarView: View {
                                                 fontScale: timelineFontScale,
                                                 timeRangeText: timeRangeText(for: leg),
                                                 dayDiff: dayShift(for: leg),
-                                                blockText: blockText(for: leg),
+                                                blockConnectionDisplay: blockConnectionDisplay(for: leg),
                                                 iconColor: hasFlightMatch ? friendMatchAmber : .primary,
                                                 // Selection and highlight are transient UI state and must win over the
                                                 // schedule-state tint. Passing them in keeps both backgrounds in the same
@@ -727,15 +727,18 @@ struct IPadTimelineSidebarView: View {
         return formatter
     }()
 
-    private func blockText(for leg: TripLeg) -> String {
-        let text = LegConnectionTextBuilder.blockAndConnectionText(for: leg, nextLegByID: legData.nextLegByID)
-        if shouldShowLayover(leg: leg),
-           let slashRange = text.range(of: " / ") {
-            return String(text[..<slashRange.lowerBound])
+    private func blockConnectionDisplay(for leg: TripLeg) -> BlockConnectionDisplay {
+        let display = LegConnectionTextBuilder.blockAndConnectionDisplay(
+            for: leg,
+            nextLegByID: legData.nextLegByID
+        )
+        if shouldShowLayover(leg: leg) {
+            return display.blockOnly
         }
-        return text
-            .replacingOccurrences(of: "Layover at ", with: "LO at ")
-            .replacingOccurrences(of: "Layover:", with: "LO:")
+        return display.mappingConnection {
+            $0.replacingOccurrences(of: "Layover at ", with: "LO at ")
+                .replacingOccurrences(of: "Layover:", with: "LO:")
+        }
     }
 
     private func arrivalLocalDateLabel(for leg: TripLeg) -> String {

@@ -40,6 +40,9 @@ enum SyncDiagnosticCode: String, Codable {
     case mergedSnapshotPersisted = "merged_snapshot_persisted"
     case mergeNoChange = "merge_no_change"
 
+    // Flight operational state
+    case flightStateInputExcluded = "flight_state_input_excluded"
+
 }
 
 struct SyncDiagnosticEntry: Codable, Identifiable, Equatable {

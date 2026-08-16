@@ -335,8 +335,8 @@ enum TimelineLayoverSupport {
     }
 
     /// Rest begins at duty end (arrival + 30m) and ends at the next duty start.
-    /// The next duty starts 90m before departure, except flights wholly inside
-    /// CONUS-48, Asia, or Europe, where report is 60m before departure.
+    /// The next duty starts 60m before departure only when both airports are in the Lower 48;
+    /// Alaska, Hawaii, Asia, Europe, and unclassified routes use 90m.
     static func restInfo(arrDate: Date?, nextLeg: TripLeg?) -> RestInfo? {
         guard let arr = arrDate,
               let nextLeg,
@@ -345,7 +345,10 @@ enum TimelineLayoverSupport {
             return nil
         }
         let dutyEnd = arr.addingTimeInterval(30 * 60)
-        let reportLeadMinutes = reportLeadMinutes(for: nextLeg)
+        let reportLeadMinutes = ReportLeadTimePolicy.minutes(
+            originAirport: nextLeg.depAirport,
+            destinationAirport: nextLeg.arrAirport
+        )
         let dutyStart = dep.addingTimeInterval(TimeInterval(-reportLeadMinutes * 60))
         guard dutyStart > dutyEnd else { return nil }
         return RestInfo(
@@ -383,46 +386,6 @@ enum TimelineLayoverSupport {
         return "\(safeMinutes / 60):\(String(format: "%02d", safeMinutes % 60))"
     }
 
-    private static func reportLeadMinutes(for nextLeg: TripLeg) -> Int {
-        flightIsWhollyInsideReducedReportRegion(nextLeg) ? 60 : 90
-    }
-
-    private static func flightIsWhollyInsideReducedReportRegion(_ leg: TripLeg) -> Bool {
-        guard let depRegion = reportRegion(for: leg.depAirport),
-              let arrRegion = reportRegion(for: leg.arrAirport)
-        else {
-            return false
-        }
-        return depRegion == arrRegion
-    }
-
-    private static func reportRegion(for airport: String) -> String? {
-        let normalized = airport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard let tzID = IATATimeZoneResolver.shared.resolve(normalized) else { return nil }
-        if tzID.hasPrefix("Asia/") { return "asia" }
-        if tzID.hasPrefix("Europe/") { return "europe" }
-        if lower48TimeZoneIDs.contains(tzID) { return "conus48" }
-        return nil
-    }
-
-    private static let lower48TimeZoneIDs: Set<String> = [
-        "America/New_York",
-        "America/Detroit",
-        "America/Kentucky/Louisville",
-        "America/Kentucky/Monticello",
-        "America/Indiana/Indianapolis",
-        "America/Indiana/Knox",
-        "America/Indiana/Vincennes",
-        "America/Chicago",
-        "America/Menominee",
-        "America/North_Dakota/Center",
-        "America/North_Dakota/New_Salem",
-        "America/North_Dakota/Beulah",
-        "America/Denver",
-        "America/Boise",
-        "America/Phoenix",
-        "America/Los_Angeles"
-    ]
 }
 
 /// "+Nd" / "−Nd" day-shift label suffix, or empty string for zero shift.

@@ -96,12 +96,10 @@ targets:
     platform: iOS
     sources:
       - path: TripDataCountdownWidgetExtension
-      # Shared countdown models (`FlightCountdownSnapshot`, `FlightCountdownAttributes`,
-      # `CountdownPresentationPhase`, `FlightCountdownSharedStore`) compiled into both the app and
-      # this extension. Dual target membership of one file, not a copy — the phase computation and
-      # the Live Activity attributes must stay byte-identical on both sides of the App Group.
-      # The file imports only Foundation and ActivityKit; `FlightCountdownSnapshotStore` is
-      # private to the widget, so no further app source is required.
+      # Shared operational state and countdown payloads compiled into both the app and extension.
+      # Dual target membership, not copies: state, presentation policy, and Activity attributes
+      # must stay byte-identical on both sides of the App Group.
+      - path: TripDataHub/Models/FlightOperationalState.swift
       - path: TripDataHub/Models/FlightCountdownSharedModels.swift
     settings:
       base:

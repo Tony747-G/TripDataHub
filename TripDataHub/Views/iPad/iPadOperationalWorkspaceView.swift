@@ -20,6 +20,7 @@ struct IPadOperationalWorkspaceView: View {
     @AppStorage(ProfileStorageKeys.passportExpiryDate) private var passportExpiryDate = ""
     @AppStorage(ProfileStorageKeys.chinaVisaExpiryDate) private var chinaVisaExpiryDate = ""
     @AppStorage(OperationalSettings.crewBaseKey) private var crewDomicileRawValue = OperationalSettings.defaultCrewBase.rawValue
+    @AppStorage("timeline_clock_display") private var timelineClockDisplayRawValue = TimelineClockDisplay.lcl.rawValue
     @Environment(\.scenePhase) private var scenePhase
 
     private var selectedAppearanceMode: AppearanceMode {
@@ -114,11 +115,22 @@ struct IPadOperationalWorkspaceView: View {
             if newPhase == .active {
                 viewModel.consumePendingAppGroupImportIfAvailable()
                 Task {
+                    await viewModel.refreshFlightCountdownPresentation(mode: .reconcile)
                     await viewModel.syncCrewAccessDeviceData(reason: "ipad workspace active")
                     if AppEnvironment.isFriendSharingVisible {
                         await viewModel.syncFriendCloudKit(reason: "ipad workspace active")
                     }
                 }
+            }
+        }
+        .onChange(of: viewModel.scheduleDataRevision) { _, _ in
+            Task {
+                await viewModel.refreshFlightCountdownPresentation(mode: .reconcile)
+            }
+        }
+        .onChange(of: timelineClockDisplayRawValue) { _, _ in
+            Task {
+                await viewModel.refreshFlightCountdownPresentation(mode: .reconcile)
             }
         }
         // Calendar trip bars use the same focused popup in portrait and landscape.
@@ -249,7 +261,10 @@ struct IPadOperationalWorkspaceView: View {
             Text(bidPeriodJSONExportErrorMessage ?? "Unable to generate the Bid Period JSON.")
         }
         .onChange(of: viewModel.pendingImport?.id) { _, newValue in
-            isShowingImportPreviewFromExternalOpen = newValue != nil
+            isShowingImportPreviewFromExternalOpen = ImportPreviewPresentationPolicy.externalPreviewIsPresented(
+                pendingImportID: newValue,
+                browserIsPresented: showingBrowser
+            )
         }
     }
 

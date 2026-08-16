@@ -67,9 +67,14 @@ struct OpenTimeTripDetailView: View {
                                             .appScaledFont(.footnote, scale: fontScale)
                                             .foregroundStyle(.primary)
                                         Spacer()
-                                        Text(blockAndLayoverText(for: leg, nextLegByID: connectionMap))
-                                            .appScaledFont(.caption, scale: fontScale)
-                                            .foregroundStyle(.primary)
+                                        BlockConnectionDisplayView(
+                                            display: blockConnectionDisplay(
+                                                for: leg,
+                                                nextLegByID: connectionMap
+                                            ),
+                                            fontScale: fontScale,
+                                            foregroundColor: .primary
+                                        )
                                     }
                                 }
                             }
@@ -184,8 +189,11 @@ struct OpenTimeTripDetailView: View {
         ScheduleDateText.dayShift(from: depText, to: arrText)
     }
 
-    private func blockAndLayoverText(for leg: TripLeg, nextLegByID: [UUID: TripLeg]) -> String {
-        LegConnectionTextBuilder.blockAndConnectionText(for: leg, nextLegByID: nextLegByID)
+    private func blockConnectionDisplay(
+        for leg: TripLeg,
+        nextLegByID: [UUID: TripLeg]
+    ) -> BlockConnectionDisplay {
+        LegConnectionTextBuilder.blockAndConnectionDisplay(for: leg, nextLegByID: nextLegByID)
     }
 
     private var fontScale: CGFloat {
