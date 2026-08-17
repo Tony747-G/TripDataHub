@@ -504,7 +504,7 @@ enum LiveActivityRefreshMode {
 6. `.scheduledArrivalPassed` の 2 行表示（status 行 ＋ reference 行）を実装。reference 行の LCL/UTC は Timeline の表示モード設定に配線する（§3.4）
 7. `selectRelevantLeg` を §3.6 の規則に置換。`.completed` / `.stale` を候補から除外し、到着側 leg を出発側の未来 leg より優先する
 8. Widget / Live Activity の countdown 表示は、**再レンダリング budget に依存しない**方式へ:
-   - `Text(timerInterval:countsDown:)` を使用（OS が連続更新する）
+   - iOS 18 の Live Activity は `SystemFormatStyle.Timer` を `maxPrecision: .seconds(60)` で使用（OS が分境界で更新する）。Home Screen Widget の既存 `Text(timerInterval:countsDown:)` は維持する
    - `TimelineView(.periodic(by: 60))` で文字列を焼き込む現行実装は、更新 budget 切れで stale 値のまま残る。**「数分〜30 分のズレ」の残り半分はここ**（前半は RC-2）
    - `.scheduledArrivalPassed` の経過時間（count-up）も同様に OS 側の連続更新に委ねる
 9. Operating / DH の分岐が engine 内に無いことをレビューで確認

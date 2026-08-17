@@ -85,18 +85,133 @@ Trip 開始前から順に確認する。時間を飛ばせない項目は、実
 
 ---
 
-## D. Layout（Phase 4）
+## D. Layout / Live Activity 実描画（Phase 4 v2）
 
 **iPhone / iPhone Pro Max / iPad の 3 機種すべてで確認すること。**
 
+### D-0. 検証レイヤーの区別（先に読むこと）
+
+**Simulator の PASS と unit test の green は、実機 Acceptance の代替ではない。** 何がどこまでを保証するのかを取り違えると、緑のまま実機が壊れる。実際に 2026-08 の `Report in --hr --min` はこの取り違えで通過した。
+
+| レイヤー | 何を保証するか | 何を保証しないか |
+|---|---|---|
+| unit test（T-14） | 4 行構成が幅によって増減しないこと。3 幅でホスト内レンダリング高さが一致すること | **WidgetKit プロセスでの実描画**。ホスト内 `UIHostingController` は別プロセスの redaction 経路を通らない |
+| unit test（T-50S） | Live Activity 経路が redaction 既知の構文（`Text(timerInterval:)` / `.components(style:` / `.dateRange(`）へ**戻らない**こと | 描画結果そのもの。**ピクセルを一切見ていない** |
+| Simulator 対話確認（B-11〜B-13 / debug fixture） | state 遷移・visibility window・TZ 非依存性・current leg 選択 | 実機の Lock Screen 描画、実運航の時刻進行、実 PDF 由来のデータ |
+| **実機 D-1〜D-7** | 上記すべてが**実際の画面**で成立していること | — |
+
+**T-50S と D-7 の役割分担**
+
+- **T-50S = 構文の回帰防止。** 「誰かが redaction する API へ戻した」を CI で即座に赤にする。人間の目を必要としない
+- **D-7 = 描画結果の受け入れ。** 「その API が今の OS で実際に正しく描かれる」を人間が確認する。自動化できない
+
+**片方だけでは不十分。** T-50S が緑でも OS 側の挙動が変われば D-7 は落ちる。D-7 が過去に PASS でも構文が戻れば意味を失う。**どちらかの PASS をもう一方の代替として報告しないこと。**
+
+---
+
+### D-1〜D-2. Live Activity 4 行レイアウト（v2・Lock Screen ＋ Dynamic Island expanded）
+
+現行仕様は以下。日付は route 行の**上**、中央は SF Symbol の飛行機。
+
+```
+Flight: D901
+
+Aug 16 (Sun)                    Aug 17 (Mon)
+ANC 16:13          ✈           ICN 17:33
+
+Report in 3hr 15min
+```
+
 | # | 確認内容 | 期待 |
 |---|---|---|
-| D-1 | Live Activity の route 行 | `ANC 23:24 → SGN 02:45` が **1 行**。2 行に折り返さない |
-| D-2 | 同上 | 飛行機アイコンや装飾がない |
+| D-1 | 行構成 | **常に 4 行**。幅・機種・文字サイズによって 5 行以上に増えない、3 行に減らない |
+| D-1b | 2 行目（日付）と 3 行目（空港＋時刻）の左右 | 出発側は**左端で揃う**、到着側は**右端で揃う**。カラムがずれない |
+| D-1c | 4 つのテキスト（日付 2 ＋ 空港時刻 2） | いずれも **1 行**。折り返さない。長い便名・4 文字空港でも縮小で吸収される |
+| D-2 | 中央のアイコン | **SF Symbol の飛行機 1 個**。`・・・✈・・・` のような文字装飾ではない |
+| D-2b | 進行方向 | 飛行機が**左→右に読める向き** |
+| D-2c | 幅が不足したとき | **縮むのはテキスト側**。アイコンの大きさと位置は変わらず、テキストカラムを押し出さない |
+
+> **旧 D-1 / D-2 は廃止。** 旧版は「route 行が 1 行であること」「飛行機アイコンや装飾がないこと」を要求していたが、これは wrap バグ回避のための当時の暫定仕様であり、v2 で意図的に覆した。旧仕様のまま確認して NG を上げないこと。
+
+### D-3〜D-6. Timeline Connection card（**本変更の対象外・従来どおり**）
+
+番号は据え置き。他ドキュメントからの参照を壊さないため。
+
+| # | 確認内容 | 期待 |
+|---|---|---|
 | D-3 | Timeline の Connection card（ICN-CGO leg） | 2 行:<br>`Block: 02:44`<br>`Connection at CGO: 2:31` |
 | D-4 | 同上 | 両方**右揃え**。`/` で繋がった 1 行になっていない |
 | D-5 | iPad の Connection card | iPhone と**同じ 2 行構造** |
 | D-6 | 文字サイズ設定を大きくする | 折り返しが発生しない（縮小で吸収される） |
+
+---
+
+### D-7. Live Activity duration rendering（**自動テスト不能・実機必須**）
+
+**この項目は自動化できない。人間が実際の画面を見る以外に検証手段がない。**
+
+**自動化不能の理由**: WidgetKit extension は別プロセスで描画され、公開 XCTest API から Lock Screen へ遷移する手段がなく（`XCUIDevice.Button` に `.lock` が存在しない）、SpringBoard へ固定 UTC を注入できない。ActivityKit 実 host / ホスト内 snapshot / XCUITest の 3 方式すべてを検証済み。（調査記録: `SWE_INSTRUCTION_IOS18_BASELINE_AND_T50.md` B-1）
+
+#### 対象サーフェス（どれを見るかを取り違えないこと）
+
+| サーフェス | 描画元 | 表記 | D-7 対象 |
+|---|---|---|---|
+| **Lock Screen Live Activity** | `LiveActivityOperationalStatusView` | `HHhr MMmin`（分精度） | **対象** |
+| **Dynamic Island expanded** | 同上 | `HHhr MMmin`（分精度） | **対象** |
+| Dynamic Island compact | `LegacyOperationalStatusView` | `H:MM:SS`（秒あり） | 対象外。**秒が出るのが正**。NG に上げない |
+| Dynamic Island minimal | 同上 | 同上 | 同上 |
+| Home Screen Widget | 同上 | 同上 | 対象外。`FlightPresentationPolicy` により Live Activity と**同時に出ない**ため利用者が並べて見ることはない（follow-up として記録済み） |
+
+#### 確認項目
+
+| # | サーフェス | 確認内容 | 期待 |
+|---|---|---|---|
+| D-7a | **Lock Screen** | `Report in` の数値部 | `3hr 15min` の形。`--` / `–` / `––` / 空欄 / placeholder が**出ない** |
+| D-7b | **Dynamic Island expanded** | 同上 | 同上。Lock Screen と**同じ値**を示す |
+| D-7c | Lock Screen | 分境界をまたぐまで**画面を見たまま待つ**（最大 60 秒） | **アプリを開かずに**値が 1 減る。凍結しない |
+| D-7d | Lock Screen | アプリをバックグラウンドに置いたまま 10 分以上放置してから見る | 値が正しく進んでいる。古い値が残らない |
+| D-7e | Lock Screen | device TZ を ANC → SGN → ICN と変更 | **duration が変化しない**。変わるのは空港時刻の表記のみ |
+| D-7f | Lock Screen / DI expanded | `Dep in` / `Arriving in` / `Scheduled Arrival Time Passed` の各状態 | いずれも D-7a と同じ条件を満たす。**4 状態すべてを見ること** |
+| D-7g | Lock Screen | 秒 | **表示されない** |
+
+**D-7c と D-7d が本項目の中核。** 「秒が消えているか」だけを見て PASS としないこと。`SystemFormatStyle.Timer` を採用した根拠は「**OS が自動更新するのでアプリを開かなくても値が凍結しない**」であり、そこを確認しなければ採用根拠が未検証のまま残る。
+
+#### 再実行が必須になる契機
+
+1. iOS メジャーバージョン更新
+2. `LiveActivityOperationalStatusView` または `FlightCountdownLiveActivityTimerContract` の変更
+3. Xcode メジャーバージョン更新
+
+---
+
+## Priority 2 完了条件（再定義）
+
+**旧定義「D-1〜D-6 を 3 幅で確認」は無効。** v2 レイアウトと D-7 追加を反映して以下に置き換える。
+
+Priority 2 が完了したと報告できるのは、**次の 3 条件をすべて満たしたとき**に限る。
+
+**条件 1 — レイアウト（3 幅 × 実機）**
+
+- D-1 / D-1b / D-1c / D-2 / D-2b / D-2c を **iPhone / iPhone Pro Max / iPad の実機**で確認
+- **Lock Screen と Dynamic Island expanded の両方**で確認する。片方のみは不可
+- D-3〜D-6（Timeline Connection card）も同 3 機種で確認
+
+**条件 2 — 実描画（D-7）**
+
+- D-7a〜D-7g を実機で確認
+- **4 状態（`Report in` / `Dep in` / `Arriving in` / `Scheduled Arrival Time Passed`）すべて**を通す。DEBUG fixture で到達できる状態は fixture で、できないものは実運航で
+- **DEBUG fixture で到達できる範囲だけを見て「D-7 PASS」と報告しない。** どの状態を fixture で見て、どれが実運航待ちかを明示する
+
+**条件 3 — 記録**
+
+- 3 幅 × 2 サーフェスのスクリーンショットを添付
+- Simulator で見たものと実機で見たものを**区別して**記録する。「Simulator で確認」は条件 1・2 のいずれも満たさない
+
+**明示的に Priority 2 の完了条件に含めないもの**
+
+- T-14 / T-50S の green — CI の前提条件であって、完了の根拠ではない
+- B-11〜B-13 の Simulator PASS — Priority 1 の項目であり、レイアウトを何も保証しない
+- 実運航でしか到達できない `Arriving in`（airborne）と `Scheduled Arrival Time Passed` — **次のトリップまで開いたままにする。** これらが未確認であることを理由に Priority 2 を止めず、「条件付き完了・実運航待ち 2 項目」として報告すること
 
 ---
 
@@ -127,7 +242,32 @@ Trip 開始前から順に確認する。時間を飛ばせない項目は、実
 
 ## 補足
 
-- **2026-08-15 実機確認の結果**: A（transaction）は PASS、**A-3 は FAIL** で UI を `.alert` へ修正済み。A-3 / A-3b / A-3c は**再確認が必要**。B〜E は端末 offline のため未実施。
-- B-6 / B-7 / B-8 / C-5 は**実際のトリップ中でないと確認しにくい**。次の `ANC-SGN-ICN-CGO-ICN-ANC` パターンで確認するのが確実。
-- B-11〜B-13 と C-6 / C-7 / D-1〜D-6 は**地上で今すぐ確認できる**。先にこちらを消化しておくと差し戻しが早い。
-- 未 commit の状態で実機に入れる必要があるため、Xcode から直接インストールすること。
+### 検証状況（2026-08-17 時点）
+
+| 区分 | 状況 |
+|---|---|
+| A（import transaction） | **PASS**。ただし **A-3 / A-3b / A-3c は再確認が必要**（2026-08-15 に A-3 FAIL → `.alert` へ修正済み） |
+| A-8〜A-11（重複配送ストレス） | 未実施。Priority 5 |
+| B-1〜B-5 / B-9 / B-10 / B-14 | 未実施。一部は DEBUG fixture で前倒し可能 |
+| B-6 / B-7 / B-8 | **実運航待ち**。airborne / STA 経過は地上で作れない |
+| B-11〜B-13 | Simulator で PASS。**実機での再確認は未実施**（Priority 1 は Simulator harness までで完了扱い） |
+| C-1〜C-4 / C-8 | 未実施 |
+| C-5 | **実運航待ち**（到着後 relaunch） |
+| C-6 / C-7 | 未実施。Priority 3 |
+| D-1〜D-7 | **未実施。Priority 2（本 v2 定義で実施すること）** |
+| E-1 / E-3 / E-4 / E-5 | 未実施 |
+| E-2 | 未実施。Priority 4 |
+
+### 実施順の推奨
+
+1. **Priority 2（D-1〜D-7）** — 地上で今すぐ消化できる。Live Activity 変更の commit 直後に実施するのが最も差し戻しが早い
+2. Priority 3（C-6 / C-7） — 起動系。同じく地上で可能
+3. Priority 4（E-2） — Friends rest window
+4. Priority 5（A-8〜A-11） — import ストレス。実 PDF が必要
+5. **実運航 acceptance（B-6 / B-7 / B-8 / C-5 / C-8 ＋ D-7 の airborne 系）** — 次の `ANC-SGN-ICN-CGO-ICN-ANC` で確認
+
+### 注意
+
+- **Simulator / unit test の PASS を実機 Acceptance として報告しないこと。** D-0 の表を参照。Definition of Done の「実機で iPhone + iPad を確認」は、実機でしか閉じられない
+- 未 commit の状態で実機に入れる必要があるため、Xcode から直接インストールすること
+- DEBUG fixture（Settings から起動）を使うと、実運航を待たずに `Report in` / `Dep in` の描画を確認できる。ただし **fixture は in-memory・非永続**であり、CloudKit / Friends へは一切上がらない。実 Trip データでの確認を置き換えるものではない

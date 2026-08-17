@@ -44,6 +44,33 @@ private func liveActivityLocalDateText(_ date: Date, tzID: String) -> String {
 }
 
 private struct OperationalStatusView: View {
+    let presentationStyle: FlightCountdownStatusPresentationStyle
+    let state: FlightOperationalState
+    let plannedDepartureUTC: Date
+    let plannedArrivalUTC: Date
+    let reportTimeUTC: Date?
+
+    @ViewBuilder
+    var body: some View {
+        if presentationStyle.usesLiveActivitySystemTimer {
+            LiveActivityOperationalStatusView(
+                state: state,
+                plannedDepartureUTC: plannedDepartureUTC,
+                plannedArrivalUTC: plannedArrivalUTC,
+                reportTimeUTC: reportTimeUTC
+            )
+        } else {
+            LegacyOperationalStatusView(
+                state: state,
+                plannedDepartureUTC: plannedDepartureUTC,
+                plannedArrivalUTC: plannedArrivalUTC,
+                reportTimeUTC: reportTimeUTC
+            )
+        }
+    }
+}
+
+private struct LegacyOperationalStatusView: View {
     let state: FlightOperationalState
     let plannedDepartureUTC: Date
     let plannedArrivalUTC: Date
@@ -83,6 +110,77 @@ private struct OperationalStatusView: View {
         HStack(spacing: 4) {
             Text(prefix)
             Text(timerInterval: Date.now...target, countsDown: true)
+        }
+        .monospacedDigit()
+    }
+}
+
+private struct LiveActivityOperationalStatusView: View {
+    let state: FlightOperationalState
+    let plannedDepartureUTC: Date
+    let plannedArrivalUTC: Date
+    let reportTimeUTC: Date?
+    var showsPrefix = true
+
+    var body: some View {
+        switch state {
+        case .preReport:
+            if let reportTimeUTC, reportTimeUTC > Date.now {
+                countdownLine(prefix: "Report in", target: reportTimeUTC)
+            }
+        case .postReportPreDeparture:
+            if plannedDepartureUTC > Date.now {
+                countdownLine(prefix: "Dep in", target: plannedDepartureUTC)
+            }
+        case .scheduledDeparturePassed:
+            Text("Scheduled Departure Time Passed")
+        case .inFlight:
+            if plannedArrivalUTC > Date.now {
+                countdownLine(prefix: "Arriving in", target: plannedArrivalUTC)
+            }
+        case .scheduledArrivalPassed:
+            let staleBoundary = plannedArrivalUTC.addingTimeInterval(60 * 60)
+            if Date.now < staleBoundary {
+                HStack(spacing: 4) {
+                    if showsPrefix {
+                        Text("Scheduled Arrival Time Passed")
+                    }
+                    Text(
+                        .currentDate,
+                        format: .timer(
+                            countingUpIn: FlightCountdownLiveActivityTimerContract.countUpInterval(
+                                startingAt: plannedArrivalUTC,
+                                staleAt: staleBoundary
+                            ),
+                            showsHours: true,
+                            maxFieldCount: FlightCountdownLiveActivityTimerContract.maxFieldCount,
+                            maxPrecision: FlightCountdownLiveActivityTimerContract.maxPrecision
+                        )
+                    )
+                }
+                .monospacedDigit()
+            }
+        case .completed, .stale:
+            EmptyView()
+        }
+    }
+
+    private func countdownLine(prefix: String, target: Date) -> some View {
+        HStack(spacing: 4) {
+            if showsPrefix {
+                Text(prefix)
+            }
+            Text(
+                .currentDate,
+                format: .timer(
+                    countingDownIn: FlightCountdownLiveActivityTimerContract.countdownInterval(
+                        endingAt: target
+                    ),
+                    showsHours: true,
+                    maxFieldCount: FlightCountdownLiveActivityTimerContract.maxFieldCount,
+                    maxPrecision: FlightCountdownLiveActivityTimerContract.maxPrecision
+                )
+            )
         }
         .monospacedDigit()
     }
@@ -181,6 +279,7 @@ private struct FlightCountdownWidgetEntryView: View {
                         .lineLimit(2)
                         .minimumScaleFactor(0.85)
                     OperationalStatusView(
+                        presentationStyle: .widget,
                         state: snapshot.state,
                         plannedDepartureUTC: snapshot.plannedDepartureUTC,
                         plannedArrivalUTC: snapshot.plannedArrivalUTC,
@@ -228,35 +327,28 @@ private struct FlightCountdownLiveActivityView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Flight: \(formattedFlightNumber(state.flightNumber, isDeadhead: state.isDeadhead, unknownFallback: "UNKNOWN"))")
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
-
-            FlightCountdownRouteLineView(
-                departureAirport: state.departureAirportIATA,
-                departureTime: state.departureTimeText,
-                arrivalAirport: state.arrivalAirportIATA,
-                arrivalTime: state.arrivalTimeText
-            )
-
-            HStack(spacing: 8) {
-                Text(liveActivityLocalDateText(state.plannedDepartureUTC, tzID: state.departureTimeZoneID))
-                Spacer(minLength: 12)
-                Text(liveActivityLocalDateText(state.plannedArrivalUTC, tzID: state.arrivalTimeZoneID))
+            FlightCountdownExpandedLayoutView(
+                flightText: "Flight: \(formattedFlightNumber(state.flightNumber, isDeadhead: state.isDeadhead, unknownFallback: "UNKNOWN"))",
+                departureDateText: liveActivityLocalDateText(
+                    state.plannedDepartureUTC,
+                    tzID: state.departureTimeZoneID
+                ),
+                departureAirportTimeText: "\(state.departureAirportIATA) \(state.departureTimeText)",
+                arrivalDateText: liveActivityLocalDateText(
+                    state.plannedArrivalUTC,
+                    tzID: state.arrivalTimeZoneID
+                ),
+                arrivalAirportTimeText: "\(state.arrivalAirportIATA) \(state.arrivalTimeText)"
+            ) {
+                OperationalStatusView(
+                    presentationStyle: .liveActivity,
+                    state: state.state,
+                    plannedDepartureUTC: state.plannedDepartureUTC,
+                    plannedArrivalUTC: state.plannedArrivalUTC,
+                    reportTimeUTC: state.reportTimeUTC
+                )
+                .foregroundStyle(statusColor)
             }
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.secondary)
-
-            OperationalStatusView(
-                state: state.state,
-                plannedDepartureUTC: state.plannedDepartureUTC,
-                plannedArrivalUTC: state.plannedArrivalUTC,
-                reportTimeUTC: state.reportTimeUTC
-            )
-            .font(.title3.weight(.bold))
-            .foregroundStyle(statusColor)
-            .lineLimit(1)
-            .minimumScaleFactor(0.72)
 
             if state.state == .scheduledArrivalPassed, let referenceText = state.referenceText {
                 Text(referenceText)
@@ -310,21 +402,25 @@ struct FlightCountdownLiveActivityWidget: Widget {
             } compactLeading: {
                 Text("✈ \(formattedFlightNumber(context.state.flightNumber, isDeadhead: context.state.isDeadhead, unknownFallback: "Flight"))")
                     .font(.caption2.weight(.bold))
+                    .foregroundStyle(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.9)
             } compactTrailing: {
-                OperationalStatusView(
+                LiveActivityOperationalStatusView(
                     state: context.state.state,
                     plannedDepartureUTC: context.state.plannedDepartureUTC,
                     plannedArrivalUTC: context.state.plannedArrivalUTC,
-                    reportTimeUTC: context.state.reportTimeUTC
+                    reportTimeUTC: context.state.reportTimeUTC,
+                    showsPrefix: false
                 )
                 .font(.caption2.weight(.bold))
+                .foregroundStyle(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.45)
             } minimal: {
                 Text("✈ \(formattedFlightNumber(context.state.flightNumber, isDeadhead: context.state.isDeadhead, unknownFallback: "Flight"))")
                     .font(.caption2.weight(.bold))
+                    .foregroundStyle(.white)
             }
         }
     }

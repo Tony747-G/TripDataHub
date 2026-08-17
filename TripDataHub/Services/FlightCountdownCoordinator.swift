@@ -107,8 +107,18 @@ struct SystemFlightCountdownActivityClient: FlightCountdownActivityClient {
                 arrivalTimeText: snapshot.arrivalTimeText,
                 referenceText: snapshot.referenceText
             ),
-            staleDate: snapshot.plannedArrivalUTC.addingTimeInterval(60 * 60)
+            staleDate: FlightCountdownActivityLifecyclePolicy.staleDate(
+                plannedArrivalUTC: snapshot.plannedArrivalUTC
+            )
         )
+    }
+}
+
+enum FlightCountdownActivityLifecyclePolicy {
+    static let staleGraceInterval: TimeInterval = 60 * 60
+
+    static func staleDate(plannedArrivalUTC: Date) -> Date {
+        plannedArrivalUTC.addingTimeInterval(staleGraceInterval)
     }
 }
 

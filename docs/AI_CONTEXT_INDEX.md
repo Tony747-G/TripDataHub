@@ -39,6 +39,9 @@ This is the routing layer for AI sessions working on TripDataHub. It tells you w
 - `docs/INVARIANTS.md` — especially INV-013 through INV-018
 - `docs/ADR/ADR-004-flight-operational-state-model.md`
 - `docs/BUILD_WEEK_TDH_RELIABILITY_SWE_INSTRUCTION.md` — phased scope, T-1 through T-25, and acceptance requirements
+- `docs/SWE_INSTRUCTION_DEBUG_TRIP_FIXTURE.md` — DEBUG-only simulator harness, T-45 through T-49, and non-persistence requirements
+- `docs/SWE_INSTRUCTION_LIVE_ACTIVITY_LAYOUT_V2.md` — iOS 18 Live Activity layout/status rendering, T-14, T-50S, and device-only D-7
+- `docs/SWE_INSTRUCTION_IOS18_BASELINE_AND_T50.md` — iOS 18 project baseline, minimal generated-project diff, T-50S, and deferred Dynamic Island automation
 
 ## If Touching Manual Operational / Personal Events
 

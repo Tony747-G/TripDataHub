@@ -38,3 +38,9 @@ If SpringBoard restart does not recover it, escalate in this order:
 2. `xcrun simctl shutdown booted`, then boot the device again.
 3. Restart CoreSimulator services.
 4. Reboot macOS only as the last resort.
+
+## Unsigned Unit-Test Host and CloudKit
+
+Follow-up for CI: running the app-hosted unit-test bundle with `CODE_SIGNING_ALLOWED=NO` can terminate TripDataHub before XCTest connects because CloudKit initializes without the required simulated entitlements. The same suite succeeds in the normal signed Simulator configuration.
+
+Do not treat the early-exit result as a unit-test assertion failure. Before adopting unsigned CI, provide a test-host configuration that preserves the required CloudKit/app-group entitlements or prevents production CloudKit initialization before XCTest bootstraps.

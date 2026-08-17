@@ -60,50 +60,115 @@ private enum FlightCountdownFixture {
 
 final class Phase4LayoutTests: XCTestCase {
     @MainActor
-    func test_T14_narrowRouteAndConnectionViewsKeepFixedLineCounts() throws {
-        let routeText = FlightCountdownRouteLine.text(
-            departureAirport: "ANC",
-            departureTime: "23:24",
-            arrivalAirport: "SGN",
-            arrivalTime: "02:45"
-        )
-        XCTAssertEqual(routeText, "ANC 23:24 → SGN 02:45")
-        XCTAssertFalse(routeText.contains("✈"))
-        XCTAssertFalse(routeText.contains("\n"))
+    func test_T14_expandedLiveActivityKeepsFourRowsAtAllTargetWidths() throws {
+        XCTAssertEqual(FlightCountdownExpandedLayoutContract.rowCount, 4)
+        XCTAssertEqual(FlightCountdownExpandedLayoutContract.airplaneSymbolName, "airplane")
 
-        let leg = connectionLeg
-        let nextLeg = nextConnectionLeg
-        let display = LegConnectionTextBuilder.blockAndConnectionDisplay(
-            for: leg,
-            nextLegByID: [leg.id: nextLeg]
-        )
-        XCTAssertEqual(display.lines, ["Block: 02:44", "Connection at CGO: 2:31"])
-        XCTAssertFalse(display.lines.contains { $0.contains(" / ") || $0.contains("\n") })
+        let targetContentWidths = [
+            "iPhone": 240.0,
+            "iPhone Pro Max": 320.0,
+            "iPad": 430.0
+        ]
+        let renderedHeights = targetContentWidths.mapValues { width in
+            measuredHeight(expandedLiveActivityLayout, width: width)
+        }
+        assertEqualHeights(Array(renderedHeights.values))
 
-        let routeHeights = [240.0, 320.0, 430.0].map { width in
-            measuredHeight(
-                FlightCountdownRouteLineView(
-                    departureAirport: "ANC",
-                    departureTime: "23:24",
-                    arrivalAirport: "SGN",
-                    arrivalTime: "02:45"
-                ),
+        for (deviceName, width) in targetContentWidths.sorted(by: { $0.key < $1.key }) {
+            let attachment = XCTAttachment(image: renderedImage(
+                expandedLiveActivityLayout,
                 width: width
+            ))
+            attachment.name = "T-14 \(deviceName) width-\(Int(width))"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
+    func test_liveActivityTimerContractConstants() {
+        let targetUTC = Date(timeIntervalSince1970: 1_786_909_800)
+        let staleUTC = targetUTC.addingTimeInterval(60 * 60)
+
+        XCTAssertEqual(FlightCountdownLiveActivityTimerContract.maxFieldCount, 2)
+        XCTAssertEqual(FlightCountdownLiveActivityTimerContract.maxPrecision, .seconds(60))
+        XCTAssertEqual(
+            FlightCountdownLiveActivityTimerContract.countdownInterval(endingAt: targetUTC).upperBound,
+            targetUTC
+        )
+        XCTAssertEqual(
+            FlightCountdownLiveActivityTimerContract.countUpInterval(
+                startingAt: targetUTC,
+                staleAt: staleUTC
+            ),
+            targetUTC..<staleUTC
+        )
+
+        XCTAssertTrue(FlightCountdownStatusPresentationStyle.liveActivity.usesLiveActivitySystemTimer)
+        XCTAssertFalse(FlightCountdownStatusPresentationStyle.widget.usesLiveActivitySystemTimer)
+
+        // Dates are absolute instants. Presentation timezone changes must not move either timer
+        // boundary. WidgetKit rendering remains a separate device acceptance requirement.
+        for timeZoneID in ["America/Anchorage", "UTC", "Asia/Tokyo"] {
+            XCTAssertNotNil(TimeZone(identifier: timeZoneID))
+            XCTAssertEqual(
+                FlightCountdownLiveActivityTimerContract.countdownInterval(
+                    endingAt: targetUTC
+                ).upperBound,
+                targetUTC
             )
         }
-        assertEqualHeights(routeHeights)
 
-        let connectionHeights = [160.0, 220.0, 420.0].map { width in
-            measuredHeight(
-                BlockConnectionDisplayView(
-                    display: display,
-                    fontScale: 1,
-                    foregroundColor: .primary
-                ),
-                width: width
+        let plannedArrival = Date(timeIntervalSince1970: 0).addingTimeInterval(8 * 60 * 60)
+        XCTAssertEqual(
+            FlightCountdownActivityLifecyclePolicy.staleDate(plannedArrivalUTC: plannedArrival),
+            plannedArrival.addingTimeInterval(60 * 60)
+        )
+    }
+
+    /// T-50S is a syntax guard, not a rendering test. WidgetKit renders Live Activities in a
+    /// separate process, so device-only D-7 remains authoritative for pixels and redaction.
+    /// This test prevents the Live Activity path from returning to APIs known to redact there.
+    func test_T50S_liveActivityUsesSystemTimerSyntaxAndRejectsKnownRedactionPaths() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(
+                "TripDataCountdownWidgetExtension/TripDataCountdownWidget.swift"
+            ),
+            encoding: .utf8
+        )
+        let liveActivityStart = try XCTUnwrap(
+            source.range(of: "private struct LiveActivityOperationalStatusView")
+        ).lowerBound
+        let liveActivityEnd = try XCTUnwrap(
+            source.range(
+                of: "private struct FlightCountdownEntry",
+                range: liveActivityStart..<source.endIndex
+            )
+        ).lowerBound
+        let liveActivitySource = String(source[liveActivityStart..<liveActivityEnd])
+        let compactSource = liveActivitySource.replacingOccurrences(
+            of: #"\s+"#,
+            with: "",
+            options: .regularExpression
+        )
+
+        for forbiddenSyntax in [
+            "Text(timerInterval:",
+            ".components(style:",
+            ".dateRange(",
+            "style:.relative",
+            "style:.timer"
+        ] {
+            XCTAssertFalse(
+                compactSource.contains(forbiddenSyntax),
+                "Live Activity restored known-redacting syntax: \(forbiddenSyntax)"
             )
         }
-        assertEqualHeights(connectionHeights)
+
+        XCTAssertTrue(compactSource.contains(".timer(countingDownIn:"))
+        XCTAssertTrue(compactSource.contains(".timer(countingUpIn:"))
     }
 
     @MainActor
@@ -140,6 +205,20 @@ final class Phase4LayoutTests: XCTestCase {
         ).height
     }
 
+    @MainActor
+    private func renderedImage<V: View>(_ view: V, width: CGFloat) -> UIImage {
+        let controller = UIHostingController(rootView: view)
+        let size = controller.sizeThatFits(in: CGSize(width: width, height: 1_000))
+        controller.view.bounds = CGRect(origin: .zero, size: size)
+        controller.view.backgroundColor = .black
+        controller.view.overrideUserInterfaceStyle = .dark
+        controller.view.layoutIfNeeded()
+
+        return UIGraphicsImageRenderer(size: size).image { _ in
+            controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+        }
+    }
+
     private func assertEqualHeights(
         _ heights: [CGFloat],
         file: StaticString = #filePath,
@@ -153,39 +232,25 @@ final class Phase4LayoutTests: XCTestCase {
         }
     }
 
-    private var connectionLeg: TripLeg {
-        TripLeg(
-            payPeriod: "PP26-08",
-            pairing: "T14001",
-            leg: 1,
-            flight: "5X61",
-            depAirport: "ICN",
-            depLocal: "07:16",
-            arrAirport: "CGO",
-            arrLocal: "10:00",
-            depUTC: "2026-08-20T07:16:00Z",
-            arrUTC: "2026-08-20T10:00:00Z",
-            status: "-",
-            block: "02:44"
-        )
+    private var expandedLiveActivityLayout: some View {
+        FlightCountdownExpandedLayoutView(
+            flightText: "Flight: D901",
+            departureDateText: "Aug 16 (Sun)",
+            departureAirportTimeText: "ANC 16:13",
+            arrivalDateText: "Aug 17 (Mon)",
+            arrivalAirportTimeText: "ICN 17:33"
+        ) {
+            Text("Report in 3hr 15min")
+                .foregroundStyle(.green)
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 10)
+        .padding(.vertical, 6)
+        .background(Color.black)
+        .environment(\.colorScheme, .dark)
+        .ignoresSafeArea()
     }
 
-    private var nextConnectionLeg: TripLeg {
-        TripLeg(
-            payPeriod: "PP26-08",
-            pairing: "T14001",
-            leg: 2,
-            flight: "5X62",
-            depAirport: "CGO",
-            depLocal: "12:31",
-            arrAirport: "ICN",
-            arrLocal: "15:00",
-            depUTC: "2026-08-20T12:31:00Z",
-            arrUTC: "2026-08-20T15:00:00Z",
-            status: "-",
-            block: "02:29"
-        )
-    }
 }
 
 // Replaces the legacy STD-relative `.liveDelayed` / `.finished` phase tests. ADR-004 records

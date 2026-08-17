@@ -87,6 +87,122 @@ enum FlightCountdownRouteLine {
     }
 }
 
+enum FlightCountdownStatusPresentationStyle {
+    case widget
+    case liveActivity
+
+    /// Widget and Live Activity visibility are mutually exclusive. Their duration renderers are
+    /// intentionally different until Widget layout safety is covered by its own follow-up tests.
+    var usesLiveActivitySystemTimer: Bool {
+        self == .liveActivity
+    }
+}
+
+enum FlightCountdownLiveActivityTimerContract {
+    static let maxFieldCount = 2
+    static let maxPrecision = Duration.seconds(60)
+
+    static func countdownInterval(endingAt targetUTC: Date) -> Range<Date> {
+        Date.distantPast..<targetUTC
+    }
+
+    static func countUpInterval(startingAt startUTC: Date, staleAt staleUTC: Date) -> Range<Date> {
+        startUTC..<staleUTC
+    }
+}
+
+enum FlightCountdownExpandedLayoutContract {
+    static let rowCount = 4
+    static let airplaneSymbolName = "airplane"
+    static let airplaneColumnWidth: CGFloat = 20
+    static let airplaneColumnHeight: CGFloat = 18
+}
+
+struct FlightCountdownExpandedLayoutView<StatusContent: View>: View {
+    let flightText: String
+    let departureDateText: String
+    let departureAirportTimeText: String
+    let arrivalDateText: String
+    let arrivalAirportTimeText: String
+    private let statusContent: () -> StatusContent
+
+    init(
+        flightText: String,
+        departureDateText: String,
+        departureAirportTimeText: String,
+        arrivalDateText: String,
+        arrivalAirportTimeText: String,
+        @ViewBuilder statusContent: @escaping () -> StatusContent
+    ) {
+        self.flightText = flightText
+        self.departureDateText = departureDateText
+        self.departureAirportTimeText = departureAirportTimeText
+        self.arrivalDateText = arrivalDateText
+        self.arrivalAirportTimeText = arrivalAirportTimeText
+        self.statusContent = statusContent
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(flightText)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .frame(minHeight: 20, alignment: .leading)
+
+            alignedRow(
+                left: departureDateText,
+                right: arrivalDateText,
+                center: Color.clear
+            )
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .frame(minHeight: 20)
+
+            alignedRow(
+                left: departureAirportTimeText,
+                right: arrivalAirportTimeText,
+                center: Image(systemName: FlightCountdownExpandedLayoutContract.airplaneSymbolName)
+                    .accessibilityHidden(true)
+            )
+            .font(.title3.weight(.semibold))
+            .monospacedDigit()
+            .frame(minHeight: 24)
+
+            statusContent()
+                .font(.title3.weight(.bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .allowsTightening(true)
+                .frame(minHeight: 28, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func alignedRow<CenterContent: View>(
+        left: String,
+        right: String,
+        center: CenterContent
+    ) -> some View {
+        HStack(spacing: 8) {
+            scalableText(left, alignment: .leading)
+            center
+                .frame(
+                    width: FlightCountdownExpandedLayoutContract.airplaneColumnWidth,
+                    height: FlightCountdownExpandedLayoutContract.airplaneColumnHeight
+                )
+            scalableText(right, alignment: .trailing)
+        }
+    }
+
+    private func scalableText(_ text: String, alignment: Alignment) -> some View {
+        Text(text)
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
+            .allowsTightening(true)
+            .frame(maxWidth: .infinity, alignment: alignment)
+    }
+}
+
 struct FlightCountdownRouteLineView: View {
     let departureAirport: String
     let departureTime: String
