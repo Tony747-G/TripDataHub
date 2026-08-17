@@ -253,3 +253,15 @@ If a required planning instant or presentation timezone cannot be resolved, no o
 **Enforced by:** the pure state evaluator, current-leg selector, shared presentation payload, and lifecycle end/update handling. Tests: T-11, T-12, T-18, T-20, and T-21.
 
 **See also:** INV-014, INV-017, and `docs/ADR/ADR-004-flight-operational-state-model.md`.
+
+---
+
+## INV-019: A Surface That Overrides Its Background Must Declare Its Foreground
+
+**Rule:** A surface that overrides its background MUST declare its foreground at the same ownership boundary. `.primary` and `.secondary` resolve against the system appearance, not against a background or tint supplied by the view. Background and foreground declarations are a pair; changing only one is forbidden.
+
+**Why:** An implicit semantic foreground can become unreadable when the fixed background and system appearance disagree. On iOS 18.6 in Light appearance, the Lock Screen Live Activity flight and route text rendered dark on a black background; the same contract defect also existed in the active Home Screen Widget. iOS 26.5 happened to keep the Live Activity text visible, so one OS version could not expose the regression reliably.
+
+**Forbidden:** Adding or changing a fixed custom background without declaring the matching foreground environment or explicit foreground at the same surface; placing surface color policy in `FlightCountdownExpandedLayoutView`; relying on `activitySystemActionForegroundColor` to color Live Activity content.
+
+**Enforced by:** adjacent foreground/background declarations on the Lock Screen / Dynamic Island expanded Live Activity surface and the active Home Screen Widget surface. T-51S asserts both sides of each source-level pair; Light and Dark rendering remains device acceptance.

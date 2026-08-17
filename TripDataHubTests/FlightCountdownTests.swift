@@ -171,6 +171,65 @@ final class Phase4LayoutTests: XCTestCase {
         XCTAssertTrue(compactSource.contains(".timer(countingUpIn:"))
     }
 
+    /// T-51S guards the source-level foreground/background ownership contract. It does not
+    /// inspect rendered pixels; Light/Dark acceptance remains a device verification step.
+    func test_T51S_customBackgroundSurfacesDeclareMatchingForegroundEnvironment() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(
+                "TripDataCountdownWidgetExtension/TripDataCountdownWidget.swift"
+            ),
+            encoding: .utf8
+        )
+
+        let widgetViewStart = try XCTUnwrap(
+            source.range(of: "private struct FlightCountdownWidgetEntryView")
+        ).lowerBound
+        let widgetActiveStart = try XCTUnwrap(
+            source.range(
+                of: "if let snapshot = entry.snapshot",
+                range: widgetViewStart..<source.endIndex
+            )
+        ).lowerBound
+        let widgetInactiveStart = try XCTUnwrap(
+            source.range(
+                of: "} else {",
+                range: widgetActiveStart..<source.endIndex
+            )
+        ).lowerBound
+        let widgetActiveSource = compactSyntax(
+            String(source[widgetActiveStart..<widgetInactiveStart])
+        )
+
+        XCTAssertTrue(widgetActiveSource.contains(".environment(\\.colorScheme,.dark)"))
+        XCTAssertTrue(widgetActiveSource.contains(".containerBackground(for:.widget)"))
+        XCTAssertTrue(widgetActiveSource.contains("LinearGradient("))
+
+        let activityStart = try XCTUnwrap(
+            source.range(of: "struct FlightCountdownLiveActivityWidget")
+        ).lowerBound
+        let activityEnd = try XCTUnwrap(
+            source.range(
+                of: "@main",
+                range: activityStart..<source.endIndex
+            )
+        ).lowerBound
+        let activitySource = compactSyntax(String(source[activityStart..<activityEnd]))
+
+        XCTAssertTrue(activitySource.contains(".environment(\\.colorScheme,.dark)"))
+        XCTAssertTrue(activitySource.contains(".activityBackgroundTint(Color.black)"))
+    }
+
+    private func compactSyntax(_ source: String) -> String {
+        source.replacingOccurrences(
+            of: #"\s+"#,
+            with: "",
+            options: .regularExpression
+        )
+    }
+
     @MainActor
     func test_T15_iPhoneAndIPadUseTheSameTwoLineConnectionComponent() {
         let display = BlockConnectionDisplay(

@@ -292,6 +292,10 @@ private struct FlightCountdownWidgetEntryView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            // This surface owns its background, therefore it must own its foreground.
+            // Semantic colors resolve against the system appearance, not this tint;
+            // changing either declaration requires reviewing the other.
+            .environment(\.colorScheme, .dark)
             .containerBackground(for: .widget) {
                 LinearGradient(
                     colors: [
@@ -392,6 +396,10 @@ struct FlightCountdownLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: FlightCountdownAttributes.self) { context in
             FlightCountdownLiveActivityView(state: context.state)
+                // This surface owns its background, therefore it must own its foreground.
+                // Semantic colors resolve against the system appearance, not this tint;
+                // changing either declaration requires reviewing the other.
+                .environment(\.colorScheme, .dark)
                 .activityBackgroundTint(Color.black)
                 .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
