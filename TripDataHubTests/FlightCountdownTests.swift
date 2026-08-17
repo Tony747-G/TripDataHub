@@ -569,6 +569,43 @@ final class FlightCountdownCoordinatorLifecycleTests: XCTestCase {
         )
     }
 
+    func test_T52_reconcileWithSameLegUpdatesInPlaceWithoutRecreating() async throws {
+        let activityClient = FlightCountdownActivitySpy(
+            activities: [FlightCountdownActivityRecord(id: "same", legID: "L1")]
+        )
+        let coordinator = FlightCountdownCoordinator(
+            activityClient: activityClient,
+            snapshotClient: FlightCountdownSnapshotSpy()
+        )
+        let now = F.departure.addingTimeInterval(-30 * 60)
+        let firstOutput = try XCTUnwrap(FlightCountdownEngine.buildCountdownOutput(
+            from: [F.leg(id: "L1")],
+            nowUTC: now,
+            referenceTimeDisplay: .lcl
+        ))
+        let revisedDeparture = F.departure.addingTimeInterval(10 * 60)
+        let revisedOutput = try XCTUnwrap(FlightCountdownEngine.buildCountdownOutput(
+            from: [F.leg(
+                id: "L1",
+                departure: revisedDeparture,
+                arrival: F.arrival.addingTimeInterval(10 * 60)
+            )],
+            nowUTC: now,
+            referenceTimeDisplay: .lcl
+        ))
+
+        await coordinator.refresh(output: firstOutput, mode: .reconcile, nowUTC: now)
+        await coordinator.refresh(output: revisedOutput, mode: .reconcile, nowUTC: now)
+
+        let counts = await activityClient.counts()
+        XCTAssertEqual(counts.update, 2)
+        XCTAssertEqual(counts.end, 0)
+        XCTAssertEqual(counts.request, 0)
+        let updatedDepartures = await activityClient.updatedPlannedDepartureUTCs()
+        XCTAssertEqual(updatedDepartures, [F.departure, revisedDeparture])
+        XCTAssertEqual(updatedDepartures.last, revisedDeparture)
+    }
+
     func test_T19_legChangeEndsAndCreatesButReplacementAlwaysRebuilds() async throws {
         let now = F.departure.addingTimeInterval(-30 * 60)
         let nextLeg = F.leg(id: "L2")
@@ -769,6 +806,10 @@ private actor FlightCountdownActivitySpy: FlightCountdownActivityClient {
 
     func updatedStates() -> [FlightOperationalState] {
         updateSnapshots.map(\.state)
+    }
+
+    func updatedPlannedDepartureUTCs() -> [Date] {
+        updateSnapshots.map(\.plannedDepartureUTC)
     }
 
     func events() -> [String] { eventLog }
