@@ -896,3 +896,261 @@ final class FlightCountdownConversionAndBuilderTests: XCTestCase {
         )
     }
 }
+
+#if DEBUG
+@MainActor
+final class DebugFlightCountdownFixtureTests: XCTestCase {
+    private let canonicalNowUTC = ISO8601DateFormatter().date(from: "2026-08-16T18:30:00Z")!
+    private let anchorageTimeZone = TimeZone(identifier: "America/Anchorage")!
+
+    func test_T45_fixtureUsesProductionOperationalStateBuilder() throws {
+        let output = try XCTUnwrap(buildCanonicalOutput(nowUTC: canonicalNowUTC))
+
+        XCTAssertEqual(output.leg.id, AppViewModel.debugFlightCountdownFirstLegID.uuidString)
+        XCTAssertEqual(output.state, .preReport)
+        XCTAssertEqual(output.visibility, .liveActivity)
+        XCTAssertEqual(output.leg.reportTimeUTC, date("2026-08-16T22:10:00Z"))
+        XCTAssertEqual(
+            output.leg.reportTimeUTC?.timeIntervalSince(canonicalNowUTC),
+            date("2026-08-16T22:10:00Z").timeIntervalSince(canonicalNowUTC)
+        )
+    }
+
+    func test_T46_deviceTimezoneDoesNotChangeDurationStateOrCurrentLeg() throws {
+        let original = NSTimeZone.default
+        defer { NSTimeZone.default = original }
+
+        var outputs: [CountdownEngineOutput] = []
+        for identifier in ["America/Anchorage", "Asia/Ho_Chi_Minh", "Asia/Seoul"] {
+            NSTimeZone.default = try XCTUnwrap(TimeZone(identifier: identifier))
+            outputs.append(try XCTUnwrap(buildCanonicalOutput(nowUTC: canonicalNowUTC)))
+        }
+
+        let expected = try XCTUnwrap(outputs.first)
+        for output in outputs {
+            XCTAssertEqual(output.state, .preReport)
+            XCTAssertEqual(output.leg.id, AppViewModel.debugFlightCountdownFirstLegID.uuidString)
+            XCTAssertEqual(output.display.statusText, expected.display.statusText)
+            XCTAssertEqual(output.leg.reportTimeUTC?.timeIntervalSince(canonicalNowUTC),
+                           expected.leg.reportTimeUTC?.timeIntervalSince(canonicalNowUTC))
+            XCTAssertEqual(output.display.departureTimeText, expected.display.departureTimeText)
+            XCTAssertEqual(output.display.arrivalTimeText, expected.display.arrivalTimeText)
+        }
+    }
+
+    func test_T47_operationalStateIsIndependentAcrossAllPresentationWindows() throws {
+        let variants: [(String, FlightPresentationVisibility)] = [
+            ("2026-08-16T10:40:00Z", .hidden),
+            ("2026-08-16T16:40:00Z", .widget),
+            ("2026-08-16T18:40:00Z", .liveActivity)
+        ]
+
+        for (nowString, expectedVisibility) in variants {
+            let output = try XCTUnwrap(buildCanonicalOutput(nowUTC: date(nowString)))
+            XCTAssertEqual(output.leg.id, AppViewModel.debugFlightCountdownFirstLegID.uuidString)
+            XCTAssertEqual(output.state, .preReport)
+            XCTAssertEqual(output.visibility, expectedVisibility)
+            XCTAssertEqual(output.leg.plannedDepartureUTC, date("2026-08-16T23:40:00Z"))
+            XCTAssertEqual(output.leg.reportTimeUTC, date("2026-08-16T22:10:00Z"))
+        }
+    }
+
+    func test_T48_secondLegDoesNotDisplaceCurrentFirstLeg() throws {
+        let output = try XCTUnwrap(buildCanonicalOutput(nowUTC: canonicalNowUTC))
+
+        XCTAssertEqual(AppViewModel.debugFlightCountdownCanonicalSchedules().flatMap(\.legs).count, 2)
+        XCTAssertEqual(output.leg.id, AppViewModel.debugFlightCountdownFirstLegID.uuidString)
+        XCTAssertEqual(output.leg.departureAirportIATA, "ANC")
+        XCTAssertEqual(output.leg.arrivalAirportIATA, "ICN")
+    }
+
+    func test_T49_fixtureLifecycleDoesNotPersistOrUploadSchedules() async throws {
+        let baseline = PayPeriodSchedule(
+            id: "BASELINE",
+            label: "BASELINE",
+            tripCount: 0,
+            legCount: 0,
+            openTimeCount: 0,
+            updatedAt: date("2026-08-01T00:00:00Z"),
+            legs: [],
+            openTimeTrips: []
+        )
+        let cache = DebugFlightFixtureCache(
+            snapshot: ScheduleCacheSnapshotV2(
+                crewAccessSchedules: [baseline],
+                bidproSchedules: [],
+                lastSyncAt: date("2026-08-01T00:00:00Z"),
+                migratedAt: nil
+            )
+        )
+        let friendUploadSpy = DebugFlightFixtureFriendUploadSpy()
+        let deviceUploadSpy = DebugFlightFixtureDeviceUploadSpy()
+        let notificationSpy = DebugFlightFixtureNotificationSpy()
+        let activitySpy = FlightCountdownActivitySpy(activities: [])
+        let snapshotSpy = FlightCountdownSnapshotSpy()
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tdh-debug-flight-fixture-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let viewModel = AppViewModel(
+            cacheService: cache,
+            notificationService: notificationSpy,
+            friendScheduleCloudKitService: friendUploadSpy,
+            deviceScheduleCloudKitService: deviceUploadSpy,
+            flightCountdownCoordinator: FlightCountdownCoordinator(
+                activityClient: activitySpy,
+                snapshotClient: snapshotSpy
+            ),
+            crewAccessImportsDirectory: directory,
+            retentionReferenceDate: { ISO8601DateFormatter().date(from: "2026-08-16T18:30:00Z")! }
+        )
+        viewModel.isScheduleSharingEnabled = true
+        let schedulesBefore = viewModel.schedules
+        let crewSchedulesBefore = viewModel.crewAccessSchedules
+        let revisionBefore = viewModel.scheduleDataRevision
+
+        await viewModel.startDebugFlightCountdownFixture(nowUTC: canonicalNowUTC)
+
+        XCTAssertTrue(viewModel.isDebugFlightCountdownFixtureActive)
+        XCTAssertEqual(viewModel.schedules, schedulesBefore)
+        XCTAssertEqual(viewModel.crewAccessSchedules, crewSchedulesBefore)
+        XCTAssertEqual(viewModel.scheduleDataRevision, revisionBefore)
+        let uploadCountsAfterStart = await friendUploadSpy.counts()
+        let deviceUploadsAfterStart = await deviceUploadSpy.uploadCount()
+        let activityCountsAfterStart = await activitySpy.counts()
+        XCTAssertEqual(uploadCountsAfterStart, .init(shared: 0, snapshot: 0))
+        XCTAssertEqual(deviceUploadsAfterStart, 0)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+        XCTAssertEqual(activityCountsAfterStart.request, 1)
+
+        await viewModel.stopDebugFlightCountdownFixture(nowUTC: canonicalNowUTC)
+
+        let notificationInvalidationsAfterStop = await notificationSpy.invalidationCount()
+        let uploadCountsAfterStop = await friendUploadSpy.counts()
+        let deviceUploadsAfterStop = await deviceUploadSpy.uploadCount()
+        let persistedLegIDsAfterStop = await snapshotSpy.persistedLegIDs()
+        XCTAssertFalse(viewModel.isDebugFlightCountdownFixtureActive)
+        XCTAssertEqual(viewModel.schedules, schedulesBefore)
+        XCTAssertEqual(viewModel.crewAccessSchedules, crewSchedulesBefore)
+        XCTAssertEqual(notificationInvalidationsAfterStop, 1)
+        XCTAssertEqual(uploadCountsAfterStop, .init(shared: 0, snapshot: 0))
+        XCTAssertEqual(deviceUploadsAfterStop, 0)
+        XCTAssertNil(persistedLegIDsAfterStop.last!)
+        XCTAssertNil(viewModel.nextFlightCountdownOutput(nowUTC: canonicalNowUTC))
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+    }
+
+    private func buildCanonicalOutput(nowUTC: Date) -> CountdownEngineOutput? {
+        OperationalStateBuilder.build(
+            schedules: AppViewModel.debugFlightCountdownCanonicalSchedules(),
+            domicileAirportCode: "ANC",
+            domicileTimeZone: anchorageTimeZone,
+            nowUTC: nowUTC,
+            referenceTimeDisplay: .lcl
+        )
+    }
+
+    private func date(_ value: String) -> Date {
+        ISO8601DateFormatter().date(from: value)!
+    }
+}
+
+private final class DebugFlightFixtureCache: ScheduleCacheServiceProtocol {
+    private var snapshot: ScheduleCacheSnapshotV2?
+
+    init(snapshot: ScheduleCacheSnapshotV2?) {
+        self.snapshot = snapshot
+    }
+
+    func load() -> ScheduleCacheSnapshotV2? { snapshot }
+    func save(_ snapshot: ScheduleCacheSnapshotV2) throws { self.snapshot = snapshot }
+    func clear() { snapshot = nil }
+}
+
+private actor DebugFlightFixtureFriendUploadSpy: FriendScheduleCloudKitServicing {
+    struct Counts: Equatable {
+        let shared: Int
+        let snapshot: Int
+    }
+
+    private var sharedUploadCount = 0
+    private var snapshotUploadCount = 0
+
+    func uploadSchedule(gemsID: String, cloudKitRecordName: String, schedules: [PayPeriodSchedule]) async throws {
+        sharedUploadCount += 1
+    }
+
+    func uploadScheduleSnapshot(
+        gemsID: String,
+        ownerDisplayName: String,
+        crewAccessTrips: [CrewAccessTripJSON]
+    ) async throws {
+        snapshotUploadCount += 1
+    }
+
+    func requestFriend(
+        myGEMSID: String,
+        friendGEMSID: String,
+        friendResetAt: Date?
+    ) async throws -> FriendScheduleCloudKitLink {
+        FriendScheduleCloudKitLink(
+            friendGEMSID: friendGEMSID,
+            isAccepted: false,
+            linkedAt: nil,
+            requestedAt: nil
+        )
+    }
+
+    func cancelFriendRequest(myGEMSID: String, friendGEMSID: String) async throws {}
+    func deleteSharedScheduleData(gemsID: String) async throws {}
+    func deleteFriendSharingData(gemsID: String) async throws {}
+
+    func refreshConnections(
+        myGEMSID: String,
+        connections: [FriendConnection],
+        friendResetAt: Date?
+    ) async throws -> FriendConnectionRefreshResult {
+        FriendConnectionRefreshResult(connections: connections)
+    }
+
+    func counts() -> Counts {
+        Counts(shared: sharedUploadCount, snapshot: snapshotUploadCount)
+    }
+}
+
+private actor DebugFlightFixtureDeviceUploadSpy: DeviceScheduleCloudKitServicing {
+    private var count = 0
+
+    func uploadDeviceSchedule(
+        gemsID: String,
+        cloudKitRecordName: String,
+        schedules: [PayPeriodSchedule],
+        deviceID: String,
+        source: DeviceScheduleSyncSource
+    ) async throws {
+        count += 1
+    }
+
+    func fetchDeviceSchedule(gemsID: String) async throws -> DeviceScheduleSnapshot? { nil }
+    func uploadCount() -> Int { count }
+}
+
+private actor DebugFlightFixtureNotificationSpy: NextReportNotificationServiceProtocol {
+    private var invalidations = 0
+
+    func authorizationStatus() async -> UNAuthorizationStatus { .notDetermined }
+    func requestAuthorization() async throws -> Bool { false }
+    func invalidateNextReportNotifications() async { invalidations += 1 }
+    func reschedule(
+        schedules: [PayPeriodSchedule],
+        notify48h: Bool,
+        notify24h: Bool,
+        notify12h: Bool
+    ) async -> NotificationRescheduleResult {
+        NotificationRescheduleResult(requested: 0, scheduled: 0, failed: 0)
+    }
+
+    func invalidationCount() -> Int { invalidations }
+}
+#endif

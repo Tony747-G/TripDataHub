@@ -282,6 +282,10 @@ final class AppViewModel: ObservableObject {
     private let importCommitVerificationFaultInjector: (@MainActor @Sendable (URL) throws -> Void)?
     private let flightCountdownCoordinator: FlightCountdownCoordinator
     private var flightCountdownBoundaryTask: Task<Void, Never>?
+#if DEBUG
+    @Published private(set) var isDebugFlightCountdownFixtureActive = false
+    private var debugFlightCountdownFixtureSchedules: [PayPeriodSchedule]?
+#endif
     private var sessionCookies: [HTTPCookie] = []
     private var lastAutoFetchAt: Date?
     private var externalConsumerTask: Task<Void, Never>?
@@ -4419,6 +4423,19 @@ final class AppViewModel: ObservableObject {
     }
 
     func nextFlightCountdownOutput(nowUTC: Date = Date()) -> CountdownEngineOutput? {
+#if DEBUG
+        if let debugFlightCountdownFixtureSchedules {
+            return nextFlightCountdownOutput(
+                schedules: debugFlightCountdownFixtureSchedules,
+                domicileAirportCode: "ANC",
+                domicileTimeZone: DomicileSupport.timeZone(for: "ANC"),
+                nowUTC: nowUTC,
+                referenceTimeDisplay: FlightReferenceTimeDisplay(
+                    rawValue: UserDefaults.standard.string(forKey: "timeline_clock_display") ?? ""
+                ) ?? .lcl
+            )
+        }
+#endif
         let crewBase = CrewBase(normalizing: verifiedIdentity?.domicile)
         let referenceTimeDisplay = FlightReferenceTimeDisplay(
             rawValue: UserDefaults.standard.string(forKey: "timeline_clock_display") ?? ""
@@ -4440,6 +4457,70 @@ final class AppViewModel: ObservableObject {
             )
         }
     }
+
+#if DEBUG
+    /// DEBUG-only integration seam. Supplied schedules never enter either persisted schedule
+    /// array, so the fixture cannot trigger cache, CloudKit, or Friends publication.
+    func nextFlightCountdownOutput(
+        schedules: [PayPeriodSchedule],
+        domicileAirportCode: String,
+        domicileTimeZone: TimeZone,
+        nowUTC: Date,
+        referenceTimeDisplay: FlightReferenceTimeDisplay
+    ) -> CountdownEngineOutput? {
+        OperationalStateBuilder.build(
+            schedules: schedules,
+            domicileAirportCode: domicileAirportCode,
+            domicileTimeZone: domicileTimeZone,
+            nowUTC: nowUTC,
+            referenceTimeDisplay: referenceTimeDisplay,
+            tzResolver: tzResolver
+        ) { [diagnostics] exclusion in
+            diagnostics.record(
+                .flightStateInputExcluded,
+                [
+                    "leg": SyncDiagnosticsLog.tag(exclusion.legID),
+                    "reason": exclusion.reason.rawValue
+                ]
+            )
+        }
+    }
+
+    func startDebugFlightCountdownFixture(nowUTC: Date = Date()) async {
+        let fixtureSchedules = Self.debugFlightCountdownInteractiveSchedules(nowUTC: nowUTC)
+        debugFlightCountdownFixtureSchedules = fixtureSchedules
+        isDebugFlightCountdownFixtureActive = true
+
+        let output = nextFlightCountdownOutput(
+            schedules: fixtureSchedules,
+            domicileAirportCode: "ANC",
+            domicileTimeZone: DomicileSupport.timeZone(for: "ANC"),
+            nowUTC: nowUTC,
+            referenceTimeDisplay: FlightReferenceTimeDisplay(
+                rawValue: UserDefaults.standard.string(forKey: "timeline_clock_display") ?? ""
+            ) ?? .lcl
+        )
+        await flightCountdownCoordinator.refresh(
+            output: output,
+            mode: .reconcile,
+            nowUTC: nowUTC
+        )
+        scheduleFlightCountdownBoundary(for: output, after: nowUTC)
+    }
+
+    func stopDebugFlightCountdownFixture(nowUTC: Date = Date()) async {
+        flightCountdownBoundaryTask?.cancel()
+        flightCountdownBoundaryTask = nil
+        await flightCountdownCoordinator.refresh(
+            output: nil,
+            mode: .reconcile,
+            nowUTC: nowUTC
+        )
+        debugFlightCountdownFixtureSchedules = nil
+        isDebugFlightCountdownFixtureActive = false
+        await notificationService.invalidateNextReportNotifications()
+    }
+#endif
 
     func prepareFlightCountdownPresentationForLaunch(nowUTC: Date = Date()) async {
         await refreshFlightCountdownPresentation(

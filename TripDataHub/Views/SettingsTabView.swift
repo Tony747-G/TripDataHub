@@ -64,6 +64,33 @@ struct SettingsTabView: View {
                 SettingsTripBoardFetchSection(autoFetchOnOpen: $autoFetchOnOpen)
             }
 
+#if DEBUG
+            Section {
+                Button {
+                    Task {
+                        if viewModel.isDebugFlightCountdownFixtureActive {
+                            await viewModel.stopDebugFlightCountdownFixture()
+                        } else {
+                            await viewModel.startDebugFlightCountdownFixture()
+                        }
+                    }
+                } label: {
+                    Label(
+                        viewModel.isDebugFlightCountdownFixtureActive
+                            ? "Stop Flight Countdown Fixture"
+                            : "Start Flight Countdown Fixture",
+                        systemImage: viewModel.isDebugFlightCountdownFixtureActive
+                            ? "stop.circle"
+                            : "airplane.circle"
+                    )
+                }
+            } header: {
+                sectionHeader("DEBUG Validation")
+            } footer: {
+                Text("In-memory only. Does not modify or publish schedule data.")
+            }
+#endif
+
             SettingsProfileSection()
         }
         .scrollDismissesKeyboard(.interactively)

@@ -2,6 +2,114 @@
 import Foundation
 
 extension AppViewModel {
+    static let debugFlightCountdownFixtureID = "DEBUG-ANC-ICN-ANC"
+    static let debugFlightCountdownFirstLegID = UUID(uuidString: "D3B60001-0000-4000-8000-000000000001")!
+    static let debugFlightCountdownSecondLegID = UUID(uuidString: "D3B60002-0000-4000-8000-000000000002")!
+
+    static func debugFlightCountdownCanonicalSchedules() -> [PayPeriodSchedule] {
+        debugFlightCountdownSchedules(
+            firstDepartureUTC: debugFixtureDate("2026-08-16T23:40:00Z"),
+            firstArrivalUTC: debugFixtureDate("2026-08-17T08:00:00Z"),
+            secondDepartureUTC: debugFixtureDate("2026-08-18T09:00:00Z"),
+            secondArrivalUTC: debugFixtureDate("2026-08-18T18:00:00Z")
+        )
+    }
+
+    static func debugFlightCountdownInteractiveSchedules(nowUTC: Date) -> [PayPeriodSchedule] {
+        let firstDepartureUTC = nowUTC.addingTimeInterval(5 * 60 * 60)
+        let firstArrivalUTC = firstDepartureUTC.addingTimeInterval((8 * 60 + 20) * 60)
+        let secondDepartureUTC = nowUTC.addingTimeInterval((2 * 24 + 9) * 60 * 60)
+        let secondArrivalUTC = secondDepartureUTC.addingTimeInterval(9 * 60 * 60)
+        return debugFlightCountdownSchedules(
+            firstDepartureUTC: firstDepartureUTC,
+            firstArrivalUTC: firstArrivalUTC,
+            secondDepartureUTC: secondDepartureUTC,
+            secondArrivalUTC: secondArrivalUTC
+        )
+    }
+
+    static func debugFlightCountdownSchedules(
+        firstDepartureUTC: Date,
+        firstArrivalUTC: Date,
+        secondDepartureUTC: Date,
+        secondArrivalUTC: Date
+    ) -> [PayPeriodSchedule] {
+        let payPeriod = "DEBUG-PP"
+        let pairing = debugFlightCountdownFixtureID
+        let firstDeparture = debugFixtureUTCString(firstDepartureUTC)
+        let firstArrival = debugFixtureUTCString(firstArrivalUTC)
+        let secondDeparture = debugFixtureUTCString(secondDepartureUTC)
+        let secondArrival = debugFixtureUTCString(secondArrivalUTC)
+        let legs = [
+            TripLeg(
+                id: debugFlightCountdownFirstLegID,
+                payPeriod: payPeriod,
+                pairing: pairing,
+                leg: 1,
+                flight: "D901",
+                depAirport: "ANC",
+                depLocal: debugFixtureLocalString(firstDepartureUTC),
+                arrAirport: "ICN",
+                arrLocal: debugFixtureLocalString(firstArrivalUTC),
+                depUTC: firstDeparture,
+                arrUTC: firstArrival,
+                status: "-",
+                block: "8:20",
+                stdUTC: firstDeparture,
+                staUTC: firstArrival
+            ),
+            TripLeg(
+                id: debugFlightCountdownSecondLegID,
+                payPeriod: payPeriod,
+                pairing: pairing,
+                leg: 2,
+                flight: "D902",
+                depAirport: "ICN",
+                depLocal: debugFixtureLocalString(secondDepartureUTC),
+                arrAirport: "ANC",
+                arrLocal: debugFixtureLocalString(secondArrivalUTC),
+                depUTC: secondDeparture,
+                arrUTC: secondArrival,
+                status: "-",
+                block: "9:00",
+                stdUTC: secondDeparture,
+                staUTC: secondArrival
+            )
+        ]
+        return [
+            PayPeriodSchedule(
+                id: debugFlightCountdownFixtureID,
+                label: debugFlightCountdownFixtureID,
+                tripCount: 1,
+                legCount: legs.count,
+                openTimeCount: 0,
+                updatedAt: firstDepartureUTC,
+                legs: legs,
+                openTimeTrips: []
+            )
+        ]
+    }
+
+    private static func debugFixtureDate(_ value: String) -> Date {
+        ISO8601DateFormatter().date(from: value)!
+    }
+
+    private static func debugFixtureUTCString(_ value: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: value)
+    }
+
+    private static func debugFixtureLocalString(_ value: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter.string(from: value)
+    }
+
     static var previewSchedules: [PayPeriodSchedule] {
         let legs2602 = [
             TripLeg(
