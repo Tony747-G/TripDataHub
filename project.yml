@@ -4,7 +4,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: 5.9
-    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "18.0"
   configs:
     Debug:
       ENABLE_TESTABILITY: YES
