@@ -40,6 +40,8 @@
 
 Trip 開始前から順に確認する。時間を飛ばせない項目は、実際のトリップ中に確認すること。
 
+**本章は「アプリ内 Timeline」の表示を見る。** Live Activity / Lock Screen は D-7 で別途確認する。両者は表記が異なる（下記 D-7 の注記を参照）。
+
 | # | タイミング | 期待表示 |
 |---|---|---|
 | B-1 | Report Time より前 | `Report in HHhr MMmin` |
@@ -119,7 +121,7 @@ Flight: D901
 Aug 16 (Sun)                    Aug 17 (Mon)
 ANC 16:13          ✈           ICN 17:33
 
-Report in 3hr 15min
+Report in 3 hours, 15 minutes
 ```
 
 | # | 確認内容 | 期待 |
@@ -134,6 +136,10 @@ Report in 3hr 15min
 > **旧 D-1 / D-2 は廃止。** 旧版は「route 行が 1 行であること」「飛行機アイコンや装飾がないこと」を要求していたが、これは wrap バグ回避のための当時の暫定仕様であり、v2 で意図的に覆した。旧仕様のまま確認して NG を上げないこと。
 
 ### D-3〜D-6. Timeline Connection card（**本変更の対象外・従来どおり**）
+
+> **D-3〜D-5 は Simulator triage の対象外。** connection を持つ実 Trip データ（`ICN-CGO` 等）が必要で、
+> DEBUG fixture は 2 leg の `ANC-ICN-ANC` である。fixture を拡張すると T-45〜T-49 の前提が崩れるため拡張しない。
+> **実 PDF を扱う Priority 5 と併せて、実機で確認する。**（2026-08-17 再分類）
 
 番号は据え置き。他ドキュメントからの参照を壊さないため。
 
@@ -156,18 +162,24 @@ Report in 3hr 15min
 
 | サーフェス | 描画元 | 表記 | D-7 対象 |
 |---|---|---|---|
-| **Lock Screen Live Activity** | `LiveActivityOperationalStatusView` | `HHhr MMmin`（分精度） | **対象** |
-| **Dynamic Island expanded** | 同上 | `HHhr MMmin`（分精度） | **対象** |
+| **Lock Screen Live Activity** | `LiveActivityOperationalStatusView` → **OS 描画**（`SystemFormatStyle.Timer`） | `3 hours, 15 minutes`（分精度・OS ロケール依存） | **対象** |
+| **Dynamic Island expanded** | 同上 | 同上 | **対象** |
 | Dynamic Island compact | `LegacyOperationalStatusView` | `H:MM:SS`（秒あり） | 対象外。**秒が出るのが正**。NG に上げない |
 | Dynamic Island minimal | 同上 | 同上 | 同上 |
 | Home Screen Widget | 同上 | 同上 | 対象外。`FlightPresentationPolicy` により Live Activity と**同時に出ない**ため利用者が並べて見ることはない（follow-up として記録済み） |
+
+> **重要 — アプリ内表記と Live Activity 表記は異なる。**
+> アプリ内 Timeline は `FlightCountdownSharedStore.durationText` が生成する `3hr 15min`、
+> Live Activity は OS が描画する `3 hours, 15 minutes`。**同じ値でも文字列が違うのが現状の実装である。**
+> B 章（アプリ内）の `HHhr MMmin` と D-7（Live Activity）の表記差を NG として上げないこと。
+> 表記統一は **`FOLLOW_UPS.md` F-1 として deferred 判断済み**（2026-08-17）。現状維持でよい。
 
 #### 確認項目
 
 | # | サーフェス | 確認内容 | 期待 |
 |---|---|---|---|
-| D-7a | **Lock Screen** | `Report in` の数値部 | `3hr 15min` の形。`--` / `–` / `––` / 空欄 / placeholder が**出ない** |
-| D-7b | **Dynamic Island expanded** | 同上 | 同上。Lock Screen と**同じ値**を示す |
+| D-7a | **Lock Screen** | `Report in` の数値部 | `3 hours, 15 minutes` の形（**`3hr 15min` ではない**）。`--` / `–` / `––` / 空欄 / placeholder が**出ない** |
+| D-7b | **Dynamic Island expanded** | 同上 | 同上。Lock Screen と**同じ値**を示す。**下記の観測規約に従うこと** |
 | D-7c | Lock Screen | 分境界をまたぐまで**画面を見たまま待つ**（最大 60 秒） | **アプリを開かずに**値が 1 減る。凍結しない |
 | D-7d | Lock Screen | アプリをバックグラウンドに置いたまま 10 分以上放置してから見る | 値が正しく進んでいる。古い値が残らない |
 | D-7e | Lock Screen | device TZ を ANC → SGN → ICN と変更 | **duration が変化しない**。変わるのは空港時刻の表記のみ |
@@ -176,9 +188,31 @@ Report in 3hr 15min
 
 **D-7c と D-7d が本項目の中核。** 「秒が消えているか」だけを見て PASS としないこと。`SystemFormatStyle.Timer` を採用した根拠は「**OS が自動更新するのでアプリを開かなくても値が凍結しない**」であり、そこを確認しなければ採用根拠が未検証のまま残る。
 
+
+> **D-7b / 複数サーフェス比較の観測規約（必須）**
+>
+> DEBUG fixture は起動のたびに `STD = now + 5h` を作り直す。**run をまたいで撮った 2 枚を比較すると必ず食い違う。**
+> 実際に 2026-08-17、別 run の Lock Screen と DI expanded を比較して FAIL と誤判定した。
+>
+> 1. Simulator を `Erase All Content and Settings` で初期化する
+> 2. fixture を **1 回だけ**起動し、起動時刻を記録する
+> 3. **同一分内**に両サーフェスを撮影する。その間にアプリ再起動・fixture 再起動・再ビルドをしない
+> 4. 画面の文字列を **1 文字ずつそのまま**書き写す。要約・言い換えをしない（`Dep in` を `Depart in` と書かない）
+> 5. 食い違いを見つけたら、RCA の前に `Activity<FlightCountdownAttributes>.activities` の **count / id / legID / plannedDepartureUTC** を確認する。`count >= 2` なら lifecycle 欠陥、`count == 1` なら観測手順を疑う
+>
+> **算術チェック**: 同一 leg なら `Dep in` は `Report in` より必ず report lead（ANC↔ICN は 90 分）だけ大きい。差が 90 分でない 2 値は同一 run のものではない。
+
+#### OS バージョン網羅（**最低サポート版での確認は必須**）
+
+本アプリの最低サポートは **iOS 18.0**。`SystemFormatStyle.Timer` は OS 描画のため、**最低サポート版で 1 度は D-7a / D-7c / D-7g を通すこと。**
+最新版のみで確認して済ませない。先の `TimeDataSource` の dash redaction も特定 OS 版で発見された事象であり、OS 版依存の描画差は本件で実証済みである。
+
+文字列そのものは OS 版 / ロケールで変わり得る。**NG の条件は「redaction・空欄・秒の出現・凍結」のみ**とし、語形の差は NG にしない（観測文字列は報告すること）。
+
 #### 再実行が必須になる契機
 
 1. iOS メジャーバージョン更新
+1b. **最低サポート OS を引き上げたとき**（新しい下限で再確認する）
 2. `LiveActivityOperationalStatusView` または `FlightCountdownLiveActivityTimerContract` の変更
 3. Xcode メジャーバージョン更新
 

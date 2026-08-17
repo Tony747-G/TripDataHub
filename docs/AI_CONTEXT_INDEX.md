@@ -42,6 +42,8 @@ This is the routing layer for AI sessions working on TripDataHub. It tells you w
 - `docs/SWE_INSTRUCTION_DEBUG_TRIP_FIXTURE.md` — DEBUG-only simulator harness, T-45 through T-49, and non-persistence requirements
 - `docs/SWE_INSTRUCTION_LIVE_ACTIVITY_LAYOUT_V2.md` — iOS 18 Live Activity layout/status rendering, T-14, T-50S, and device-only D-7
 - `docs/SWE_INSTRUCTION_IOS18_BASELINE_AND_T50.md` — iOS 18 project baseline, minimal generated-project diff, T-50S, and deferred Dynamic Island automation
+- `docs/SWE_INSTRUCTION_PRIORITY2_SIMULATOR_TRIAGE.md` — Priority 2 Simulator triage scope; explicitly not device acceptance
+- `docs/FOLLOW_UPS.md` — register of deliberately deferred items (F-1 duration format divergence, F-2 Widget format, F-3 DI nightly test, F-4 CI signing, F-5 Print Preview, F-6 Phase 5)
 
 ## If Touching Manual Operational / Personal Events
 

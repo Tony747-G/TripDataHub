@@ -64,7 +64,7 @@
 
 | # | 確認内容 | 方法 | 期待 |
 |---|---|---|---|
-| A-2-1 | `UIAppFonts` | baseline / 変更後それぞれで build し、`plutil -p <build>/TripDataHub.app/Info.plist` の該当キーを比較 | **完全一致**。配列 1 要素 `Resources/Fonts/MaterialIcons.ttf` |
+| A-2-1 | `UIAppFonts` | baseline / 変更後それぞれで build し、`plutil -p <build>/TripDataHub.app/Info.plist` の該当キーを比較 | **baseline と完全一致すること**（絶対値ではなく差分を見る）。<br>**PM 訂正 2026-08-17**: 初版は「配列 1 要素 `Resources/Fonts/MaterialIcons.ttf`」と書いたが**誤り**。checked-in `TripDataHub/Info.plist` と `project.yml` の `INFOPLIST_KEY_UIAppFonts` が Xcode によって merge されるため、実際の生成物は 2 要素（`MaterialIcons.ttf` / `Resources/Fonts/MaterialIcons.ttf`）である。**これは migration が作った差ではない。** 本検証の目的は「migration が生成物を変えていないこと」であり、判定基準は baseline との一致のみ。詳細は `FOLLOW_UPS.md` F-8 |
 | A-2-2 | `UISupportedInterfaceOrientations` | 同上 | **完全一致**。4 値の配列 |
 | A-2-3 | `UISupportedInterfaceOrientations~ipad` | 同上 | **完全一致**。landscape 2 値の配列 |
 | A-2-4 | Archive 成功 | `xcodebuild archive` | 成功。かつ `.app/PlugIns/` に **`TripDataCountdownWidgetExtension.appex` と `TripDataShareActionExtension.appex` の両方**が存在し署名されていること（`project.yml` のコメントにある過去の欠落事故の再発確認） |
