@@ -2,8 +2,8 @@
 
 **Status:** Accepted — revised by Product Owner
 **Original date:** 2026-08-15
-**Revised date:** 2026-08-17
-**Implementation status:** Contract approved; production and test migration is pending.
+**Revised date:** 2026-08-19
+**Implementation status:** Four-state contract implemented; local-only Activity lifecycle limitation and bounded elapsed presentation approved.
 
 ## Context
 
@@ -92,9 +92,9 @@ Every operational surface consumes the same structured status descriptor:
 | `.departureTimePassed` | departure elapsed | `Departure time passed` | `plannedDepartureUTC` |
 | `.expired` | none | no operational presentation | none |
 
-The descriptor, anchor UTC instant, state, leg identity, and expiration instant are common. Layout, font, and compactness may differ by surface; operational meaning may not.
+The descriptor, anchor UTC instant, state, leg identity, operational expiration instant, and any presentation-only timer clamp instant are common. Layout, font, and compactness may differ by surface; operational meaning may not.
 
-Live Activity and Widget countdown or elapsed values use OS-driven dynamic time rendering. For departure elapsed, `SystemFormatStyle.Timer` localization such as `14 minutes` is accepted. The exact `XX min` spelling is not a product requirement. The prefix and semantic meaning are the common contract. Manual per-minute `Activity.update()`, a Swift timer, or polling solely to format the duration is forbidden.
+Live Activity and Widget countdown or elapsed values use OS-driven dynamic time rendering. For departure elapsed, `SystemFormatStyle.Timer` localization such as `14 minutes` is accepted. The exact `XX min` spelling is not a product requirement. The prefix and semantic meaning are the common contract. The count-up range is bounded by the presentation-only `timerClampUTC = STD + 60 minutes`, so a retained Activity shell never advances beyond 60 minutes. `expirationUTC = STD + 61 minutes` remains a distinct evaluator and lifecycle boundary. Manual per-minute `Activity.update()`, a Swift timer, or polling solely to format the duration is forbidden.
 
 The old `Arriving in`, `Scheduled Arrival Time Passed`, arrival reference line, and all STA-based operational copy are retired.
 
@@ -106,7 +106,8 @@ One builder produces a structured operational presentation containing at least:
 - the four-state result;
 - semantic status descriptor;
 - anchor UTC instant;
-- optional `STD + 61 minutes` expiration;
+- optional `expirationUTC = STD + 61 minutes` operational expiration;
+- optional `timerClampUTC = STD + 60 minutes` departure-elapsed presentation clamp;
 - planned route/date/time metadata needed by the layout;
 - Presentation Policy visibility.
 
@@ -136,13 +137,13 @@ A selected `.departureTimePassed` leg remains current through elapsed minute 60.
 
 ### 8. Reconcile at report, STD, and STD+61 boundaries
 
-Boundary-driven reevaluation uses report time, STD, STD+61, and Presentation Policy visibility boundaries. STA and STA+1h are removed. Minute polling is not introduced.
+Boundary-driven reevaluation uses report time, STD, STD+61, and Presentation Policy visibility boundaries. STA and STA+1h are removed. Minute polling is not introduced. In the local-only architecture, this scheduler is best-effort while the process is suspended or terminated; it is not an exact background wake guarantee.
 
-Normal `reconcile` updates the same Activity through `.preReport`, `.preDeparture`, and `.departureTimePassed`. At STD+61, it ends the Activity and removes the snapshot unless a newly selected leg justifies an update or replacement Activity. A current-leg identity change ends the old Activity and may request one new Activity.
+Normal `reconcile` updates the same Activity through `.preReport`, `.preDeparture`, and `.departureTimePassed`. Whenever execution reaches reconciliation at or after STD+61, it immediately ends the expired Activity and removes the snapshot unless a newly selected leg justifies an update or replacement Activity. A current-leg identity change ends the old Activity and may request one new Activity. If the app is suspended or terminated at the boundary, the Activity shell may remain until the next available app execution; exact dismissal at STD+61 is not guaranteed without a server-side Activity end.
 
 `destructiveRebuild` remains exclusive to successful Trip Revision or Replacement and retains its existing teardown and rebuild contract.
 
-The Activity stale boundary for an active operational countdown is `plannedDepartureUTC + 61 minutes`, not planned arrival plus one hour.
+The Activity stale boundary for an active operational countdown is `plannedDepartureUTC + 61 minutes`, not planned arrival plus one hour. `staleDate` is metadata and MUST NOT be described as a dismissal guarantee. While a shell remains, the system timer is bounded by `timerClampUTC = plannedDepartureUTC + 60 minutes` and remains visibly clamped at 60 minutes.
 
 ### 9. Keep Actual data on the history side of the boundary
 
@@ -162,6 +163,7 @@ Legacy scheduled-departure-passed data is re-evaluated against STD and STD+61. D
 - `Departure time passed` communicates a schedule fact, not a claim that the aircraft departed.
 - Planned arrival remains available for route display, but no longer drives state, selection, status, or lifecycle.
 - A passed leg deliberately owns the operational presentation through minute 60; a short turn may have little or no `Dep in` presentation for its next leg.
+- Operational expiration (`STD+61`) and visible timer clamping (`STD+60`) are separate contracts. A suspended Activity may remain temporarily, but its visible elapsed value stops at 60 minutes and the next reconciliation ends it.
 - App Timeline, Widget, and Live Activity must migrate together because a surface-specific fallback would recreate contradictory operational meaning.
 - Device rendering acceptance remains necessary for OS-driven timer output; source-level tests protect syntax and semantic anchors but do not inspect SpringBoard pixels.
 - The original seven-state arrival/Actual-driven contract and its arrival-side T-xx assertions are retired by Product Owner decision, not lost coverage.
@@ -183,6 +185,10 @@ Rejected because selection, lifecycle, persisted snapshots, and surface builders
 ### Format elapsed minutes with manual updates
 
 Rejected because background Activity updates are not reliable enough to make a formatting preference an operational dependency. OS-driven localized timer output is accepted instead.
+
+### Guarantee exact local-only Activity dismissal at STD+61
+
+Rejected because a suspended or terminated app has no guaranteed execution opportunity at the boundary. `staleDate` does not end an Activity. APNs/server-side Activity ending, BGTask boundary guarantees, and per-minute updates are outside this contract; the next app execution reconciles and ends the expired Activity.
 
 ### Let each surface adapt the old model independently
 

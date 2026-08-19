@@ -68,7 +68,7 @@ HStack(spacing: 8) {
 Report in 3hr 15min
 ```
 
-秒は表示しない。2026-08-17 PO revision後の `.departureTimePassed` の経過時間も同様で、STD..<STD+61minをcount-upする。
+秒は表示しない。2026-08-19 PO lifecycle revision後の `.departureTimePassed` の経過時間は、presentation専用の `timerClampUTC = STD+60min` までをcount-upする。operational expirationは別概念の `expirationUTC = STD+61min` のまま維持する。
 
 ### 採用する実装
 
@@ -84,7 +84,7 @@ Text(.currentDate,
 
 // 経過時間（Departure time passed）
 Text(.currentDate,
-     format: .timer(countingUpIn: plannedDepartureUTC..<operationalExpirationUTC,
+     format: .timer(countingUpIn: plannedDepartureUTC..<timerClampUTC,
                     showsHours: false,
                     maxFieldCount: 1,
                     maxPrecision: .seconds(60)))
@@ -93,7 +93,9 @@ Text(.currentDate,
 - **OS が自動更新する。** アプリがバックグラウンドでも値が凍結しない
 - `maxPrecision: .seconds(60)` により秒を表示せず、分境界で system-driven 更新する
 - **分境界スケジューラの追加は不要。** `staleDate` を freshness 用に短縮する必要もない
-- 既存の `staleDate = plannedArrivalUTC + 1h` は **operational lifecycle 用としてそのまま維持**する
+- `staleDate = operationalExpirationUTC = plannedDepartureUTC + 61min` は補助metadataとして維持するが、local-only構成におけるexact dismissal guaranteeとして扱わない
+- appがsuspended/terminated中にActivity shellが残っても、bounded rangeによりvisible elapsedは60分で停止する。次回app executionのreconcileでexpired Activityをimmediate endする
+- minute polling / per-minute `Activity.update()` / BGTask exact wake / APNs server-side endingは導入しない
 - countdown target は既存の absolute UTC instant を変更せず、そのまま interval の境界に使う
 
 ### 却下した方式（記録）
@@ -141,7 +143,8 @@ Text(.currentDate,
 自動テストは `LiveActivityOperationalStatusView` のソース範囲だけを読み、既知の redaction 経路へ戻らないことを検証する。これはレンダリング結果の検証ではなく、構文回帰ガードである。
 
 - `Text(timerInterval:` / `.components(style:` / `.dateRange(` / `style: .relative` / `style: .timer` が Live Activity 本体にない
-- `.timer(countingDownIn:` と `.timer(countingUpIn:` が存在し、count-up intervalがSTD..<STD+61minに固定される
+- `.timer(countingDownIn:` と `.timer(countingUpIn:` が存在し、count-up intervalがSTD..<STD+60minに固定される
+- descriptor/API上で`timerClampUTC = STD+60min`と`expirationUTC = STD+61min`が別々に存在し、同じDate/propertyへ統合されない
 - `Arriving in` / `Scheduled Arrival Time Passed` / `plannedArrivalUTC..<staleDate` がLive Activity operational bodyに存在しない
 - `LegacyOperationalStatusView` は検査範囲外とする
 

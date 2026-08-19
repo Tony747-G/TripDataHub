@@ -32,6 +32,7 @@ Product Owner は、CrewAccess ATD / ATA を real-time source として利用で
 - `plannedArrivalUTC` / STA は route display metadata のみ。ATD / ATA は INV-012 の history data のみ
 - 評価順序は `now >= STD+61min` → expired、`now >= STD` → departure-time-passed、report 前 → pre-report、その他 STD 前 → pre-departure
 - `.departureTimePassed` は elapsed minute 0〜60。STD+61 で除外
+- operational expirationは `expirationUTC = STD+61min`、OS-driven elapsed表示の上限は別概念の `timerClampUTC = STD+60min`。Activity shellが残ってもvisible elapsedは60分で停止する
 - current leg は non-expired `.departureTimePassed` を最新 STD 順で優先し、STD+61 で初めて次 leg へ進む。short turn で次 leg の `Dep in` が短縮または消失してよい
 - App Timeline / Widget / Live Activity は同じ structured descriptor、state、prefix、anchor UTC を使用する
 - elapsed 部分は `SystemFormatStyle.Timer` の OS localization を許容する。`XX min` の文字列完全一致は要求しない
@@ -648,10 +649,11 @@ The imported schedule contains revisions and will replace the current version.
    > **保証を coordinator 内部の状態に移すこと。** 例: coordinator が `hasCompletedInitialPopulationWait` を持ち、**false の間はどのモード・どの呼び出し元であっても、必ず population 待ちを済ませてから activity 判定に進む**。`waitForInitialActivityPopulation` 引数は撤去してよい。
    >
    > 理由: 「正しい call site から正しい引数で呼ばれたときだけ安全」という設計は、INV-015 が禁じている *surface ごとの独自判断* と同じ脆さを持つ。**構造で保証すること。**
-3. refresh は report time / STD / STD+61 の **境界駆動の再評価**とする。formattingまたはstate更新のための毎分 pollingは禁止。同一 leg の visible state 遷移は `update`、STD+61でlegが消える場合はend、次legへ変わる場合はend/requestに落ちること
-4. `.expired`（STD+61）で旧 Live Activity を必ず end し、次legが無ければsnapshotを削除する
-5. `NextReportNotificationService`: `UNCalendarNotificationTrigger` + 全 component を、absolute 差分の `UNTimeIntervalNotificationTrigger`、または `[.year,.month,.day,.hour,.minute,.second,.timeZone]` に限定した component set へ変更
-6. Report time lead を §3.5 の region rule に置換
+3. refresh は report time / STD / STD+61 の **境界駆動の再評価**とする。formattingまたはstate更新のための毎分 pollingは禁止。同一 leg の visible state 遷移は `update`、実行機会のあるSTD+61または次回app executionでlegが消える場合はend、次legへ変わる場合はend/requestに落ちること
+4. `.expired`（STD+61）をreconcileした時点で旧 Live Activity をimmediate endし、次legが無ければsnapshotを削除する。local-only構成ではsuspended/terminated中のexact boundary wake/dismissalを保証しない。`staleDate = STD+61`は補助metadataでありdismissal guaranteeではない
+5. `.departureTimePassed`のsystem timerは`STD..<timerClampUTC`、`timerClampUTC = STD+60min`とする。Activity shellがSTD+61以降も残る場合も60分で表示をclampする。`expirationUTC`と同一propertyにしてはならない
+6. `NextReportNotificationService`: `UNCalendarNotificationTrigger` + 全 component を、absolute 差分の `UNTimeIntervalNotificationTrigger`、または `[.year,.month,.day,.hour,.minute,.second,.timeZone]` に限定した component set へ変更
+7. Report time lead を §3.5 の region rule に置換
 
 ### Phase 4 — P1: Timeline / Live Activity UI
 
@@ -685,7 +687,7 @@ struct BlockConnectionDisplay {
 
 | # | テスト | 判定 |
 |---|---|---|
-| T-1 | shared absolute-time descriptor | `Report in` / `Dep in` のtarget、`Departure time passed` のanchorが共通payloadのabsolute UTC instantと一致 |
+| T-1 | shared absolute-time descriptor | `Report in` / `Dep in` のtarget、`Departure time passed` のanchorが共通payloadのabsolute UTC instantと一致。`timerClampUTC = STD+60`と`expirationUTC = STD+61`を別々に保持する |
 | T-2 | device timezone 変更（ANC → SGN → ICN → Korea）| **duration が 1 秒も変化しない** |
 | T-3 | date-line crossing | ICN→ANC で日付が壊れない。`PDFTripParser.addDays` の TZ 依存を含む |
 | T-4 | revised-trip replacement | 確定操作 1 回・transaction 1 回で完了 |
@@ -696,16 +698,17 @@ struct BlockConnectionDisplay {
 | T-9 | operating vs DH parity | 同一schedule入力で **完全に同一のduration / state / semantic descriptor** |
 | T-10 | STD elapsed boundary | STD+0 / +1 / +60で `.departureTimePassed`、`Delayed` / `Departed` / `Completed`を生成しない |
 | T-11 | Actual independence | ATD / ATAのnil・非nil・値の違いだけではstate / status / selection / payloadが一切変化しない |
-| T-12 | STD+61 lifecycle | 境界ちょうどで `.expired`。次legが無ければpayload nil / Activity end / snapshot削除。ATD / ATA値に依存しない |
+| T-12 | STD+61 lifecycle | 境界ちょうどで evaluator は `.expired`。reconcileが実行された時点で次legが無ければpayload nil / Activity immediate end / snapshot削除。suspended中のexact dismissalは要求せず、残存shellのtimerは60分でclampする。ATD / ATA値に依存しない |
 | T-13 | Report time rule | Lower48↔Lower48 = 60 分、AK/HI 含む = 90 分、判定不能 = 90 分 |
 | T-14 | narrow-width UI | Live Activity route 行 / Connection card が wrap しない |
 | T-15 | iPad UI | Connection card が iPhone と同一構造 |
 | T-16 | equivalent-surface semantic parity | 同一leg / nowでApp Timeline iPhone/iPad、Widget、Live Activityが同じstate / prefix / anchor UTCを消費し、Timeline独自countdownが存在しない |
 | T-17 | Actual/STA inputs absent by construction | evaluator signatureにSTA / ATD / ATAが無く、state enumが4 casesで、旧arrival/Actual-driven casesが存在しない |
-| T-18 | same-leg transition vs expiry | `.preReport → .preDeparture → .departureTimePassed` はupdateのみ。STD+61で次legなしならendし、end/requestで同一legを再生成しない |
+| T-18 | same-leg transition vs expiry | `.preReport → .preDeparture → .departureTimePassed` はupdateのみ。STD+61以降の次回reconcileで次legなしならendし、end/requestで同一legを再生成しない |
 | T-19 | current leg 変更 vs replacement | leg 変更時は旧 end ＋ 新 create。Trip replacement 時は current leg が同一でも **全 end → rebuild** |
 | T-20 | **4-state全境界列** | 単一leg・単一testでreport前 / reportちょうど / STD直前 / STD / +1 / +60 / +61を進め、下記のexact stateと表示をassert |
 | T-21 | exact evaluation order | `STD+61 → STD → report → preDeparture` の優先順、report / STD / +61 equality、passed leg優先が固定される |
+| Timer clamp | display/lifecycle boundary separation | +59は59分、+60:00と+60:59は60分、+61以降も残存shellは60分。timer range上限はSTD+60、evaluator/stale上限はSTD+61で互いに異なる |
 | T-22 | input insufficiencyとActual非依存 | STD欠落はstate生成不可。route presentationに必要なplanning/TZ欠落はpayload除外・reason log。ATD/ATA欠落・不正値だけでは除外しない |
 | T-23 | **state が presentation window から独立していること（INV-016 の dedicated enforcing test）** | `now = STD − 30h`でも `.preReport` / `.preDeparture` を返す。面のvisibilityとstateが独立し、evaluator signatureにwindow入力が無い |
 | T-24 | **report lead time が全経路で一致すること** | 同一 leg に対し `NextReportWindowBuilder` の report time と `TimelineSupport` の duty start が **同じ lead を使う**。特に Asia→Asia（`ICN→CGO`）と Europe→Europe で **両経路とも 90 分**になること。Lower48↔Lower48 で両経路とも 60 分 |
@@ -730,13 +733,13 @@ INV-016（window 定数を state 判定に入れない）は、SWE 提出時点�
 | `STD`（境界ちょうど） | `.departureTimePassed` | prefix `Departure time passed`、elapsed minute 0 |
 | `STD + 1min` | `.departureTimePassed` | elapsed minute 1 |
 | `STD + 60min` | `.departureTimePassed` | elapsed minute 60 |
-| `STD + 61min`（境界ちょうど） | `.expired` | 表示なし / next legなしならActivity end |
+| `STD + 61min`（境界ちょうど） | `.expired` | 新payloadなし。reconcile実行時はnext legなしならActivity immediate end。未実行なら残存shellは60分表示で停止 |
 
 - evaluatorは `STD+61 → STD → report → preDeparture` の順で評価する。
 - elapsedは `floor((nowUTC - STD) / 60)`。+60:59までは60、+61:00でexpired。
 - 同一fixtureのATD / ATAだけを変更しても全行の結果が変わらないことを併せてassertする。
 - `.inFlight` / `.scheduledArrivalPassed` / `.completed` / STA-based `.stale`、`Arriving in` / `Scheduled Arrival Time Passed` が一度も現れないこと。
-- visibleな同一leg遷移はupdateのみ。+61のterminal transitionだけがendまたはnext-leg changeを許可する。
+- visibleな同一leg遷移はupdateのみ。+61以降をreconcileしたterminal transitionだけがendまたはnext-leg changeを許可する。
 
 その他:
 
@@ -748,7 +751,7 @@ INV-016（window 定数を state 判定に入れない）は、SWE 提出時点�
 ### Regression Scenarios（実データ）
 
 - **Scenario A — Revised Trip**: `ANC→SGN→ICN→ANC` → `ANC→SGN→ICN→CGO→ICN→ANC`。confirmation 1 回 / transaction 1 回 / Timeline 正 / 旧 DH 5X67 が生存しない / 旧 notification 消滅 / 旧 Live Activity 消滅 / current leg 正 / **iCloud sync 正常維持**
-- **Scenario B — 5X68 ANC→SGN**: `Report in` → `Dep in` → `Departure time passed`（minute 0〜60）→ STD+61で表示終了。同一legのvisible遷移はActivity updateのみ。countdown anchorはabsolute report/STD、TZ変更でduration不変、ATD/ATAの有無で結果不変、arrival operational copyはゼロ
+- **Scenario B — 5X68 ANC→SGN**: `Report in` → `Dep in` → `Departure time passed`（minute 0〜60）→ STD+61でevaluator expired。同一legのvisible遷移はActivity updateのみ。suspended中にshellが残ってもelapsedは60でclampし、次のapp executionでendする。countdown anchorはabsolute report/STD、TZ変更でduration不変、ATD/ATAの有無で結果不変、arrival operational copyはゼロ
 - **Scenario C — DH KE480 SGN→ICN**: operatingと同一engine / SGN→KoreaのTZ変更でduration不変 / `Delayed`その他Actual推測ゼロ / passed legが+60までcurrent / +61で次legへ遷移。短いturnで次legの`Dep in`が短縮・消失してもaccepted behavior
 - **Scenario D — ICN→CGO→ICN**: revised leg が original を置換 / CGO→ICN 完了後に original DH leg が再浮上しない / app restart で obsolete flight を再生成しない / current/next event が revised trip のみから導出
 
@@ -770,7 +773,8 @@ INV-016（window 定数を state 判定に入れない）は、SWE 提出時点�
 - [ ] 最初のdomicile departureはreport前に`Report in`、report以降STD前に`Dep in`を表示する
 - [ ] 後続legはreportを持たず、STD前は`Dep in`を表示する
 - [ ] STD〜STD+60でprefix `Departure time passed`とOS-driven localized elapsed valueを表示する
-- [ ] STD+60は表示され、STD+61境界ちょうどで`.expired`となり旧leg表示が停止する
+- [ ] STD+60は表示され、STD+61境界ちょうどでevaluatorは`.expired`となる。実行中または次回app executionのreconcileで旧Activityをendし、suspended中の残存shellは60分から進まない
+- [ ] `timerClampUTC = STD+60`と`expirationUTC = staleDate = STD+61`が別のdescriptor/APIとして表現され、count-up rangeが前者を使用する
 - [ ] passed legはminute 60までfuture legより優先し、+61で次legへ進む
 - [ ] `FlightOperationalState` が4 casesで、`.inFlight` / `.scheduledArrivalPassed` / real-time `.completed` / STA-based `.stale`を持たない
 - [ ] evaluator signatureにSTA / ATD / ATA / presentation window入力が無い

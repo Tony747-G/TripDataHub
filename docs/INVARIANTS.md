@@ -188,7 +188,7 @@ If a required planned departure or presentation timezone cannot be resolved, no 
 
 ## INV-014: Time Passage Reports a Schedule Boundary, Not an Actual Event
 
-**Rule:** Time passage alone MUST NOT produce `Delayed`, `Departed`, `In flight`, `Arriving`, `Arrived`, or `Completed`. From STD through elapsed minute 60 the product may report only the schedule fact `.departureTimePassed` with the prefix `Departure time passed`. At STD+61 the leg becomes `.expired` and produces no operational countdown.
+**Rule:** Time passage alone MUST NOT produce `Delayed`, `Departed`, `In flight`, `Arriving`, `Arrived`, or `Completed`. From STD through elapsed minute 60 the product may report only the schedule fact `.departureTimePassed` with the prefix `Departure time passed`. At STD+61 the leg becomes `.expired` and produces no new operational payload. If a local-only Activity shell survives suspension across that boundary, its system timer MUST remain clamped at 60 minutes until the next app execution reconciles and ends it.
 
 **Why:** A passed STD is known from the schedule; what the aircraft actually did is not. `Departure time passed` deliberately describes the former and makes no Actual claim. STA passage is not used for real-time operational presentation.
 
@@ -208,7 +208,7 @@ If a required planned departure or presentation timezone cannot be resolved, no 
 
 **Forbidden:** Surface-specific state builders; notification and Activity state computed independently; coordinator-side guessing of refresh mode; unconditional Activity end/request during launch, scene activation, periodic refresh, or same-leg state transitions; patching an old Activity through a Trip Replacement.
 
-**Enforced by:** the single operational-state builder and shared structured countdown presentation; caller-selected `LiveActivityRefreshMode`; a coordinator-owned, one-time initial Activity population barrier shared by every refresh entry point; boundary-driven report/STD/STD+61 evaluation; and the replacement-only, timeout-bounded destructive invalidation seam. Tests: T-4 through T-8, revised T-16, T-18, T-19, and T-22.
+**Enforced by:** the single operational-state builder and shared structured countdown presentation; caller-selected `LiveActivityRefreshMode`; a coordinator-owned, one-time initial Activity population barrier shared by every refresh entry point; best-effort boundary-driven report/STD/STD+61 evaluation with immediate next-execution cleanup; and the replacement-only, timeout-bounded destructive invalidation seam. Tests: T-4 through T-8, revised T-16, T-18, T-19, and T-22.
 
 **See also:** INV-006, INV-007, INV-008, and `docs/ADR/ADR-004-flight-operational-state-model.md`.
 
@@ -244,15 +244,17 @@ If a required planned departure or presentation timezone cannot be resolved, no 
 
 ## INV-018: STD+61 Is the Exact Operational Expiration Boundary
 
-**Rule:** Operational state is evaluated in this exact order: `now >= STD+61min` → `.expired`; otherwise `now >= STD` → `.departureTimePassed`; otherwise a non-nil report time with `now < reportTime` → `.preReport`; otherwise → `.preDeparture`. Equality belongs to the later state. STD is elapsed minute 0, the entire interval from STD+60:00 through STD+60:59 displays elapsed minute 60, and STD+61:00 is non-presenting.
+**Rule:** Operational state is evaluated in this exact order: `now >= STD+61min` → `.expired`; otherwise `now >= STD` → `.departureTimePassed`; otherwise a non-nil report time with `now < reportTime` → `.preReport`; otherwise → `.preDeparture`. Equality belongs to the later state. STD is elapsed minute 0, the entire interval from STD+60:00 through STD+60:59 displays elapsed minute 60, and STD+61:00 is non-presenting when reconciliation can run.
+
+Operational expiration and presentation clamping are distinct absolute instants: `expirationUTC = STD+61min`, while `timerClampUTC = STD+60min`. The OS-driven departure-elapsed timer uses `STD..<timerClampUTC`, so a retained shell displays at most 60 minutes. `staleDate = expirationUTC` is supplemental metadata, not an exact dismissal guarantee. A suspended or terminated local-only app need not wake at STD+61; the next available app execution MUST immediately reconcile and end the expired Activity.
 
 Current-leg selection gives `.departureTimePassed` legs priority through minute 60, choosing the latest STD when multiple such legs exist. Only at STD+61 is that leg excluded and selection allowed to advance to the earliest valid future leg. Short turns may therefore have a shortened or absent next-leg `Dep in` interval; this is accepted product behavior.
 
-**Why:** The order preserves the exact +60/+61 contract and prevents a future leg from displacing the selected passed leg early. It also gives lifecycle scheduling one deterministic terminal boundary without claiming an Actual event.
+**Why:** The order preserves the exact +60/+61 contract and prevents a future leg from displacing the selected passed leg early. Separating the timer clamp from operational expiration prevents misleading 61/62/90-minute copy without pretending that local scheduling can guarantee execution at the terminal boundary.
 
-**Forbidden:** Using strict `>` at STD or STD+61; expiring at STD+60; allowing a future leg to outrank a non-expired `.departureTimePassed` leg; using STA, STA+1h, ATD, or ATA as an operational boundary; polling every minute to drive state or Activity updates.
+**Forbidden:** Using strict `>` at STD or STD+61; expiring at STD+60; reusing one Date/property for both `timerClampUTC` and `expirationUTC`; allowing visible elapsed time to advance beyond 60 minutes; treating `staleDate` as a dismissal guarantee; allowing a future leg to outrank a non-expired `.departureTimePassed` leg; using STA, STA+1h, ATD, or ATA as an operational boundary; polling every minute to drive state or Activity updates; adding BGTask/APNs/server-side ending solely to guarantee this boundary.
 
-**Enforced by:** the pure state evaluator, latest-STD passed-leg selector, report/STD/STD+61 boundary scheduler, OS-driven localized timer rendering, and lifecycle end/update handling. Tests: revised T-6, T-10, T-12, T-18, T-20, and T-21.
+**Enforced by:** the pure state evaluator, latest-STD passed-leg selector, best-effort report/STD/STD+61 boundary scheduler, separately bounded OS-driven timer rendering, and immediate next-execution lifecycle cleanup. Tests: revised T-6, T-10, T-12, T-18, T-20, T-21, and the timer-clamp boundary regression.
 
 **See also:** INV-014, INV-017, and `docs/ADR/ADR-004-flight-operational-state-model.md`.
 
