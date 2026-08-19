@@ -256,6 +256,7 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var hasSeniorityDataOnDisk = false
     @Published private(set) var isDeviceSyncing = false
     @Published private(set) var isTripSyncing = false
+    @Published private(set) var operationalCountdownOutput: CountdownEngineOutput?
     @Published private(set) var deviceSyncStatusMessage: String?
     @Published private(set) var manualOperationalEvents: [ManualOperationalEvent] = []
     @Published private(set) var manualPersonalEvents: [ManualPersonalEvent] = []
@@ -1962,6 +1963,7 @@ final class AppViewModel: ObservableObject {
             mode: .destructiveRebuild,
             nowUTC: nowUTC
         )
+        operationalCountdownOutput = output
         scheduleFlightCountdownBoundary(for: output, after: nowUTC)
     }
 
@@ -4428,24 +4430,15 @@ final class AppViewModel: ObservableObject {
             return nextFlightCountdownOutput(
                 schedules: debugFlightCountdownFixtureSchedules,
                 domicileAirportCode: "ANC",
-                domicileTimeZone: DomicileSupport.timeZone(for: "ANC"),
-                nowUTC: nowUTC,
-                referenceTimeDisplay: FlightReferenceTimeDisplay(
-                    rawValue: UserDefaults.standard.string(forKey: "timeline_clock_display") ?? ""
-                ) ?? .lcl
+                nowUTC: nowUTC
             )
         }
 #endif
         let crewBase = CrewBase(normalizing: verifiedIdentity?.domicile)
-        let referenceTimeDisplay = FlightReferenceTimeDisplay(
-            rawValue: UserDefaults.standard.string(forKey: "timeline_clock_display") ?? ""
-        ) ?? .lcl
         return OperationalStateBuilder.build(
             schedules: schedules,
             domicileAirportCode: crewBase.reportAirportCode,
-            domicileTimeZone: crewBase.timeZone,
             nowUTC: nowUTC,
-            referenceTimeDisplay: referenceTimeDisplay,
             tzResolver: tzResolver
         ) { [diagnostics] exclusion in
             diagnostics.record(
@@ -4464,16 +4457,12 @@ final class AppViewModel: ObservableObject {
     func nextFlightCountdownOutput(
         schedules: [PayPeriodSchedule],
         domicileAirportCode: String,
-        domicileTimeZone: TimeZone,
-        nowUTC: Date,
-        referenceTimeDisplay: FlightReferenceTimeDisplay
+        nowUTC: Date
     ) -> CountdownEngineOutput? {
         OperationalStateBuilder.build(
             schedules: schedules,
             domicileAirportCode: domicileAirportCode,
-            domicileTimeZone: domicileTimeZone,
             nowUTC: nowUTC,
-            referenceTimeDisplay: referenceTimeDisplay,
             tzResolver: tzResolver
         ) { [diagnostics] exclusion in
             diagnostics.record(
@@ -4494,17 +4483,14 @@ final class AppViewModel: ObservableObject {
         let output = nextFlightCountdownOutput(
             schedules: fixtureSchedules,
             domicileAirportCode: "ANC",
-            domicileTimeZone: DomicileSupport.timeZone(for: "ANC"),
-            nowUTC: nowUTC,
-            referenceTimeDisplay: FlightReferenceTimeDisplay(
-                rawValue: UserDefaults.standard.string(forKey: "timeline_clock_display") ?? ""
-            ) ?? .lcl
+            nowUTC: nowUTC
         )
         await flightCountdownCoordinator.refresh(
             output: output,
             mode: .reconcile,
             nowUTC: nowUTC
         )
+        operationalCountdownOutput = output
         scheduleFlightCountdownBoundary(for: output, after: nowUTC)
     }
 
@@ -4516,6 +4502,7 @@ final class AppViewModel: ObservableObject {
             mode: .reconcile,
             nowUTC: nowUTC
         )
+        operationalCountdownOutput = nil
         debugFlightCountdownFixtureSchedules = nil
         isDebugFlightCountdownFixtureActive = false
         await notificationService.invalidateNextReportNotifications()
@@ -4539,6 +4526,7 @@ final class AppViewModel: ObservableObject {
             mode: mode,
             nowUTC: nowUTC
         )
+        operationalCountdownOutput = output
         scheduleFlightCountdownBoundary(for: output, after: nowUTC)
     }
 
@@ -4550,8 +4538,7 @@ final class AppViewModel: ObservableObject {
         let candidates = [
             leg.reportTimeUTC,
             Optional(leg.plannedDepartureUTC),
-            Optional(leg.plannedArrivalUTC),
-            Optional(leg.plannedArrivalUTC.addingTimeInterval(60 * 60)),
+            Optional(leg.plannedDepartureUTC.addingTimeInterval(FlightOperationalState.expirationInterval)),
             FlightPresentationPolicy.nextVisibilityBoundary(
                 plannedDepartureUTC: leg.plannedDepartureUTC,
                 nowUTC: nowUTC

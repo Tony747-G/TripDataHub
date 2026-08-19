@@ -99,26 +99,24 @@ struct SystemFlightCountdownActivityClient: FlightCountdownActivityClient {
                 plannedDepartureUTC: snapshot.plannedDepartureUTC,
                 plannedArrivalUTC: snapshot.plannedArrivalUTC,
                 reportTimeUTC: snapshot.reportTimeUTC,
+                presentation: snapshot.presentation,
                 departureTimeZoneID: snapshot.departureTimeZoneID,
                 arrivalTimeZoneID: snapshot.arrivalTimeZoneID,
                 departureDateText: snapshot.departureDateText,
                 departureTimeText: snapshot.departureTimeText,
                 arrivalDateText: snapshot.arrivalDateText,
-                arrivalTimeText: snapshot.arrivalTimeText,
-                referenceText: snapshot.referenceText
+                arrivalTimeText: snapshot.arrivalTimeText
             ),
             staleDate: FlightCountdownActivityLifecyclePolicy.staleDate(
-                plannedArrivalUTC: snapshot.plannedArrivalUTC
+                plannedDepartureUTC: snapshot.plannedDepartureUTC
             )
         )
     }
 }
 
 enum FlightCountdownActivityLifecyclePolicy {
-    static let staleGraceInterval: TimeInterval = 60 * 60
-
-    static func staleDate(plannedArrivalUTC: Date) -> Date {
-        plannedArrivalUTC.addingTimeInterval(staleGraceInterval)
+    static func staleDate(plannedDepartureUTC: Date) -> Date {
+        plannedDepartureUTC.addingTimeInterval(FlightOperationalState.expirationInterval)
     }
 }
 
@@ -190,7 +188,7 @@ actor FlightCountdownCoordinator {
 
         let candidate = output.map { makeSnapshot(from: $0, nowUTC: nowUTC) }
         let snapshot = candidate.flatMap {
-            $0.state == .completed || $0.state == .stale ? nil : $0
+            $0.state == .expired ? nil : $0
         }
 
         switch mode {
@@ -287,13 +285,13 @@ actor FlightCountdownCoordinator {
             plannedDepartureUTC: output.leg.plannedDepartureUTC,
             plannedArrivalUTC: output.leg.plannedArrivalUTC,
             reportTimeUTC: output.leg.reportTimeUTC,
+            presentation: output.presentation,
             departureTimeZoneID: output.leg.departureTimeZoneID,
             arrivalTimeZoneID: output.leg.arrivalTimeZoneID,
             departureDateText: output.display.departureDateText,
             departureTimeText: output.display.departureTimeText,
             arrivalDateText: output.display.arrivalDateText,
-            arrivalTimeText: output.display.arrivalTimeText,
-            referenceText: output.display.referenceText
+            arrivalTimeText: output.display.arrivalTimeText
         )
     }
 }

@@ -5,22 +5,14 @@ enum OperationalStateBuilder {
     static func build(
         schedules: [PayPeriodSchedule],
         domicileAirportCode: String,
-        domicileTimeZone: TimeZone,
         nowUTC: Date,
-        referenceTimeDisplay: FlightReferenceTimeDisplay,
         tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared,
         onExclusion: (FlightCountdownLegExclusion) -> Void = { _ in }
     ) -> CountdownEngineOutput? {
-        let reportWindows = NextReportWindowBuilder.build(
-            schedules: schedules,
-            domicileAirportCode: domicileAirportCode,
-            domicileTimeZone: domicileTimeZone,
-            tzResolver: tzResolver
-        )
         let reportTimes = reportTimesByLegID(
             schedules: schedules,
-            windows: reportWindows,
-            domicileAirportCode: domicileAirportCode
+            domicileAirportCode: domicileAirportCode,
+            tzResolver: tzResolver
         )
 
         var countdownLegs: [FlightCountdownLeg] = []
@@ -38,36 +30,42 @@ enum OperationalStateBuilder {
 
         return FlightCountdownEngine.buildCountdownOutput(
             from: countdownLegs,
-            nowUTC: nowUTC,
-            referenceTimeDisplay: referenceTimeDisplay
+            nowUTC: nowUTC
         )
     }
 
     private static func reportTimesByLegID(
         schedules: [PayPeriodSchedule],
-        windows: [NextReportTripWindow],
-        domicileAirportCode: String
+        domicileAirportCode: String,
+        tzResolver: IATATimeZoneResolving
     ) -> [UUID: Date] {
         let domicile = domicileAirportCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        let allLegs = schedules.flatMap(\.legs)
         var result: [UUID: Date] = [:]
 
-        for window in windows {
-            let matchingLeg = allLegs
-                .filter {
-                    $0.payPeriod == window.payPeriod
-                        && $0.pairing == window.pairing
-                        && $0.depAirport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == domicile
-                }
-                .first {
-                    guard let departure = LegConnectionTextBuilder.parseUTC($0.plannedDepartureUTC) else {
-                        return false
-                    }
-                    return departure == window.tripStartDomicile
-                }
-            if let matchingLeg {
-                result[matchingLeg.id] = window.reportTime
+        let grouped = Dictionary(grouping: schedules.flatMap(\.legs)) {
+            "\($0.payPeriod)|\($0.pairing)"
+        }
+        for legs in grouped.values {
+            let ordered = legs.sorted {
+                let lhs = LegConnectionTextBuilder.parseUTC($0.plannedDepartureUTC) ?? .distantFuture
+                let rhs = LegConnectionTextBuilder.parseUTC($1.plannedDepartureUTC) ?? .distantFuture
+                if lhs != rhs { return lhs < rhs }
+                if $0.leg != $1.leg { return $0.leg < $1.leg }
+                return $0.id.uuidString < $1.id.uuidString
             }
+            guard let firstBaseDeparture = ordered.first(where: {
+                $0.depAirport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == domicile
+                    && LegConnectionTextBuilder.parseUTC($0.plannedDepartureUTC) != nil
+            }),
+            let departure = LegConnectionTextBuilder.parseUTC(firstBaseDeparture.plannedDepartureUTC) else {
+                continue
+            }
+            let leadMinutes = ReportLeadTimePolicy.minutes(
+                originAirport: firstBaseDeparture.depAirport,
+                destinationAirport: firstBaseDeparture.arrAirport,
+                tzResolver: tzResolver
+            )
+            result[firstBaseDeparture.id] = departure.addingTimeInterval(TimeInterval(-leadMinutes * 60))
         }
         return result
     }

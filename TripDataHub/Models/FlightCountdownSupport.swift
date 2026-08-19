@@ -8,8 +8,6 @@ struct FlightCountdownLeg: Codable, Equatable, Hashable, Identifiable {
     let arrivalAirportIATA: String
     let plannedDepartureUTC: Date
     let plannedArrivalUTC: Date
-    let atdUTC: Date?
-    let ataUTC: Date?
     let reportTimeUTC: Date?
     let departureTimeZoneID: String
     let arrivalTimeZoneID: String
@@ -20,8 +18,6 @@ enum FlightCountdownLegExclusionReason: String, Error, Equatable {
     case invalidPlannedDeparture
     case missingPlannedArrival
     case invalidPlannedArrival
-    case invalidActualDeparture
-    case invalidActualArrival
     case unresolvedDepartureTimeZone
     case unresolvedArrivalTimeZone
 }
@@ -37,14 +33,13 @@ struct CountdownDisplayStrings: Codable, Equatable, Hashable {
     let arrivalDateText: String
     let arrivalTimeText: String
     let routeText: String
-    let statusText: String
-    let referenceText: String?
 }
 
 struct CountdownEngineOutput: Codable, Equatable, Hashable {
     let leg: FlightCountdownLeg
     let state: FlightOperationalState
     let visibility: FlightPresentationVisibility
+    let presentation: OperationalCountdownPresentation
     let display: CountdownDisplayStrings
 }
 
@@ -61,9 +56,6 @@ enum FlightCountdownEngine {
     static func state(for leg: FlightCountdownLeg, nowUTC: Date) -> FlightOperationalState {
         FlightOperationalState.evaluate(
             plannedDepartureUTC: leg.plannedDepartureUTC,
-            plannedArrivalUTC: leg.plannedArrivalUTC,
-            atdUTC: leg.atdUTC,
-            ataUTC: leg.ataUTC,
             reportTimeUTC: leg.reportTimeUTC,
             nowUTC: nowUTC
         )
@@ -75,108 +67,44 @@ enum FlightCountdownEngine {
     ) -> EvaluatedFlightCountdownLeg? {
         let evaluated = legs.map { EvaluatedFlightCountdownLeg(leg: $0, state: state(for: $0, nowUTC: nowUTC)) }
 
-        if let inFlight = latestDeparture(in: evaluated.filter { $0.state == .inFlight }) {
-            return inFlight
-        }
-        if let arrivalPassed = latestDeparture(in: evaluated.filter { $0.state == .scheduledArrivalPassed }) {
-            return arrivalPassed
-        }
-        if let departurePassed = latestDeparture(in: evaluated.filter { $0.state == .scheduledDeparturePassed }) {
+        if let departurePassed = latestDeparture(in: evaluated.filter { $0.state == .departureTimePassed }) {
             return departurePassed
         }
 
         return evaluated
-            .filter { $0.state == .postReportPreDeparture || $0.state == .preReport }
+            .filter { $0.state == .preDeparture || $0.state == .preReport }
             .sorted(by: compareUpcoming(_:_:))
             .first
     }
 
-    static func statusText(
-        for leg: FlightCountdownLeg,
-        state: FlightOperationalState,
-        nowUTC: Date
-    ) -> String? {
-        switch state {
-        case .preReport:
-            guard let reportTimeUTC = leg.reportTimeUTC,
-                  let duration = FlightCountdownSharedStore.durationText(from: nowUTC, to: reportTimeUTC) else {
-                return nil
-            }
-            return "Report in \(duration)"
-        case .postReportPreDeparture:
-            guard let duration = FlightCountdownSharedStore.durationText(from: nowUTC, to: leg.plannedDepartureUTC) else {
-                return nil
-            }
-            return "Dep in \(duration)"
-        case .scheduledDeparturePassed:
-            return "Scheduled Departure Time Passed"
-        case .inFlight:
-            guard let duration = FlightCountdownSharedStore.durationText(from: nowUTC, to: leg.plannedArrivalUTC),
-                  nowUTC < leg.plannedArrivalUTC else {
-                assertionFailure(".inFlight must have a positive schedule-based arrival countdown")
-                return nil
-            }
-            return "Arriving in \(duration)"
-        case .scheduledArrivalPassed:
-            guard let duration = FlightCountdownSharedStore.durationText(from: leg.plannedArrivalUTC, to: nowUTC) else {
-                return nil
-            }
-            return "Scheduled Arrival Time Passed \(duration)"
-        case .completed, .stale:
-            return nil
-        }
-    }
-
-    static func displayStrings(
-        for leg: FlightCountdownLeg,
-        state: FlightOperationalState,
-        nowUTC: Date,
-        referenceTimeDisplay: FlightReferenceTimeDisplay
-    ) -> CountdownDisplayStrings? {
-        guard let statusText = statusText(for: leg, state: state, nowUTC: nowUTC) else {
-            return nil
-        }
+    static func displayStrings(for leg: FlightCountdownLeg) -> CountdownDisplayStrings {
         let departureDateText = localDateText(for: leg.plannedDepartureUTC, timeZoneID: leg.departureTimeZoneID)
         let departureTimeText = localTimeText(for: leg.plannedDepartureUTC, timeZoneID: leg.departureTimeZoneID)
         let arrivalDateText = localDateText(for: leg.plannedArrivalUTC, timeZoneID: leg.arrivalTimeZoneID)
         let arrivalTimeText = localTimeText(for: leg.plannedArrivalUTC, timeZoneID: leg.arrivalTimeZoneID)
         let routeText = "\(leg.departureAirportIATA) \(departureTimeText) -> \(arrivalDateText) \(arrivalTimeText) \(leg.arrivalAirportIATA)"
-        let referenceText: String?
-        if state == .scheduledArrivalPassed {
-            switch referenceTimeDisplay {
-            case .lcl:
-                referenceText = "Scheduled Arrival: \(arrivalTimeText) LCL"
-            case .utc:
-                referenceText = "Scheduled Arrival: \(localTimeText(for: leg.plannedArrivalUTC, timeZoneID: "UTC")) UTC"
-            }
-        } else {
-            referenceText = nil
-        }
         return CountdownDisplayStrings(
             departureDateText: departureDateText,
             departureTimeText: departureTimeText,
             arrivalDateText: arrivalDateText,
             arrivalTimeText: arrivalTimeText,
-            routeText: routeText,
-            statusText: statusText,
-            referenceText: referenceText
+            routeText: routeText
         )
     }
 
     static func buildCountdownOutput(
         from legs: [FlightCountdownLeg],
-        nowUTC: Date,
-        referenceTimeDisplay: FlightReferenceTimeDisplay
+        nowUTC: Date
     ) -> CountdownEngineOutput? {
         guard let evaluated = selectRelevantLeg(from: legs, nowUTC: nowUTC),
-              let display = displayStrings(
-                  for: evaluated.leg,
+              let presentation = OperationalCountdownPresentation.make(
                   state: evaluated.state,
-                  nowUTC: nowUTC,
-                  referenceTimeDisplay: referenceTimeDisplay
+                  plannedDepartureUTC: evaluated.leg.plannedDepartureUTC,
+                  reportTimeUTC: evaluated.leg.reportTimeUTC
               ) else {
             return nil
         }
+        let display = displayStrings(for: evaluated.leg)
         let visibility = FlightPresentationPolicy.visibility(
             for: evaluated.state,
             plannedDepartureUTC: evaluated.leg.plannedDepartureUTC,
@@ -186,6 +114,7 @@ enum FlightCountdownEngine {
             leg: evaluated.leg,
             state: evaluated.state,
             visibility: visibility,
+            presentation: presentation,
             display: display
         )
     }
@@ -276,24 +205,6 @@ extension TripLeg {
         guard let plannedArrival = LegConnectionTextBuilder.parseUTC(plannedArrivalText) else {
             return .failure(.invalidPlannedArrival)
         }
-        let actualDeparture: Date?
-        if let atdUTC {
-            guard let parsed = LegConnectionTextBuilder.parseUTC(atdUTC) else {
-                return .failure(.invalidActualDeparture)
-            }
-            actualDeparture = parsed
-        } else {
-            actualDeparture = nil
-        }
-        let actualArrival: Date?
-        if let ataUTC {
-            guard let parsed = LegConnectionTextBuilder.parseUTC(ataUTC) else {
-                return .failure(.invalidActualArrival)
-            }
-            actualArrival = parsed
-        } else {
-            actualArrival = nil
-        }
         guard let departureTimeZoneID = tzResolver.resolve(depAirport) else {
             return .failure(.unresolvedDepartureTimeZone)
         }
@@ -311,8 +222,6 @@ extension TripLeg {
                 arrivalAirportIATA: arrAirport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
                 plannedDepartureUTC: plannedDeparture,
                 plannedArrivalUTC: plannedArrival,
-                atdUTC: actualDeparture,
-                ataUTC: actualArrival,
                 reportTimeUTC: reportTimeUTC,
                 departureTimeZoneID: departureTimeZoneID,
                 arrivalTimeZoneID: arrivalTimeZoneID

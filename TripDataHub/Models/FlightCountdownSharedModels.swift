@@ -10,9 +10,53 @@ enum FlightPresentationVisibility: String, Codable, Hashable {
     case liveActivity
 }
 
-enum FlightReferenceTimeDisplay: String, Codable, Hashable {
-    case lcl
-    case utc
+enum OperationalCountdownDirection: String, Codable, Equatable, Hashable {
+    case countingDown
+    case countingUp
+}
+
+struct OperationalCountdownPresentation: Codable, Equatable, Hashable {
+    let state: FlightOperationalState
+    let prefix: String
+    let direction: OperationalCountdownDirection
+    let anchorUTC: Date
+    let expirationUTC: Date?
+
+    static func make(
+        state: FlightOperationalState,
+        plannedDepartureUTC: Date,
+        reportTimeUTC: Date?
+    ) -> OperationalCountdownPresentation? {
+        switch state {
+        case .preReport:
+            guard let reportTimeUTC else { return nil }
+            return OperationalCountdownPresentation(
+                state: state,
+                prefix: "Report in",
+                direction: .countingDown,
+                anchorUTC: reportTimeUTC,
+                expirationUTC: plannedDepartureUTC.addingTimeInterval(FlightOperationalState.expirationInterval)
+            )
+        case .preDeparture:
+            return OperationalCountdownPresentation(
+                state: state,
+                prefix: "Dep in",
+                direction: .countingDown,
+                anchorUTC: plannedDepartureUTC,
+                expirationUTC: plannedDepartureUTC.addingTimeInterval(FlightOperationalState.expirationInterval)
+            )
+        case .departureTimePassed:
+            return OperationalCountdownPresentation(
+                state: state,
+                prefix: "Departure time passed",
+                direction: .countingUp,
+                anchorUTC: plannedDepartureUTC,
+                expirationUTC: plannedDepartureUTC.addingTimeInterval(FlightOperationalState.expirationInterval)
+            )
+        case .expired:
+            return nil
+        }
+    }
 }
 
 struct FlightCountdownSnapshot: Codable, Equatable, Hashable {
@@ -27,13 +71,13 @@ struct FlightCountdownSnapshot: Codable, Equatable, Hashable {
     let plannedDepartureUTC: Date
     let plannedArrivalUTC: Date
     let reportTimeUTC: Date?
+    let presentation: OperationalCountdownPresentation?
     let departureTimeZoneID: String
     let arrivalTimeZoneID: String
     let departureDateText: String
     let departureTimeText: String
     let arrivalDateText: String
     let arrivalTimeText: String
-    let referenceText: String?
 }
 
 enum FlightPresentationPolicy {
@@ -48,7 +92,7 @@ enum FlightPresentationPolicy {
         plannedDepartureUTC: Date,
         nowUTC: Date
     ) -> FlightPresentationVisibility {
-        guard state != .completed, state != .stale else {
+        guard state != .expired else {
             return .hidden
         }
         if nowUTC < plannedDepartureUTC.addingTimeInterval(-widgetLeadTime) {
@@ -87,17 +131,6 @@ enum FlightCountdownRouteLine {
     }
 }
 
-enum FlightCountdownStatusPresentationStyle {
-    case widget
-    case liveActivity
-
-    /// Widget and Live Activity visibility are mutually exclusive. Their duration renderers are
-    /// intentionally different until Widget layout safety is covered by its own follow-up tests.
-    var usesLiveActivitySystemTimer: Bool {
-        self == .liveActivity
-    }
-}
-
 enum FlightCountdownLiveActivityTimerContract {
     static let maxFieldCount = 2
     static let maxPrecision = Duration.seconds(60)
@@ -106,8 +139,51 @@ enum FlightCountdownLiveActivityTimerContract {
         Date.distantPast..<targetUTC
     }
 
-    static func countUpInterval(startingAt startUTC: Date, staleAt staleUTC: Date) -> Range<Date> {
-        startUTC..<staleUTC
+    static func countUpInterval(startingAt startUTC: Date, expirationUTC: Date) -> Range<Date> {
+        startUTC..<expirationUTC
+    }
+}
+
+struct OperationalCountdownStatusView: View {
+    let presentation: OperationalCountdownPresentation
+    var showsPrefix = true
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if showsPrefix {
+                Text(presentation.prefix)
+            }
+            switch presentation.direction {
+            case .countingDown:
+                Text(
+                    .currentDate,
+                    format: .timer(
+                        countingDownIn: FlightCountdownLiveActivityTimerContract.countdownInterval(
+                            endingAt: presentation.anchorUTC
+                        ),
+                        showsHours: true,
+                        maxFieldCount: FlightCountdownLiveActivityTimerContract.maxFieldCount,
+                        maxPrecision: FlightCountdownLiveActivityTimerContract.maxPrecision
+                    )
+                )
+            case .countingUp:
+                if let expirationUTC = presentation.expirationUTC {
+                    Text(
+                        .currentDate,
+                        format: .timer(
+                            countingUpIn: FlightCountdownLiveActivityTimerContract.countUpInterval(
+                                startingAt: presentation.anchorUTC,
+                                expirationUTC: expirationUTC
+                            ),
+                            showsHours: false,
+                            maxFieldCount: 1,
+                            maxPrecision: FlightCountdownLiveActivityTimerContract.maxPrecision
+                        )
+                    )
+                }
+            }
+        }
+        .monospacedDigit()
     }
 }
 
@@ -248,13 +324,13 @@ struct FlightCountdownAttributes: ActivityAttributes {
         let plannedDepartureUTC: Date
         let plannedArrivalUTC: Date
         let reportTimeUTC: Date?
+        let presentation: OperationalCountdownPresentation?
         let departureTimeZoneID: String
         let arrivalTimeZoneID: String
         let departureDateText: String
         let departureTimeText: String
         let arrivalDateText: String
         let arrivalTimeText: String
-        let referenceText: String?
     }
 
     let activityID: String

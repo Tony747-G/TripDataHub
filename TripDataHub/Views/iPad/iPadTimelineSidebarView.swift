@@ -21,9 +21,6 @@ struct IPadTimelineSidebarView: View {
     @State private var tripDataKeyByLegID: [UUID: String] = [:]
     @State private var firstRowIDByTripID: [String: String] = [:]
     @State private var firstTripSummaryIDByTripID: [String: String] = [:]
-    /// Heavy window computation cached; time-based selection stays computed so it
-    /// reflects current time as the clock advances without re-running the full build.
-    @State private var cachedReportWindows: [NextReportTripWindow] = []
 
     private var dateHeaderTextColor: Color {
         ScheduleColors.timelineDateHeaderText(for: colorScheme)
@@ -81,17 +78,6 @@ struct IPadTimelineSidebarView: View {
         }
     }
 
-    /// Selects the active/next report from the pre-built (cached) windows.
-    /// Computed so that as time advances the displayed report updates without
-    /// re-running the expensive NextReportWindowBuilder.build().
-    private var nextReportInfo: (reportTime: Date, tripLabel: String)? {
-        guard let window = NextReportWindowBuilder.nextReportWindow(
-            from: cachedReportWindows,
-            now: Date()
-        ) else { return nil }
-        return (window.reportTime, window.pairing)
-    }
-
     /// Section (day) IDs that contain at least one leg of the selected trip.
     /// Depends only on cached `legData` (stable) + `selectedTripID`.
     private var selectedSectionIDs: Set<String> {
@@ -107,9 +93,7 @@ struct IPadTimelineSidebarView: View {
         VStack(spacing: 0) {
             if focusedTripID == nil {
                 sidebarHeader
-                if let report = nextReportInfo {
-                    nextReportStrip(report: report)
-                }
+                operationalCountdownStrip
                 Divider()
             }
             ScrollViewReader { proxy in
@@ -473,64 +457,36 @@ struct IPadTimelineSidebarView: View {
             .overlay(alignment: .bottom) { Divider() }
     }
 
-    // MARK: Next Report Strip — identical structure to iPhone's nextReportCard
+    // MARK: Operational Countdown Strip — same descriptor as iPhone/Widget/Live Activity
 
-    private func nextReportStrip(report: (reportTime: Date, tripLabel: String)) -> some View {
-        TimelineView(.periodic(from: Date(), by: 60)) { _ in
+    @ViewBuilder
+    private var operationalCountdownStrip: some View {
+        if let output = viewModel.operationalCountdownOutput {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
-                    Text("NEXT REPORT")
+                    Text("OPERATIONAL COUNTDOWN")
                         .appScaledFont(.caption, weight: .bold, scale: timelineFontScale)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                    Text("Trip \(report.tripLabel)")
+                    Spacer()
+                    Text(output.leg.flightNumber ?? output.leg.id)
                         .appScaledFont(.caption, scale: timelineFontScale)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
                 }
-                HStack {
-                    Text(Self.reportTimeFormatter(for: selectedDomicileTimeZone.identifier).string(from: report.reportTime) + " \(selectedCrewDomicile.displayName)")
-                        .appScaledFont(.subheadline, weight: .bold, scale: timelineFontScale)
-                        .foregroundStyle(dateHeaderTextColor)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                        .layoutPriority(1)
-                    Spacer()
-                    Text(countdownText(to: report.reportTime))
-                        .appScaledFont(.subheadline, weight: .bold, scale: timelineFontScale)
-                        .foregroundStyle(countdownColor(to: report.reportTime))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                        .layoutPriority(1)
-                }
+                Text("\(output.leg.departureAirportIATA) → \(output.leg.arrivalAirportIATA)")
+                    .appScaledFont(.subheadline, weight: .bold, scale: timelineFontScale)
+                    .foregroundStyle(dateHeaderTextColor)
+                    .lineLimit(1)
+                OperationalCountdownStatusView(presentation: output.presentation)
+                    .appScaledFont(.subheadline, weight: .bold, scale: timelineFontScale)
+                    .foregroundStyle(output.state == .departureTimePassed ? .orange : .green)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
             .background(.thinMaterial)
         }
-    }
-
-    private func countdownText(to target: Date) -> String {
-        let deltaSeconds = Int(target.timeIntervalSince(Date()))
-        let sign = deltaSeconds >= 0 ? "-" : "+"
-        let absMinutes = abs(deltaSeconds) / 60
-        let days = absMinutes / (24 * 60)
-        let hours = (absMinutes % (24 * 60)) / 60
-        let minutes = absMinutes % 60
-        if days == 0 {
-            return "(\(sign)\(String(format: "%02d", hours))h \(String(format: "%02d", minutes))m)"
-        }
-        return "(\(sign)\(String(format: "%02d", days))d \(String(format: "%02d", hours))h \(String(format: "%02d", minutes))m)"
-    }
-
-    private func countdownColor(to target: Date) -> Color {
-        let remainingHours = target.timeIntervalSince(Date()) / 3600.0
-        if remainingHours <= 12 { return .red }
-        if remainingHours <= 24 { return .orange }
-        return dateHeaderTextColor
     }
 
     // MARK: Trip summary card
@@ -705,19 +661,6 @@ struct IPadTimelineSidebarView: View {
     private static var localTimeFormatters: [String: DateFormatter] = [:]
     private static var localDayKeyFormatters: [String: DateFormatter] = [:]
 
-    private static func reportTimeFormatter(for tzID: String) -> DateFormatter {
-        if let cached = reportTimeFormatters[tzID] { return cached }
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US")
-        formatter.timeZone = TimeZone(identifier: tzID)
-        formatter.dateFormat = "EEE, MMM d yyyy  HH:mm"
-        reportTimeFormatters[tzID] = formatter
-        return formatter
-    }
-
-    private static var reportTimeFormatters: [String: DateFormatter] = [:]
-
     private static let utcTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -848,15 +791,6 @@ struct IPadTimelineSidebarView: View {
         firstRowIDByTripID = rowMap
         firstTripSummaryIDByTripID = summaryMap
 
-        // Cache only the window list; time-based selection stays in computed nextReportInfo.
-        // Focused mode hides the next-report strip, so skip the window build entirely.
-        cachedReportWindows = focusedTripID == nil
-            ? NextReportWindowBuilder.build(
-                schedules: schedules,
-                domicileAirportCode: selectedCrewDomicile.reportAirportCode,
-                domicileTimeZone: selectedDomicileTimeZone
-            ).sorted { $0.reportTime < $1.reportTime }
-            : []
     }
 
     private func refreshTripDataCards() {
