@@ -6,7 +6,7 @@ final class LaunchBehaviorUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    func test_timelineLaunchShowsNextReportCardBeforeDateHeaderBetweenTrips() {
+    func test_timelineLaunchShowsOperationalCountdownBeforeDateHeaderBetweenTrips() {
         let app = XCUIApplication()
         app.launchArguments += ["UITEST_TIMELINE_SEED"]
         app.launch()
@@ -18,10 +18,21 @@ final class LaunchBehaviorUITests: XCTestCase {
         ).firstMatch
         XCTAssertTrue(dateHeader.waitForExistence(timeout: 10))
 
-        let nextReportCard = app.staticTexts.matching(identifier: "timeline.nextReportCard").firstMatch
-        XCTAssertTrue(nextReportCard.waitForExistence(timeout: 5))
-        XCTAssertTrue(nextReportCard.isHittable)
-        XCTAssertLessThan(nextReportCard.frame.minY, dateHeader.frame.minY)
+        let operationalCountdown = app.staticTexts.matching(
+            identifier: "timeline.operationalCountdownCard"
+        ).firstMatch
+        XCTAssertTrue(operationalCountdown.waitForExistence(timeout: 5))
+        XCTAssertTrue(operationalCountdown.isHittable)
+
+        let reportPrefix = app.staticTexts.matching(
+            NSPredicate(
+                format: "identifier == %@ AND label == %@",
+                "timeline.operationalCountdownCard",
+                "Report in"
+            )
+        ).firstMatch
+        XCTAssertTrue(reportPrefix.waitForExistence(timeout: 5))
+        XCTAssertLessThan(operationalCountdown.frame.minY, dateHeader.frame.minY)
     }
 
     func test_settingsLoggedOutStateShowsTripBoardLoginAction() {

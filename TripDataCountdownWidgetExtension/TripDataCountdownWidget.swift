@@ -46,13 +46,15 @@ private func liveActivityLocalDateText(_ date: Date, tzID: String) -> String {
 private struct LiveActivityOperationalStatusView: View {
     let presentation: OperationalCountdownPresentation?
     var showsPrefix = true
+    var prioritizesPrefix = false
 
     @ViewBuilder
     var body: some View {
         if let presentation {
             OperationalCountdownStatusView(
                 presentation: presentation,
-                showsPrefix: showsPrefix
+                showsPrefix: showsPrefix,
+                prioritizesPrefix: prioritizesPrefix
             )
         }
     }
@@ -200,6 +202,8 @@ private struct FlightCountdownWidgetEntryView: View {
 
 private struct FlightCountdownLiveActivityView: View {
     let state: FlightCountdownAttributes.ContentState
+    var verticalPadding: CGFloat = 6
+    var prioritizesStatusPrefix = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -216,14 +220,17 @@ private struct FlightCountdownLiveActivityView: View {
                 ),
                 arrivalAirportTimeText: "\(state.arrivalAirportIATA) \(state.arrivalTimeText)"
             ) {
-                LiveActivityOperationalStatusView(presentation: state.presentation)
+                LiveActivityOperationalStatusView(
+                    presentation: state.presentation,
+                    prioritizesPrefix: prioritizesStatusPrefix
+                )
                     .foregroundStyle(statusColor)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, 14)
         .padding(.trailing, 10)
-        .padding(.vertical, 6)
+        .padding(.vertical, verticalPadding)
     }
 
     private var statusColor: Color {
@@ -264,8 +271,13 @@ struct FlightCountdownLiveActivityWidget: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.bottom) {
-                    FlightCountdownLiveActivityView(state: context.state)
+                    FlightCountdownLiveActivityView(
+                        state: context.state,
+                        verticalPadding: 0,
+                        prioritizesStatusPrefix: true
+                    )
                 }
+                .contentMargins(.top, 0)
             } compactLeading: {
                 Text("✈ \(formattedFlightNumber(context.state.flightNumber, isDeadhead: context.state.isDeadhead, unknownFallback: "Flight"))")
                     .font(.caption2.weight(.bold))

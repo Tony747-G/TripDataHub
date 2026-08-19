@@ -79,9 +79,13 @@ final class Phase4LayoutTests: XCTestCase {
     func test_liveActivityTimerContractConstants() {
         let targetUTC = Date(timeIntervalSince1970: 1_786_909_800)
         let expirationUTC = targetUTC.addingTimeInterval(FlightOperationalState.expirationInterval)
+        let timerClampUTC = FlightCountdownLiveActivityTimerContract.timerClampUTC(
+            plannedDepartureUTC: targetUTC
+        )
 
         XCTAssertEqual(FlightCountdownLiveActivityTimerContract.maxFieldCount, 2)
         XCTAssertEqual(FlightCountdownLiveActivityTimerContract.maxPrecision, .seconds(60))
+        XCTAssertEqual(FlightCountdownLiveActivityTimerContract.departureElapsedClampInterval, 60 * 60)
         XCTAssertEqual(
             FlightCountdownLiveActivityTimerContract.countdownInterval(endingAt: targetUTC).upperBound,
             targetUTC
@@ -89,10 +93,13 @@ final class Phase4LayoutTests: XCTestCase {
         XCTAssertEqual(
             FlightCountdownLiveActivityTimerContract.countUpInterval(
                 startingAt: targetUTC,
-                expirationUTC: expirationUTC
+                timerClampUTC: timerClampUTC
             ),
-            targetUTC..<expirationUTC
+            targetUTC..<timerClampUTC
         )
+        XCTAssertEqual(timerClampUTC, targetUTC.addingTimeInterval(60 * 60))
+        XCTAssertEqual(expirationUTC, targetUTC.addingTimeInterval(61 * 60))
+        XCTAssertNotEqual(timerClampUTC, expirationUTC)
 
         // Dates are absolute instants. Presentation timezone changes must not move either timer
         // boundary. WidgetKit rendering remains a separate device acceptance requirement.
@@ -175,6 +182,16 @@ final class Phase4LayoutTests: XCTestCase {
         }
         XCTAssertFalse(compactSharedSource.contains("Arrivingin"))
         XCTAssertFalse(compactSharedSource.contains("ScheduledArrivalTimePassed"))
+        XCTAssertTrue(
+            compactSharedSource.contains(
+                "countUpInterval(startingAt:presentation.anchorUTC,timerClampUTC:timerClampUTC)"
+            )
+        )
+        XCTAssertFalse(
+            compactSharedSource.contains(
+                "countUpInterval(startingAt:presentation.anchorUTC,expirationUTC:"
+            )
+        )
     }
 
     func test_T16_operationalSurfacesConsumeTheSharedDescriptorWithoutTimelineReevaluation() throws {
@@ -529,6 +546,68 @@ final class FlightCountdownPresentationTests: XCTestCase {
         XCTAssertEqual(output.presentation.prefix, "Departure time passed")
         XCTAssertEqual(output.presentation.anchorUTC, F.departure)
         XCTAssertEqual(output.presentation.direction, .countingUp)
+        XCTAssertEqual(
+            output.presentation.timerClampUTC,
+            F.departure.addingTimeInterval(60 * 60)
+        )
+        XCTAssertEqual(
+            output.presentation.expirationUTC,
+            F.departure.addingTimeInterval(61 * 60)
+        )
+        XCTAssertNotEqual(
+            output.presentation.timerClampUTC,
+            output.presentation.expirationUTC
+        )
+    }
+
+    func test_departureElapsedTimerClampsAtSixtyWhileEvaluatorExpiresAtSixtyOne() throws {
+        let report = F.departure.addingTimeInterval(-90 * 60)
+        let presentation = try XCTUnwrap(OperationalCountdownPresentation.make(
+            state: .departureTimePassed,
+            plannedDepartureUTC: F.departure,
+            reportTimeUTC: report
+        ))
+        let timerClampUTC = try XCTUnwrap(presentation.timerClampUTC)
+        let expirationUTC = try XCTUnwrap(presentation.expirationUTC)
+
+        XCTAssertEqual(timerClampUTC, F.departure.addingTimeInterval(60 * 60))
+        XCTAssertEqual(expirationUTC, F.departure.addingTimeInterval(61 * 60))
+        XCTAssertEqual(
+            FlightCountdownLiveActivityTimerContract.countUpInterval(
+                startingAt: presentation.anchorUTC,
+                timerClampUTC: timerClampUTC
+            ),
+            F.departure..<F.departure.addingTimeInterval(60 * 60)
+        )
+
+        let checkpoints: [(TimeInterval, Int, FlightOperationalState)] = [
+            (59 * 60 + 59, 59, .departureTimePassed),
+            (60 * 60, 60, .departureTimePassed),
+            (60 * 60 + 59, 60, .departureTimePassed),
+            (61 * 60, 60, .expired)
+        ]
+        for (elapsed, expectedVisibleMinute, expectedState) in checkpoints {
+            let now = F.departure.addingTimeInterval(elapsed)
+            let visibleMinute = min(Int(now.timeIntervalSince(F.departure)) / 60, 60)
+            XCTAssertEqual(visibleMinute, expectedVisibleMinute)
+            XCTAssertEqual(F.state(now: now, report: report), expectedState)
+        }
+    }
+
+    func test_timerClampAndExpirationRemainAbsoluteAcrossDeviceTimezones() throws {
+        let original = NSTimeZone.default
+        defer { NSTimeZone.default = original }
+
+        for identifier in ["America/Anchorage", "Asia/Ho_Chi_Minh", "Asia/Seoul"] {
+            NSTimeZone.default = try XCTUnwrap(TimeZone(identifier: identifier))
+            let presentation = try XCTUnwrap(OperationalCountdownPresentation.make(
+                state: .departureTimePassed,
+                plannedDepartureUTC: F.departure,
+                reportTimeUTC: nil
+            ))
+            XCTAssertEqual(presentation.timerClampUTC, F.departure.addingTimeInterval(60 * 60))
+            XCTAssertEqual(presentation.expirationUTC, F.departure.addingTimeInterval(61 * 60))
+        }
     }
 
     func test_T12_STDPlusSixtyOneExpiresAndProducesNoPayload() {
@@ -1218,6 +1297,62 @@ final class FlightCountdownConversionAndBuilderTests: XCTestCase {
 final class DebugFlightCountdownFixtureTests: XCTestCase {
     private let canonicalNowUTC = ISO8601DateFormatter().date(from: "2026-08-16T18:30:00Z")!
 
+    func test_debugRuntimeScenariosGenerateExpectedPlanningRelationshipsAndProductionStates() throws {
+        let variants: [(FlightCountdownDebugScenario, TimeInterval, FlightOperationalState)] = [
+            (.preReport, 5 * 60 * 60, .preReport),
+            (.preDeparture, 30 * 60, .preDeparture),
+            (.departureTimePassed0, 0, .departureTimePassed),
+            (.departureTimePassed1, -60, .departureTimePassed),
+            (.departureTimePassed60, -(60 * 60), .departureTimePassed)
+        ]
+
+        for (scenario, expectedDepartureOffset, expectedState) in variants {
+            let schedules = AppViewModel.debugFlightCountdownInteractiveSchedules(
+                nowUTC: canonicalNowUTC,
+                scenario: scenario
+            )
+            let output = try XCTUnwrap(OperationalStateBuilder.build(
+                schedules: schedules,
+                domicileAirportCode: "ANC",
+                nowUTC: canonicalNowUTC
+            ))
+
+            XCTAssertEqual(output.leg.id, AppViewModel.debugFlightCountdownFirstLegID.uuidString)
+            XCTAssertEqual(
+                output.leg.plannedDepartureUTC.timeIntervalSince(canonicalNowUTC),
+                expectedDepartureOffset,
+                accuracy: 0.001,
+                "Unexpected STD relationship for \(scenario.rawValue)"
+            )
+            let reportTimeUTC = try XCTUnwrap(output.leg.reportTimeUTC)
+            XCTAssertEqual(
+                reportTimeUTC.timeIntervalSince(output.leg.plannedDepartureUTC),
+                -(90 * 60),
+                accuracy: 0.001,
+                "Production report policy was bypassed for \(scenario.rawValue)"
+            )
+            XCTAssertEqual(output.state, expectedState)
+            XCTAssertEqual(output.presentation.state, expectedState)
+            XCTAssertEqual(output.visibility, .liveActivity)
+        }
+    }
+
+    func test_debugRuntimeScenarioTypesAndSettingsUIAreGuardedByDEBUGCompilation() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let previewSource = try String(contentsOf: repositoryRoot
+            .appendingPathComponent("TripDataHub/ViewModels/AppViewModel+PreviewData.swift"))
+        let settingsSource = try String(contentsOf: repositoryRoot
+            .appendingPathComponent("TripDataHub/Views/SettingsTabView.swift"))
+
+        XCTAssertTrue(previewSource.hasPrefix("#if DEBUG\n"))
+        XCTAssertTrue(previewSource.hasSuffix("#endif\n"))
+        assertToken("FlightCountdownDebugScenario", isInsideDebugBlockIn: settingsSource)
+        assertToken("Countdown State", isInsideDebugBlockIn: settingsSource)
+        assertToken("startDebugFlightCountdownFixture", isInsideDebugBlockIn: settingsSource)
+    }
+
     func test_T45_fixtureUsesProductionOperationalStateBuilder() throws {
         let output = try XCTUnwrap(buildCanonicalOutput(nowUTC: canonicalNowUTC))
 
@@ -1373,6 +1508,33 @@ final class DebugFlightCountdownFixtureTests: XCTestCase {
 
     private func date(_ value: String) -> Date {
         ISO8601DateFormatter().date(from: value)!
+    }
+
+    private func assertToken(
+        _ token: String,
+        isInsideDebugBlockIn source: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let tokenRange = source.range(of: token) else {
+            XCTFail("Missing source token: \(token)", file: file, line: line)
+            return
+        }
+        let prefix = source[..<tokenRange.lowerBound]
+        let debugStart = prefix.range(of: "#if DEBUG", options: .backwards)
+        let debugEndBeforeToken = prefix.range(of: "#endif", options: .backwards)
+        XCTAssertNotNil(debugStart, file: file, line: line)
+        if let debugStart, let debugEndBeforeToken {
+            XCTAssertGreaterThan(
+                source.distance(from: source.startIndex, to: debugStart.lowerBound),
+                source.distance(from: source.startIndex, to: debugEndBeforeToken.lowerBound),
+                "\(token) is not inside the active DEBUG block",
+                file: file,
+                line: line
+            )
+        }
+        let suffix = source[tokenRange.upperBound...]
+        XCTAssertNotNil(suffix.range(of: "#endif"), file: file, line: line)
     }
 }
 

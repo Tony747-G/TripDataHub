@@ -546,7 +546,7 @@ final class BrowserPopupLifecycleTests: XCTestCase {
         context.coordinator.closePopups()
 
         XCTAssertFalse(context.coordinator.popupWebViews.isEmpty)
-        try? await Task.sleep(nanoseconds: 800_000_000)
+        await waitForPopupStateToBecomeClean(context)
         assertPopupStateIsClean(context)
     }
 
@@ -641,6 +641,28 @@ final class BrowserPopupLifecycleTests: XCTestCase {
             XCTAssertNil(popup.navigationDelegate, file: file, line: line)
             XCTAssertNil(popup.uiDelegate, file: file, line: line)
         }
+    }
+
+    private func waitForPopupStateToBecomeClean(
+        _ context: PopupContext,
+        timeout: TimeInterval = 2
+    ) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if popupStateIsClean(context) {
+                return
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+    }
+
+    private func popupStateIsClean(_ context: PopupContext) -> Bool {
+        context.coordinator.popupWebViews.isEmpty
+            && context.coordinator.popupParents.isEmpty
+            && context.viewModel.popupWebView == nil
+            && context.popups.allSatisfy {
+                $0.navigationDelegate == nil && $0.uiDelegate == nil
+            }
     }
 
     private struct PopupContext {

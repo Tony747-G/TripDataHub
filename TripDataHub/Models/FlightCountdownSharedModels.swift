@@ -20,7 +20,10 @@ struct OperationalCountdownPresentation: Codable, Equatable, Hashable {
     let prefix: String
     let direction: OperationalCountdownDirection
     let anchorUTC: Date
+    /// Operational selection/lifecycle boundary. This is intentionally not the timer range end.
     let expirationUTC: Date?
+    /// Presentation-only upper bound that prevents a retained Activity shell exceeding 60 minutes.
+    let timerClampUTC: Date?
 
     static func make(
         state: FlightOperationalState,
@@ -35,7 +38,8 @@ struct OperationalCountdownPresentation: Codable, Equatable, Hashable {
                 prefix: "Report in",
                 direction: .countingDown,
                 anchorUTC: reportTimeUTC,
-                expirationUTC: plannedDepartureUTC.addingTimeInterval(FlightOperationalState.expirationInterval)
+                expirationUTC: plannedDepartureUTC.addingTimeInterval(FlightOperationalState.expirationInterval),
+                timerClampUTC: nil
             )
         case .preDeparture:
             return OperationalCountdownPresentation(
@@ -43,7 +47,8 @@ struct OperationalCountdownPresentation: Codable, Equatable, Hashable {
                 prefix: "Dep in",
                 direction: .countingDown,
                 anchorUTC: plannedDepartureUTC,
-                expirationUTC: plannedDepartureUTC.addingTimeInterval(FlightOperationalState.expirationInterval)
+                expirationUTC: plannedDepartureUTC.addingTimeInterval(FlightOperationalState.expirationInterval),
+                timerClampUTC: nil
             )
         case .departureTimePassed:
             return OperationalCountdownPresentation(
@@ -51,7 +56,10 @@ struct OperationalCountdownPresentation: Codable, Equatable, Hashable {
                 prefix: "Departure time passed",
                 direction: .countingUp,
                 anchorUTC: plannedDepartureUTC,
-                expirationUTC: plannedDepartureUTC.addingTimeInterval(FlightOperationalState.expirationInterval)
+                expirationUTC: plannedDepartureUTC.addingTimeInterval(FlightOperationalState.expirationInterval),
+                timerClampUTC: FlightCountdownLiveActivityTimerContract.timerClampUTC(
+                    plannedDepartureUTC: plannedDepartureUTC
+                )
             )
         case .expired:
             return nil
@@ -134,24 +142,31 @@ enum FlightCountdownRouteLine {
 enum FlightCountdownLiveActivityTimerContract {
     static let maxFieldCount = 2
     static let maxPrecision = Duration.seconds(60)
+    static let departureElapsedClampInterval: TimeInterval = 60 * 60
 
     static func countdownInterval(endingAt targetUTC: Date) -> Range<Date> {
         Date.distantPast..<targetUTC
     }
 
-    static func countUpInterval(startingAt startUTC: Date, expirationUTC: Date) -> Range<Date> {
-        startUTC..<expirationUTC
+    static func timerClampUTC(plannedDepartureUTC: Date) -> Date {
+        plannedDepartureUTC.addingTimeInterval(departureElapsedClampInterval)
+    }
+
+    static func countUpInterval(startingAt startUTC: Date, timerClampUTC: Date) -> Range<Date> {
+        startUTC..<timerClampUTC
     }
 }
 
 struct OperationalCountdownStatusView: View {
     let presentation: OperationalCountdownPresentation
     var showsPrefix = true
+    var prioritizesPrefix = false
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: prioritizesPrefix ? 2 : 4) {
             if showsPrefix {
                 Text(presentation.prefix)
+                    .layoutPriority(prioritizesPrefix ? 1 : 0)
             }
             switch presentation.direction {
             case .countingDown:
@@ -167,13 +182,13 @@ struct OperationalCountdownStatusView: View {
                     )
                 )
             case .countingUp:
-                if let expirationUTC = presentation.expirationUTC {
+                if let timerClampUTC = presentation.timerClampUTC {
                     Text(
                         .currentDate,
                         format: .timer(
                             countingUpIn: FlightCountdownLiveActivityTimerContract.countUpInterval(
                                 startingAt: presentation.anchorUTC,
-                                expirationUTC: expirationUTC
+                                timerClampUTC: timerClampUTC
                             ),
                             showsHours: false,
                             maxFieldCount: 1,
