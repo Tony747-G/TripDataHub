@@ -170,31 +170,31 @@ Timeline remains compact: Original Scheduled is the normal state, Revised Schedu
 
 ---
 
-## INV-013: Flight Operational State Uses Planning, Actual, and Report Instants Only
+## INV-013: Real-Time Operational Countdown Uses STD, Report Time, and Now Only
 
-**Rule:** Countdown and operational-state decisions take only `plannedDepartureUTC`, `plannedArrivalUTC`, `atdUTC`, `ataUTC`, and the optional trip-level `reportTimeUTC`. All duration math is an absolute `Date` difference. `depUTC` and `arrUTC` are resolved display/history values and MUST NOT be read directly by the countdown engine or operational-state builder.
+**Rule:** Real-time countdown state, current-leg selection, status descriptors, boundary scheduling, and Activity lifecycle decisions take only required `plannedDepartureUTC`, optional trip-level `reportTimeUTC`, and `nowUTC`. All duration math is an absolute `Date` difference. `plannedArrivalUTC` may be carried only as route display metadata. STA, ATD, ATA, `depUTC`, and `arrUTC` MUST NOT drive operational state or lifecycle.
 
-If a required planning instant or presentation timezone cannot be resolved, no operational state or presentation payload is created for that leg. The leg is excluded from current-leg selection, the reason is recorded through `SyncDiagnosticsLog`, and selection continues with the next valid leg. There is no `.unknown` operational state and no default timestamp is synthesized.
+If a required planned departure or presentation timezone cannot be resolved, no operational presentation is created for that leg. The leg is excluded from current-leg selection, the reason is recorded through `SyncDiagnosticsLog`, and selection continues. There is no `.unknown` operational state and no default timestamp is synthesized. Missing or invalid Actual data does not exclude a leg whose planned-departure inputs are valid.
 
-**Why:** INV-012 deliberately gives display/history and planning different resolution orders. Feeding a resolved Actual display value into schedule-based countdown math moves the target when an ATD or ATA is observed. Treating an insufficient input as a state would also give an unknowable leg a user-facing status, contrary to the fail-closed product rule.
+**Why:** CrewAccess Actual information is not a reliable real-time source. INV-012 deliberately retains Actual values for history and display, but feeding them into operational state makes the live presentation depend on data normally imported only after the trip. STA is likewise a planned route timestamp, not evidence of arrival.
 
-**Forbidden:** Reading `depUTC` / `arrUTC` in the countdown or state-decision path; using device-local wall-clock math for durations; backfilling a missing planning instant or timezone; silently dropping an invalid leg; adding an `.unknown` state or an operational error banner.
+**Forbidden:** Accepting ATD, ATA, or STA in the operational evaluator signature; reading `depUTC` / `arrUTC` in the operational path; using planned arrival as a state, selection, lifecycle, or status anchor; using device-local wall-clock math; backfilling a missing planned departure or timezone; excluding a leg only because Actual data is invalid; adding an `.unknown` state or operational error banner.
 
-**Enforced by:** `FlightOperationalState`, the single operational-state builder, and reason-coded `SyncDiagnosticsLog` events. Tests: T-1, T-2, T-3, T-6, T-16, and T-22.
+**Enforced by:** the restricted `FlightOperationalState` signature, the single operational-state builder, reason-coded `SyncDiagnosticsLog`, and parity tests proving that ATD/ATA-only changes do not alter operational output. Tests: revised T-1, T-2, T-3, T-6, T-11, T-16, T-17, and T-22.
 
 **See also:** INV-001, INV-002, INV-012, and `docs/ADR/ADR-004-flight-operational-state-model.md`.
 
 ---
 
-## INV-014: Time Passage Does Not Prove an Actual Operational Event
+## INV-014: Time Passage Reports a Schedule Boundary, Not an Actual Event
 
-**Rule:** Time passage alone MUST NOT produce `Delayed`, `Departed`, or `Completed`. When schedule instants are known but Actual departure or arrival is not, the product reports only the neutral schedule-based states `.scheduledDeparturePassed` or `.scheduledArrivalPassed`. Only an observed ATA produces `.completed`.
+**Rule:** Time passage alone MUST NOT produce `Delayed`, `Departed`, `In flight`, `Arriving`, `Arrived`, or `Completed`. From STD through elapsed minute 60 the product may report only the schedule fact `.departureTimePassed` with the prefix `Departure time passed`. At STD+61 the leg becomes `.expired` and produces no operational countdown.
 
-**Why:** A passed STD or STA says what the schedule predicted, not what the aircraft did. Claiming an unobserved event is worse than showing less information.
+**Why:** A passed STD is known from the schedule; what the aircraft actually did is not. `Departure time passed` deliberately describes the former and makes no Actual claim. STA passage is not used for real-time operational presentation.
 
-**Forbidden:** Mapping `now >= STD` to `Delayed` or `Departed`; mapping a fixed offset after STD or STA to `Completed`; using a future leg, connection, location, or elapsed time to infer an Actual event; retaining legacy `Delayed` / schedule-derived `Completed` copy in any surface.
+**Forbidden:** Treating `.departureTimePassed` as proof of departure; mapping STD or STA passage to an Actual event; using a future leg, connection, location, ATD, ATA, or elapsed schedule time to infer a real-time aircraft state; retaining `Delayed`, `Arriving in`, `Scheduled Arrival Time Passed`, or schedule-derived `Completed` copy on any operational surface.
 
-**Enforced by:** `FlightOperationalState`, shared presentation payload formatting, current-leg selection, and lifecycle reconciliation. Tests: T-6, T-10, T-11, T-12, T-17, T-20, and T-21.
+**Enforced by:** the four-state evaluator, shared semantic status descriptor, current-leg selector, and STD+61 lifecycle boundary. Tests: revised T-6, T-10 through T-12, T-17, T-20, and T-21.
 
 **See also:** `docs/ADR/ADR-004-flight-operational-state-model.md`.
 
@@ -208,7 +208,7 @@ If a required planning instant or presentation timezone cannot be resolved, no o
 
 **Forbidden:** Surface-specific state builders; notification and Activity state computed independently; coordinator-side guessing of refresh mode; unconditional Activity end/request during launch, scene activation, periodic refresh, or same-leg state transitions; patching an old Activity through a Trip Replacement.
 
-**Enforced by:** the single operational-state builder and shared countdown presentation payload; caller-selected `LiveActivityRefreshMode`; a coordinator-owned, one-time initial Activity population barrier shared by every refresh entry point; boundary-driven report/STD/STA/STA+1h evaluation; and the replacement-only, timeout-bounded destructive invalidation seam. Tests: T-4 through T-8, T-18, T-19, and T-22.
+**Enforced by:** the single operational-state builder and shared structured countdown presentation; caller-selected `LiveActivityRefreshMode`; a coordinator-owned, one-time initial Activity population barrier shared by every refresh entry point; boundary-driven report/STD/STD+61 evaluation; and the replacement-only, timeout-bounded destructive invalidation seam. Tests: T-4 through T-8, revised T-16, T-18, T-19, and T-22.
 
 **See also:** INV-006, INV-007, INV-008, and `docs/ADR/ADR-004-flight-operational-state-model.md`.
 
@@ -220,7 +220,7 @@ If a required planning instant or presentation timezone cannot be resolved, no o
 
 **Why:** A leg's operational meaning does not change because a Widget or Live Activity has entered its display window. Combining the two concepts caused STD-relative UI phases to masquerade as flight state.
 
-**Forbidden:** A state case whose meaning is a Widget/Live Activity window; using a visibility lead/tail constant to decide `Delayed`, `inFlight`, `completed`, or `stale`; adding `.preTrip` to represent “not visible yet.”
+**Forbidden:** A state case whose meaning is a Widget/Live Activity window; using a visibility lead/tail constant to decide `.departureTimePassed` or `.expired`; adding `.preTrip` to represent “not visible yet.”
 
 **Enforced by:** separate `FlightOperationalState` and Presentation Policy types, with no presentation-window input in the operational-state evaluator signature. Test: T-23 is the dedicated enforcing regression; it requires the same valid operational state outside the T-12h presentation window and regardless of surface visibility.
 
@@ -228,29 +228,31 @@ If a required planning instant or presentation timezone cannot be resolved, no o
 
 ---
 
-## INV-017: In-Flight Requires Observed ATD and Ends at Scheduled Arrival
+## INV-017: Actual Events Are History-Only for Real-Time Countdown
 
-**Rule:** `.inFlight` requires `atdUTC != nil`, `ataUTC == nil`, and `now < plannedArrivalUTC`. ATD is the only accepted evidence of departure in this Build. At STA, `.inFlight` ends even when ATD is known; ATD proves departure, not continuing airborne status.
+**Rule:** ATD and ATA remain persisted, leg-scoped history under INV-012, but they MUST NOT affect real-time operational state, current-leg selection, status text, boundary scheduling, snapshot stale dates, or Activity update/end/request decisions. Two schedules differing only in ATD or ATA produce identical operational output.
 
-**Why:** Inferring airborne state from schedule passage is an unsupported operational claim. Keeping `.inFlight` after STA would make the schedule-based arrival countdown zero or negative and imply knowledge the app does not have.
+**Why:** CrewAccess Actual data is commonly imported after trip completion and is not a contracted real-time source. Allowing it to affect live countdown would make normal operation depend on unavailable evidence while leaving surfaces vulnerable to revision-time changes.
 
-**Forbidden:** Inferring `.inFlight` from STD passage, next-leg existence, connection feasibility, location, or any non-ATD signal; treating `atdUTC != nil && ataUTC == nil` as sufficient without the STA bound; clamping a non-positive `Arriving in` duration to hide an invalid state.
+**Forbidden:** `.inFlight` or `.completed` cases in the real-time state enum; operational evaluator parameters for ATD or ATA; converting an Actual observation into live `Arriving`, `Arrived`, or `Completed` copy; rejecting a planned-departure countdown because an Actual timestamp is missing or malformed.
 
-**Enforced by:** ordered `FlightOperationalState` evaluation and a positive-duration assertion for `Arriving in`. Tests: T-9, T-11, T-12, T-17, T-20, and T-21.
+**Enforced by:** a type signature with no Actual inputs, operational conversion that does not parse Actual fields, source guards for retired state/copy, and ATD/ATA parity regression tests. Tests: revised T-11, T-17, T-20, T-21, and T-22.
 
-**See also:** INV-014, INV-018, and `docs/ADR/ADR-004-flight-operational-state-model.md`.
+**See also:** INV-012, INV-013, INV-014, and `docs/ADR/ADR-004-flight-operational-state-model.md`.
 
 ---
 
-## INV-018: STA Boundaries Precede In-Flight When ATA Is Unobserved
+## INV-018: STD+61 Is the Exact Operational Expiration Boundary
 
-**Rule:** Operational state is evaluated in this exact order: observed ATA → `.completed`; ATA absent and `now >= STA + 1h` → `.stale`; ATA absent and `now >= STA` → `.scheduledArrivalPassed`; observed ATD with `now < STA` → `.inFlight`; `now >= STD` → `.scheduledDeparturePassed`; `reportTimeUTC != nil` and now before report time → `.preReport`; otherwise before STD → `.postReportPreDeparture`. Boundary equality belongs to the later state: STA is `.scheduledArrivalPassed`, and STA+1h is `.stale`.
+**Rule:** Operational state is evaluated in this exact order: `now >= STD+61min` → `.expired`; otherwise `now >= STD` → `.departureTimePassed`; otherwise a non-nil report time with `now < reportTime` → `.preReport`; otherwise → `.preDeparture`. Equality belongs to the later state. STD is elapsed minute 0, the entire interval from STD+60:00 through STD+60:59 displays elapsed minute 60, and STD+61:00 is non-presenting.
 
-**Why:** Placing the ATD branch before STA checks makes `.scheduledArrivalPassed` and `.stale` unreachable for the flights most likely to have an ATD. Evaluation order is part of the product contract, not an implementation-style choice.
+Current-leg selection gives `.departureTimePassed` legs priority through minute 60, choosing the latest STD when multiple such legs exist. Only at STD+61 is that leg excluded and selection allowed to advance to the earliest valid future leg. Short turns may therefore have a shortened or absent next-leg `Dep in` interval; this is accepted product behavior.
 
-**Forbidden:** Reordering the branches for readability; allowing ATD-known/ATA-unknown legs to remain `.inFlight` at or after STA; using strict `>` at the STA or STA+1h boundaries; allowing `.completed` without ATA.
+**Why:** The order preserves the exact +60/+61 contract and prevents a future leg from displacing the selected passed leg early. It also gives lifecycle scheduling one deterministic terminal boundary without claiming an Actual event.
 
-**Enforced by:** the pure state evaluator, current-leg selector, shared presentation payload, and lifecycle end/update handling. Tests: T-11, T-12, T-18, T-20, and T-21.
+**Forbidden:** Using strict `>` at STD or STD+61; expiring at STD+60; allowing a future leg to outrank a non-expired `.departureTimePassed` leg; using STA, STA+1h, ATD, or ATA as an operational boundary; polling every minute to drive state or Activity updates.
+
+**Enforced by:** the pure state evaluator, latest-STD passed-leg selector, report/STD/STD+61 boundary scheduler, OS-driven localized timer rendering, and lifecycle end/update handling. Tests: revised T-6, T-10, T-12, T-18, T-20, and T-21.
 
 **See also:** INV-014, INV-017, and `docs/ADR/ADR-004-flight-operational-state-model.md`.
 

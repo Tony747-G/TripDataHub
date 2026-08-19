@@ -19,7 +19,7 @@ Definition of Done の「実機で iPhone + iPad を確認」は**次のトリ�
 
 ## 1. Fixture の時刻設計 — 用途で 2 形態に分ける（重要）
 
-**固定日時をそのまま使うと明日には壊れる。** `2026-08-16 23:40Z` は今日は T-6h window 内・report time 前だが、日付が変われば全部過去になり、Leg 1 は `.stale`、current leg は Leg 2 へ移り、テストが一斉に落ちる。**壁時計に依存するテストは本 Build Week で排除した欠陥クラスそのもの。**
+**固定日時をそのまま使うと明日には壊れる。** `2026-08-16 23:40Z` は基準日時では T-6h window 内・report time 前だが、日付が変われば Leg 1 は `.expired` となり、current leg は Leg 2 へ移り、テストが一斉に落ちる。**壁時計に依存するテストは本 Build Week で排除した欠陥クラスそのもの。**
 
 ### 1-A. 自動テスト（T-45〜T-49）— `nowUTC` を注入する
 
@@ -159,7 +159,7 @@ production coordinator を通す以上、**Simulator 上に本物の ActivityKit
 
 | # | 内容 | assert |
 |---|---|---|
-| T-45 | fixture が production builder を通る | `OperationalStateBuilder` 経由で `CountdownEngineOutput` が得られる。fixture 専用 engine が存在しない |
+| T-45 | fixture が production builder を通る | `OperationalStateBuilder` 経由で共通structured operational payloadが得られる。fixture専用engine / status derivationが存在しない |
 | T-46 | Device TZ 非依存（integration） | 表示 TZ を Anchorage / Ho_Chi_Minh / Seoul と変えても、`nowUTC` が同一なら **duration が完全に一致**する。変わるのは時刻表記のみ |
 | T-47 | Presentation window 独立（INV-016 / T-23 の integration） | **canonical fixture の Leg 1 を固定したまま、注入する `nowUTC` を 3 通りに変える。** 3 通りとも `FlightOperationalState` が `.preReport` で同一。`FlightPresentationVisibility` だけが 3 値すべてに変化する（下記） |
 
@@ -178,7 +178,7 @@ production coordinator を通す以上、**Simulator 上に本物の ActivityKit
 - 3 variant すべてで `now < reportTime`（22:10Z）なので **state は `.preReport` で不変**
 - **変化するのは visibility だけ**であることを assert する。これが INV-016 の integration 検証
 - 境界そのもの（`STD − 12h` ちょうど → `.widget`、`STD − 6h` ちょうど → `.liveActivity`）も余力があれば追加してよい。必須ではない
-| T-48 | current leg selection | Leg 2 が存在しても current leg は Leg 1（`ANC → ICN`）。Leg 2 が奪わない |
+| T-48 | current leg selection | Leg 1が`.preReport`またはnon-expired `.departureTimePassed`の間、Leg 2が存在してもcurrentはLeg 1（`ANC → ICN`）。Leg 1のSTD+61でのみLeg 2へ進む |
 | T-49 | non-persistence | fixture 実行後に `viewModel.schedules` / `crewAccessSchedules` が不変。CloudKit upload / shared schedule upload が **0 回**（spy で検証）。canonical JSON が書かれていない |
 
 **T-49 が本指示の本体を守るテスト。** spy で upload 回数を数えること。「呼ばれていないはず」ではなく「**呼ばれていないことを assert**」する。
@@ -203,7 +203,7 @@ production coordinator を通す以上、**Simulator 上に本物の ActivityKit
 - UTC mode: scheduled 値が UTC instant として表示される
 - LCL mode: **ANC departure は ANC の airport timezone、ICN arrival は ICN の airport timezone**
 - **Device TZ を SGN / Seoul にしても ANC departure の LCL が device TZ に引っ張られないこと**
-- LCL / UTC 切替で `Report in` / `Dep in` / `Arriving in` の **duration が変化しないこと**
+- LCL / UTC 切替で `Report in` / `Dep in` / `Departure time passed` の **duration / elapsed が変化しないこと**。ATD / ATAは結果を変えない
 
 ### B-13 — Presentation window independence
 

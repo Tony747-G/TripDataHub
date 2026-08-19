@@ -23,6 +23,23 @@ PM Instructions に従い、実装前にコード調査を完了させた。本�
 
 SWE は着手前に `AGENTS.md` → `docs/AI_CONTEXT_INDEX.md` → `docs/INVARIANTS.md` → `docs/ADR/ADR-002-utc-source-of-truth.md` を読むこと。特に **INV-012（Display / Planning の時刻二系統）** は本 Build Week の中心にある。
 
+### 0.1 Product Owner revision — 2026-08-17（authoritative）
+
+Product Owner は、CrewAccess ATD / ATA を real-time source として利用できないことを確定した。旧 seven-state contract と、その arrival / Actual-driven assertion は retired である。本項、改訂後の INV-013〜018、ADR-004、および本書 §5 の改訂 T-xx 定義が、以下の旧記述より優先する。
+
+- operational evaluator の入力は `plannedDepartureUTC`、optional `reportTimeUTC`、`nowUTC` のみ
+- state は `.preReport` / `.preDeparture` / `.departureTimePassed` / `.expired`
+- `plannedArrivalUTC` / STA は route display metadata のみ。ATD / ATA は INV-012 の history data のみ
+- 評価順序は `now >= STD+61min` → expired、`now >= STD` → departure-time-passed、report 前 → pre-report、その他 STD 前 → pre-departure
+- `.departureTimePassed` は elapsed minute 0〜60。STD+61 で除外
+- current leg は non-expired `.departureTimePassed` を最新 STD 順で優先し、STD+61 で初めて次 leg へ進む。short turn で次 leg の `Dep in` が短縮または消失してよい
+- App Timeline / Widget / Live Activity は同じ structured descriptor、state、prefix、anchor UTC を使用する
+- elapsed 部分は `SystemFormatStyle.Timer` の OS localization を許容する。`XX min` の文字列完全一致は要求しない
+- formatting のための毎分 `Activity.update()`、Swift timer、polling は禁止
+- `Arriving in`、`Scheduled Arrival Time Passed`、STA countdown、ATD-driven `.inFlight`、ATA-driven real-time `.completed` は削除対象
+
+§2 の RCA は当時の欠陥を説明する historical evidence として残す。§3 の旧 seven-state proposal、旧 Phase 1 手順、旧 arrival-side Definition of Done は実装指示として使用してはならない。
+
 ---
 
 ## 1. 調査対象と実際に読んだコード
@@ -176,7 +193,7 @@ private static let persistentFingerprintTTL: TimeInterval = 30   // 秒
 
 ---
 
-## 3. Proposed Architecture / State Model
+## 3. Historical Architecture / State Model — RETIRED by §0.1
 
 ### 3.1 時刻の単一原則
 
@@ -475,13 +492,13 @@ enum LiveActivityRefreshMode {
 
 ### Phase 0 — 契約の明文化（コード変更前）
 
-- `docs/INVARIANTS.md` に以下 **6 件** を追加（PR に含めること）。**番号は PM 確認済み**: 現行の最新は INV-012 のため INV-013〜018 が空いている。統合して減らさず、6 件すべてを独立した invariant として追加すること
-  - **INV-013**: Countdown / state 判定は `plannedDepartureUTC` / `plannedArrivalUTC` / `atdUTC` / `ataUTC` / `reportTimeUTC` のみを入力とする。`depUTC` / `arrUTC` は表示専用。
-  - **INV-014**: 時間経過のみを根拠に `Delayed` / `Departed` / `Completed` を表示してはならない。
+- `docs/INVARIANTS.md` の INV-013〜018 を 2026-08-17 Product Owner revision に同期すること
+  - **INV-013**: real-time operational 判定は `plannedDepartureUTC` / optional `reportTimeUTC` / `nowUTC` のみ。STA は route display、ATD / ATA は history data。
+  - **INV-014**: 時間経過から Actual を推測しない。STD〜STD+60 は schedule fact `Departure time passed` のみ、STD+61 で表示終了。
   - **INV-015**: derived operational state（Live Activity / Notification / Widget snapshot / current-leg cache）は単一 builder の出力のみから生成する。**Trip 置換時は破棄→再生成（destructive rebuild）、通常の state 遷移は reconcile/update** とし、両者を混同しない。
   - **INV-016**: `T-12h` / `T-6h` 等の表示 window 定数は Presentation Policy に属し、`FlightOperationalState` の判定入力にしてはならない。
-  - **INV-017**: `.inFlight` の判定根拠は `atdUTC` の観測のみで、かつ STA 前に限る。経過時間その他から airborne を推定せず、STA 経過後に in-flight を維持もしない。
-  - **INV-018**: 状態判定は STA / STA+1h の境界を actual 未観測時の `.inFlight` より優先して評価する。到達不能な state を作らない。
+  - **INV-017**: Actual は history-only。ATD / ATA の違いが operational output を変えてはならない。
+  - **INV-018**: exact boundary は STD / STD+61。passed leg は minute 60 まで current を保持し、+61 で次 leg へ進む。
 - 各 invariant には **Rule / Why / 禁止される実装 / Enforced by / 対応する T-xx** を記載する。Phase 0 時点では型もテストも存在しないため、`Enforced by` は **「Phase 1〜3 で強制される予定」と明示**し、実装済みであるかのように書かないこと（SWE 提案を採用）
 - ADR を 1 本追加: `docs/ADR/ADR-004-flight-operational-state-model.md`（本書 §3 を正式化）
 - **`docs/AI_CONTEXT_INDEX.md` に routing entry を追加（PM 承認済み・Phase 0 の 3 番目のファイル）**
@@ -491,23 +508,19 @@ enum LiveActivityRefreshMode {
   - ADR には「既存 `FlightCountdownTests.swift` の phase テスト群が誤った仕様を固定しており、Phase 1 で削除・書き換えの対象になる」ことを **Consequences として明記**する。テストの削除は意図された仕様変更であり、QA への事前通知が必要
   - Lower 48 判定の **データ源は決定済みとして書かない**（§8 の未決事項 #1。ADR には report lead-time の製品ルールのみを記録する）
 
-### Phase 1 — P0-A: Flight State / Countdown Engine（最重要）
+### Phase 1 — P0-A revision: STD-only Operational Countdown（実装は別承認待ち）
 
-1. `FlightOperationalState`（§3.3）を新規追加。pure function、UI 非依存、test 可能。**`.preTrip` は作らない**（7 states）
-   - **§3.3 の遷移規則を書かれた順序どおりに実装すること。** 特に `.stale` / `.scheduledArrivalPassed`（規則 2・3）を `.inFlight`（規則 4）より **先に**評価する。順序を入れ替えると ATD 既知フライトで `.scheduledArrivalPassed` と `.stale` が到達不能になる
-   - `.inFlight` の条件に **`now < STA` を必ず含める**。`atd != nil && ata == nil` だけで判定しない
-   - 判定入力は 5 つ（`reportTimeUTC` は optional な 5 つ目）。doc comment もこの通りに書くこと
-2. `FlightCountdownLeg` に `atdUTC` / `ataUTC` / `plannedDeparture` / `plannedArrival` を追加。`countdownLeg()` の参照を `depUTC/arrUTC` → planning 系に変更
-3. `FlightCountdownSharedStore.phase(...)` の 12h/6h/6h ヒューリスティックを **state 判定から完全に除去**。window 定数は §3.2 の Presentation Policy 側へ移設する（削除ではなく移設。面ごとの表示開始タイミングは維持してよい）
-4. `.preReport` を取りうるのは trip の最初の domicile 出発 leg のみ。`reportTimeUTC` を `NextReportWindowBuilder` から受け取る配線を追加し、算出不能時は `.postReportPreDeparture` にフォールバック（§3.3）
-5. `statusText` / `activityStatusText` / Dynamic Island compact trailing を §3.4 の文言表に置換。`Delayed` / `Completed`（actual 由来でないもの）の文字列を削除
-6. `.scheduledArrivalPassed` の 2 行表示（status 行 ＋ reference 行）を実装。reference 行の LCL/UTC は Timeline の表示モード設定に配線する（§3.4）
-7. `selectRelevantLeg` を §3.6 の規則に置換。`.completed` / `.stale` を候補から除外し、到着側 leg を出発側の未来 leg より優先する
-8. Widget / Live Activity の countdown 表示は、**再レンダリング budget に依存しない**方式へ:
-   - iOS 18 の Live Activity は `SystemFormatStyle.Timer` を `maxPrecision: .seconds(60)` で使用（OS が分境界で更新する）。Home Screen Widget の既存 `Text(timerInterval:countsDown:)` は維持する
-   - `TimelineView(.periodic(by: 60))` で文字列を焼き込む現行実装は、更新 budget 切れで stale 値のまま残る。**「数分〜30 分のズレ」の残り半分はここ**（前半は RC-2）
-   - `.scheduledArrivalPassed` の経過時間（count-up）も同様に OS 側の連続更新に委ねる
-9. Operating / DH の分岐が engine 内に無いことをレビューで確認
+1. `FlightOperationalState` を `.preReport` / `.preDeparture` / `.departureTimePassed` / `.expired` の4 casesへ置換する。旧 arrival / Actual-driven casesを aliasとして残さない。
+2. evaluator signature を `plannedDepartureUTC` / optional `reportTimeUTC` / `nowUTC` のみにする。`plannedArrivalUTC` / ATD / ATAを受け取る引数を持たせない。
+3. exact orderを `STD+61 → STD → report → preDeparture` とし、すべて `>=` で後段へ倒す。elapsed minuteは floorで0〜60、+61でexpired。
+4. reportはtrip最初の domicile departureだけ。後続legはreportなし。算出不能時は `.preDeparture`。
+5. current legはnon-expired `.departureTimePassed`をlatest STDで優先し、+61で除外してearliest future legへ進む。
+6. App Timeline iPhone/iPad、Widget、Live Activity、Dynamic Island、notification、launch reconstructionを同じ structured descriptorへ収束させる。Timeline独自の `(-05d 15h 45m)` countdown APIは削除し、並行実装を残さない。
+7. prefixは `Report in` / `Dep in` / `Departure time passed`。elapsed valueはOS localizationを許容し、formatting pollingは導入しない。
+8. boundary schedulerとActivity stale boundaryをreport / STD / STD+61へ置換する。STA / STA+1hを削除する。
+9. Actual fields、parser、canonical JSON、Leg Historyは維持するが、operational conversionはATD/ATAをparse・validate・exclude reasonに使用しない。
+10. legacy derived stateをfail closedでmigrationし、旧arrival copyとActivityが残存しないことをreconcileで保証する。
+11. Operating / DHでengineを分岐しない。
 
 ### Phase 2 — P0-B: Replace Import を 1 transaction 化
 
@@ -635,8 +648,8 @@ The imported schedule contains revisions and will replace the current version.
    > **保証を coordinator 内部の状態に移すこと。** 例: coordinator が `hasCompletedInitialPopulationWait` を持ち、**false の間はどのモード・どの呼び出し元であっても、必ず population 待ちを済ませてから activity 判定に進む**。`waitForInitialActivityPopulation` 引数は撤去してよい。
    >
    > 理由: 「正しい call site から正しい引数で呼ばれたときだけ安全」という設計は、INV-015 が禁じている *surface ごとの独自判断* と同じ脆さを持つ。**構造で保証すること。**
-3. 周期 refresh を導入。最低でも次の境界時刻（report time / STD / STA / STA+1h）に合わせた **境界駆動の再評価**を行う（毎分 polling でなくてよい）。境界を跨いだ結果が同一 leg の state 遷移であれば `update` に落ちること
-4. `.stale`（STA + 1h 超）と `.completed` で Live Activity を必ず end し、snapshot を削除する
+3. refresh は report time / STD / STD+61 の **境界駆動の再評価**とする。formattingまたはstate更新のための毎分 pollingは禁止。同一 leg の visible state 遷移は `update`、STD+61でlegが消える場合はend、次legへ変わる場合はend/requestに落ちること
+4. `.expired`（STD+61）で旧 Live Activity を必ず end し、次legが無ければsnapshotを削除する
 5. `NextReportNotificationService`: `UNCalendarNotificationTrigger` + 全 component を、absolute 差分の `UNTimeIntervalNotificationTrigger`、または `[.year,.month,.day,.hour,.minute,.second,.timeZone]` に限定した component set へ変更
 6. Report time lead を §3.5 の region rule に置換
 
@@ -664,35 +677,37 @@ struct BlockConnectionDisplay {
 
 既存 regression tests が pass したまま実運用で破綻したため、**既存 unit tests の pass を完了条件にしない。**
 
+以下のT-1〜T-24は2026-08-17 Product Owner revision後のauthoritative definitionsである。旧arrival / Actual-driven assertionはretiredであり、同じT番号の旧説明より本表とT-20詳細が優先する。
+
 `TripDataHubTests/FlightCountdownTests.swift` の phase テスト群（`test_phase_atExact_T0_isLiveDelayed` 等）は **誤った仕様を固定している**。State model 置換に伴い削除・書き換える。QA には「これらの test が消えることは意図された仕様変更である」と明示すること。
 
 ### 必須追加テスト
 
 | # | テスト | 判定 |
 |---|---|---|
-| T-1 | absolute-time calculation | duration が `target − now` と一致 |
+| T-1 | shared absolute-time descriptor | `Report in` / `Dep in` のtarget、`Departure time passed` のanchorが共通payloadのabsolute UTC instantと一致 |
 | T-2 | device timezone 変更（ANC → SGN → ICN → Korea）| **duration が 1 秒も変化しない** |
 | T-3 | date-line crossing | ICN→ANC で日付が壊れない。`PDFTripParser.addDays` の TZ 依存を含む |
 | T-4 | revised-trip replacement | 確定操作 1 回・transaction 1 回で完了 |
 | T-5 | 同一 PDF 2 経路配信 | 2 個目が破棄され、Import Preview が再表示されない |
-| T-6 | app relaunch reconstruction | 到着済み leg が current として選択されない |
+| T-6 | app relaunch reconstruction | `now >= STD+61min` のlegがcurrentにならず、次の有効legが選択される |
 | T-7 | stale notification invalidation | replace 後、旧 trip の pending/delivered が 0 件 |
 | T-8 | stale Live Activity invalidation | replace 後、旧 leg の Activity が 0 件 |
-| T-9 | operating vs DH parity | 同一入力・status 違いで **完全に同一の duration / state** |
-| T-10 | STD 経過・ATD なし | `Delayed` を含む文字列が生成されない |
-| T-11 | STA 経過・ATA なし | `Completed` を含む文字列が生成されない。2 行表示（status ＋ reference）が出る。**ATD 既知 / ATD 不明の両方で assert する** |
-| T-12 | STA + 1h 超 | `.stale` へ遷移。presentation payload が nil / Activity が end。**ATD 既知 / ATD 不明の両方で assert する** |
+| T-9 | operating vs DH parity | 同一schedule入力で **完全に同一のduration / state / semantic descriptor** |
+| T-10 | STD elapsed boundary | STD+0 / +1 / +60で `.departureTimePassed`、`Delayed` / `Departed` / `Completed`を生成しない |
+| T-11 | Actual independence | ATD / ATAのnil・非nil・値の違いだけではstate / status / selection / payloadが一切変化しない |
+| T-12 | STD+61 lifecycle | 境界ちょうどで `.expired`。次legが無ければpayload nil / Activity end / snapshot削除。ATD / ATA値に依存しない |
 | T-13 | Report time rule | Lower48↔Lower48 = 60 分、AK/HI 含む = 90 分、判定不能 = 90 分 |
 | T-14 | narrow-width UI | Live Activity route 行 / Connection card が wrap しない |
 | T-15 | iPad UI | Connection card が iPhone と同一構造 |
-| T-16 | `.scheduledArrivalPassed` 表示モード切替 | LCL ⇄ UTC を切り替えても **1 行目の経過時間が変化しない**。変わるのは 2 行目の時刻表記のみ |
-| T-17 | `.inFlight` の根拠は ATD のみ | ATD なしで STD 経過・**STA 前**の全区間で `.scheduledDeparturePassed`。`.inFlight` にならない（STA 以降は T-11/T-12 の担当） |
-| T-18 | 同一 leg の state 遷移は update | `.preReport → .postReportPreDeparture → .scheduledDeparturePassed` を通しても Activity の **end / request が 0 回**、`update` のみ |
+| T-16 | equivalent-surface semantic parity | 同一leg / nowでApp Timeline iPhone/iPad、Widget、Live Activityが同じstate / prefix / anchor UTCを消費し、Timeline独自countdownが存在しない |
+| T-17 | Actual/STA inputs absent by construction | evaluator signatureにSTA / ATD / ATAが無く、state enumが4 casesで、旧arrival/Actual-driven casesが存在しない |
+| T-18 | same-leg transition vs expiry | `.preReport → .preDeparture → .departureTimePassed` はupdateのみ。STD+61で次legなしならendし、end/requestで同一legを再生成しない |
 | T-19 | current leg 変更 vs replacement | leg 変更時は旧 end ＋ 新 create。Trip replacement 時は current leg が同一でも **全 end → rebuild** |
-| T-20 | **ATD 既知 / ATA 不明の全遷移列** | 単一 leg・単一 test で `now` を進め、`.inFlight → .scheduledArrivalPassed → .stale` を順に assert（下記） |
-| T-21 | 遷移規則の評価順序 | `atd != nil && ata == nil && now >= STA` で `.inFlight` が返らないこと（規則 2・3 が規則 4 を上書きする証明） |
-| T-22 | 入力欠落 leg の除外 | `plannedDepartureUTC` / `plannedArrivalUTC` が nil、または TZ 解決不能な leg は operational state を生成せず、current leg 候補から除外され、次の有効な leg が選ばれる。除外が log に記録される |
-| T-23 | **state が presentation window から独立していること（INV-016 の唯一の enforcing test）** | `now = STD − 30h`（T-12h window の外側）でも leg は有効な operational state（`.preReport` / `.postReportPreDeparture`）を返す。同一 leg・同一 `now` に対し、どの面が表示対象かに関係なく state が一致する |
+| T-20 | **4-state全境界列** | 単一leg・単一testでreport前 / reportちょうど / STD直前 / STD / +1 / +60 / +61を進め、下記のexact stateと表示をassert |
+| T-21 | exact evaluation order | `STD+61 → STD → report → preDeparture` の優先順、report / STD / +61 equality、passed leg優先が固定される |
+| T-22 | input insufficiencyとActual非依存 | STD欠落はstate生成不可。route presentationに必要なplanning/TZ欠落はpayload除外・reason log。ATD/ATA欠落・不正値だけでは除外しない |
+| T-23 | **state が presentation window から独立していること（INV-016 の dedicated enforcing test）** | `now = STD − 30h`でも `.preReport` / `.preDeparture` を返す。面のvisibilityとstateが独立し、evaluator signatureにwindow入力が無い |
 | T-24 | **report lead time が全経路で一致すること** | 同一 leg に対し `NextReportWindowBuilder` の report time と `TimelineSupport` の duty start が **同じ lead を使う**。特に Asia→Asia（`ICN→CGO`）と Europe→Europe で **両経路とも 90 分**になること。Lower48↔Lower48 で両経路とも 60 分 |
 | T-25 | **Replacement confirmation UI**（実機 A-3 FAIL を受けて追加） | replacement candidate ありのとき `Confirm Import` が描画されない。確認は `.alert` であり `.confirmationDialog` を使っていない。状態を変える確定操作が 1 回だけ。Alert の message に全 candidate の Trip ID が含まれる。candidate なしのときは `Confirm Import` が描画される |
 
@@ -703,36 +718,38 @@ INV-016（window 定数を state 判定に入れない）は、SWE 提出時点�
 - 実装形態は「state 評価関数に window 定数を渡す引数が存在しない」ことを型で示すのが最良だが、型で示せない場合は本 test を必須とする。
 - INV-016 の `Enforced by` 行を **T-23 を主とする**記述に更新すること。
 
-**T-20 の具体仕様（省略不可・今回の修正の核心）**
+**T-20 の具体仕様（省略不可・2026-08-17 PO revision の核心）**
 
-ATD が観測済み・ATA が未観測の 1 leg を用意し、`now` だけを進めて state を assert する。
+最初の domicile-departure leg を用意し、legの日時を固定したまま `nowUTC` だけを進める。
 
-| `now` | 期待 state | 期待表示 |
+| `nowUTC` | 期待 state | 期待semantic表示 |
 |---|---|---|
-| `STA − 1h` | `.inFlight` | `Arriving in 1hr 00min` |
-| `STA − 1min` | `.inFlight` | `Arriving in 0hr 01min` |
-| `STA`（境界ちょうど） | `.scheduledArrivalPassed` | `Scheduled Arrival Time Passed 0hr 00min` ＋ reference 行 |
-| `STA + 12min` | `.scheduledArrivalPassed` | `Scheduled Arrival Time Passed 0hr 12min` ＋ reference 行 |
-| `STA + 59min` | `.scheduledArrivalPassed` | 同上（`0hr 59min`） |
-| `STA + 1h`（境界ちょうど） | `.stale` | 表示なし / Activity end |
-| `STA + 3h` | `.stale` | 表示なし |
+| `report − 1min` | `.preReport` | prefix `Report in`、anchor = report |
+| `report`（境界ちょうど） | `.preDeparture` | prefix `Dep in`、anchor = STD |
+| `STD − 1min` | `.preDeparture` | prefix `Dep in`、anchor = STD |
+| `STD`（境界ちょうど） | `.departureTimePassed` | prefix `Departure time passed`、elapsed minute 0 |
+| `STD + 1min` | `.departureTimePassed` | elapsed minute 1 |
+| `STD + 60min` | `.departureTimePassed` | elapsed minute 60 |
+| `STD + 61min`（境界ちょうど） | `.expired` | 表示なし / next legなしならActivity end |
 
-- 境界は **`>=` で `.scheduledArrivalPassed` / `.stale` 側に倒す**（`STA` ちょうど、`STA + 1h` ちょうどはそれぞれ後段の state）。
-- 全区間で `.completed` と `Delayed` が一度も現れないことを併せて assert する。
-- 同一 leg 内の遷移であるため、**Live Activity は end/create されず update のみ**であること（T-18 と同じ spy で確認）。
+- evaluatorは `STD+61 → STD → report → preDeparture` の順で評価する。
+- elapsedは `floor((nowUTC - STD) / 60)`。+60:59までは60、+61:00でexpired。
+- 同一fixtureのATD / ATAだけを変更しても全行の結果が変わらないことを併せてassertする。
+- `.inFlight` / `.scheduledArrivalPassed` / `.completed` / STA-based `.stale`、`Arriving in` / `Scheduled Arrival Time Passed` が一度も現れないこと。
+- visibleな同一leg遷移はupdateのみ。+61のterminal transitionだけがendまたはnext-leg changeを許可する。
 
 その他:
 
 - **T-2 は device timezone を scenario 途中で変更すること**（固定 TZ 2 本の比較では不十分）。
-- **T-17 は `.preTrip` 削除の回帰確認を兼ねる。** state が 7 種であること、`reportTimeUTC == nil` の後続 leg が `.postReportPreDeparture` になることを assert する。
+- **T-17 は型による回帰防止である。** stateが4 casesであること、evaluatorにSTA / ATD / ATA / presentation-window入力が無いこと、`reportTimeUTC == nil` の後続legが `.preDeparture` になることをassertする。
 - **T-18 / T-19 は §3.8 の 2 モード分離を守る唯一の自動検証**であり、省略不可。ActivityKit 呼び出しは protocol 越しに spy を挿して回数を数えること。
-- **T-20 / T-21 は遷移規則の評価順序を固定する唯一の自動検証**であり、省略不可。実装者が規則を「読みやすい順」に並べ替えた瞬間に dead state が復活するため。
+- **T-20 / T-21 はSTD+60/+61とpassed-leg ownershipを固定する自動検証**であり、省略不可。
 
 ### Regression Scenarios（実データ）
 
 - **Scenario A — Revised Trip**: `ANC→SGN→ICN→ANC` → `ANC→SGN→ICN→CGO→ICN→ANC`。confirmation 1 回 / transaction 1 回 / Timeline 正 / 旧 DH 5X67 が生存しない / 旧 notification 消滅 / 旧 Live Activity 消滅 / current leg 正 / **iCloud sync 正常維持**
-- **Scenario B — 5X68 ANC→SGN**: `Report in` → `Dep in` の遷移（同一 leg なので Activity は update のみ）/ countdown が absolute STD と一致 / TZ 変更で duration 不変 / STD 経過・ATD なしで `Scheduled Departure Time Passed` / 飛行中に `Completed` を出さない / STA 経過・ATA なしで 2 行表示（`Scheduled Arrival Time Passed HHhr MMmin` ＋ `Scheduled Arrival: HH:MM LCL|UTC`）/ STA+1h 超で `.stale` として表示終了
-- **Scenario C — DH KE480 SGN→ICN**: operating と同一 engine / SGN→Korea の TZ 変更で duration 不変 / `Delayed 5h 23m` 相当の false state ゼロ / current leg 正 / **ATD 既知の状態で STA を跨いだとき `.inFlight` に張り付かず `.scheduledArrivalPassed` へ遷移する**（block 約 5h の DH は本症状の再現条件そのもの）
+- **Scenario B — 5X68 ANC→SGN**: `Report in` → `Dep in` → `Departure time passed`（minute 0〜60）→ STD+61で表示終了。同一legのvisible遷移はActivity updateのみ。countdown anchorはabsolute report/STD、TZ変更でduration不変、ATD/ATAの有無で結果不変、arrival operational copyはゼロ
+- **Scenario C — DH KE480 SGN→ICN**: operatingと同一engine / SGN→KoreaのTZ変更でduration不変 / `Delayed`その他Actual推測ゼロ / passed legが+60までcurrent / +61で次legへ遷移。短いturnで次legの`Dep in`が短縮・消失してもaccepted behavior
 - **Scenario D — ICN→CGO→ICN**: revised leg が original を置換 / CGO→ICN 完了後に original DH leg が再浮上しない / app restart で obsolete flight を再生成しない / current/next event が revised trip のみから導出
 
 ---
@@ -750,20 +767,21 @@ ATD が観測済み・ATA が未観測の 1 leg を用意し、`now` だけを�
 - [ ] Countdown duration が absolute time と一致する
 - [ ] Device timezone 変更で duration が変化しない
 - [ ] Report Time 前は `Report in` を表示する（Lower48 rule 実装済み）
-- [ ] Trip 開始後は Departure countdown を表示する
-- [ ] STD 経過だけで `Delayed` と表示しない
-- [ ] STA 経過だけで `Completed` と表示しない
-- [ ] `.inFlight` の判定根拠が ATD 観測のみである（ATD なしで in-flight にならない）
-- [ ] `.inFlight` が STA 前に限定され、STA 経過で `.scheduledArrivalPassed` へ抜ける（ATD 既知でも張り付かない）
-- [ ] `.scheduledArrivalPassed` / `.stale` が **ATD の有無を問わず**到達可能である（dead state がない）
-- [ ] `.scheduledArrivalPassed` が status 行 ＋ reference 行の 2 行で表示される
-- [ ] reference 行の LCL/UTC が Timeline の表示モードに追従し、経過時間は表示モードで変化しない
-- [ ] STA + 1h 超で `.stale` となり persistent status が停止する（ATD 既知でも同じ）
-- [ ] `Arriving in` が 0 以下になる経路が存在しない
-- [ ] `FlightOperationalState` に `.preTrip` が存在せず、window 定数（T-12h / T-6h）が state 判定に入っていない
+- [ ] 最初のdomicile departureはreport前に`Report in`、report以降STD前に`Dep in`を表示する
+- [ ] 後続legはreportを持たず、STD前は`Dep in`を表示する
+- [ ] STD〜STD+60でprefix `Departure time passed`とOS-driven localized elapsed valueを表示する
+- [ ] STD+60は表示され、STD+61境界ちょうどで`.expired`となり旧leg表示が停止する
+- [ ] passed legはminute 60までfuture legより優先し、+61で次legへ進む
+- [ ] `FlightOperationalState` が4 casesで、`.inFlight` / `.scheduledArrivalPassed` / real-time `.completed` / STA-based `.stale`を持たない
+- [ ] evaluator signatureにSTA / ATD / ATA / presentation window入力が無い
+- [ ] ATD / ATAの有無・値だけを変えてもstate / status / selection / lifecycleが変化しない
+- [ ] `Arriving in` / `Scheduled Arrival Time Passed` / arrival reference operational lineが全surfaceから消えている
+- [ ] App Timeline iPhone/iPad、Widget、Live Activityが同じstate / prefix / anchor UTCを消費し、Timeline独自`(-05d 15h 45m)` countdownが残っていない
+- [ ] `SystemFormatStyle.Timer`のOS localizationを使用し、formatting目的の毎分Activity update / Swift timer / pollingが無い
+- [ ] window定数（T-12h / T-6h）がstate判定に入っていない
 - [ ] 同一 leg の state 遷移で Live Activity を end/create せず update している
 - [ ] Trip Replacement 時のみ destructive rebuild が行われる
-- [ ] actual state が未確認のとき、推測せず中立的な schedule ベースの表示をする（`.scheduledDeparturePassed` / `.scheduledArrivalPassed`）
+- [ ] actual stateをreal-time operational pathへ入力せず、schedule factだけを`.departureTimePassed`として表示する
 - [ ] 判定入力が欠けている leg は operational state を生成せず、current leg 候補から除外され、表示面に何も出さない（`.unknown` state を作っていない）
 - [ ] 入力欠落が log に残り、サイレントに握り潰されていない
 - [ ] App restart 後も正しい current leg / state を再構築する
@@ -772,7 +790,7 @@ ATD が観測済み・ATA が未観測の 1 leg を用意し、`now` だけを�
 - [ ] Route graphic が wrap しない
 - [ ] Connection Card が device 幅によって不自然に wrap しない
 - [ ] 既存 iCloud sync behavior を壊さない
-- [ ] Regression tests 追加（T-1〜T-25）
+- [ ] PO revision後のauthoritative T-1〜T-24へtestsを同期し、T-25以降の非関連coverageを維持する
 - [ ] 実機で iPhone + iPad を確認
 
 ---
@@ -794,10 +812,14 @@ ATD が観測済み・ATA が未観測の 1 leg を用意し、`now` だけを�
 - operating と DH で計算経路を分けること
 - 既存の単一文字列 `blockAndConnectionText` を残したまま新 API を追加すること（並行実装禁止）
 - 時間経過を根拠に actual state を推測すること
-- ATD 以外の根拠で `.inFlight` と判定すること
-- STA 経過後も `.inFlight` を維持すること（ATD 既知であっても）
-- §3.3 の遷移規則を「読みやすい順」に並べ替えること。**評価順序が仕様である**
-- `Arriving in` の負値を `max(0, ...)` でクランプして state machine のバグを隠蔽すること
+- real-time operational evaluator / selection / lifecycleへSTA / ATD / ATAを入力すること
+- `.inFlight` / `.scheduledArrivalPassed` / real-time `.completed` / STA-based `.stale`を残すこと
+- `Arriving in` / `Scheduled Arrival Time Passed` / arrival reference operational lineを残すこと
+- exact order `STD+61 → STD → report → preDeparture` を並べ替えること
+- `.departureTimePassed`をactual departureの証拠として扱うこと
+- non-expired `.departureTimePassed`をfuture legで早期に置換すること
+- localized elapsed copyを固定するために毎分`Activity.update()` / Swift timer / pollingを導入すること
+- App Timelineの独自countdown APIを共通payloadと並行して残すこと
 - `T-12h` / `T-6h` 等の window 定数を `FlightOperationalState` の判定に持ち込むこと
 - 通常の `refresh` で Live Activity を無条件に end/request し直すこと（destructive rebuild は replacement 専用）
 
@@ -812,4 +834,4 @@ ATD が観測済み・ATA が未観測の 1 leg を用意し、`now` だけを�
 | 3 | `Pick up in` 表示 | 今 Build 未実装。次 Build |
 | 4 | In-Flight Progress UI | P0 完了後に判断 |
 
-> 旧「信頼できる in-progress 認識の定義」は **未決事項から削除した。** 今 Build の `.inFlight` 判定は `atdUTC != nil && ataUTC == nil && now < STA` に確定しており、未決ではない。ATD 以外の根拠を追加する場合は別 Build ＋ 新規 ADR で扱う。
+> 旧「信頼できる in-progress 認識の定義」とATD-driven `.inFlight` contractは2026-08-17 Product Owner revisionでretired。trustworthy real-time sourceを将来追加する場合は別Build＋新規ADRで扱う。

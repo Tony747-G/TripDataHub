@@ -142,10 +142,10 @@ XCTAssertEqual(FlightCountdownLiveActivityTimerContract.maxPrecision, .seconds(6
 
 ## 変更してはいけないもの
 
-- **production countdown implementation**（`LiveActivityOperationalStatusView` / `FlightCountdownLiveActivityTimerContract` / `FlightCountdownExpandedLayoutView`）。B-2 条件 1 の実証で一時的に差し戻す場合を除き、最終状態は現行のまま
-- `FlightOperationalState` の評価順序・境界（INV-018）
-- `OperationalStateBuilder` の current leg 選択規則
-- `FlightCountdownActivityLifecyclePolicy.staleDate`（`plannedArrivalUTC + 1h`）
+- **Historical scope note:** この節の「production countdown implementationを現行のまま維持」は2026-08-17 PO revisionによりretired。新contract実装まではコード変更を開始しないが、承認後はADR-004 / INV-013〜018 / authoritative T-xxに従って置換する
+- `FlightOperationalState` の評価順序・境界（2026-08-17改訂INV-018: STD / STD+61）
+- `OperationalStateBuilder` の current leg 選択規則（passed legをminute 60まで優先）
+- `FlightCountdownActivityLifecyclePolicy.staleDate`（`plannedDepartureUTC + 61min`）
 - `FlightCountdownStatusPresentationStyle` による `.widget` / `.liveActivity` の分岐と、そのコメント
 - `LegacyOperationalStatusView` の `Text(timerInterval:)`（Widget / compact / minimal は対象外のまま）
 - import fingerprint ledger / queue semantics / transaction 境界
@@ -171,6 +171,6 @@ stage / commit / push は行わない。
 
 The original automated T-50 is not implementable with current public test APIs. ActivityKit host tests cannot observe WidgetKit pixels; host snapshots do not reproduce the extension privacy/redaction environment; and public XCUITest has no Lock Screen button or fixed-UTC injection for SpringBoard.
 
-- **T-50S (commit gate):** source-scope guard for `LiveActivityOperationalStatusView`. It rejects `Text(timerInterval:`, `.components(style:`, `.dateRange(`, `style: .relative`, and `style: .timer`, and requires `.timer(countingDownIn:` plus `.timer(countingUpIn:`. It does not claim to verify rendered pixels.
+- **T-50S (commit gate):** source-scope guard for `LiveActivityOperationalStatusView`. It rejects `Text(timerInterval:`, `.components(style:`, `.dateRange(`, `style: .relative`, and `style: .timer`, and requires `.timer(countingDownIn:` plus `.timer(countingUpIn:`. The count-up source must be STD..<STD+61min; arrival prefixes, arrival-state cases, and planned-arrival count-up intervals fail the guard. It does not claim to verify rendered pixels.
 - **D-7 (device-only acceptance):** `docs/DEVICE_VERIFICATION_CHECKLIST.md` verifies that Lock Screen and Dynamic Island expanded render numeric durations without dash/blank redaction.
 - **Follow-up after Priority 5:** evaluate a nightly, non-gating Dynamic Island expanded XCUITest using SpringBoard coordinate long-press, screenshot OCR, and a real-time 70-second minute-boundary observation. Do not require Lock Screen, and do not implement this during the current commit-gate work.

@@ -68,25 +68,25 @@ HStack(spacing: 8) {
 Report in 3hr 15min
 ```
 
-秒は表示しない。`.scheduledArrivalPassed` の経過時間も同様。
+秒は表示しない。2026-08-17 PO revision後の `.departureTimePassed` の経過時間も同様で、STD..<STD+61minをcount-upする。
 
 ### 採用する実装
 
 **WidgetKit 実描画調査により `SystemFormatStyle.Timer` の minute precision を採用する。**
 
 ```swift
-// 残り時間（Report in / Dep in / Arriving in）
+// 残り時間（Report in / Dep in）
 Text(.currentDate,
      format: .timer(countingDownIn: Date.distantPast..<targetDate,
                     showsHours: true,
                     maxFieldCount: 2,
                     maxPrecision: .seconds(60)))
 
-// 経過時間（Scheduled Arrival Time Passed）
+// 経過時間（Departure time passed）
 Text(.currentDate,
-     format: .timer(countingUpIn: plannedArrivalUTC..<staleDate,
-                    showsHours: true,
-                    maxFieldCount: 2,
+     format: .timer(countingUpIn: plannedDepartureUTC..<operationalExpirationUTC,
+                    showsHours: false,
+                    maxFieldCount: 1,
                     maxPrecision: .seconds(60)))
 ```
 
@@ -141,10 +141,11 @@ Text(.currentDate,
 自動テストは `LiveActivityOperationalStatusView` のソース範囲だけを読み、既知の redaction 経路へ戻らないことを検証する。これはレンダリング結果の検証ではなく、構文回帰ガードである。
 
 - `Text(timerInterval:` / `.components(style:` / `.dateRange(` / `style: .relative` / `style: .timer` が Live Activity 本体にない
-- `.timer(countingDownIn:` と `.timer(countingUpIn:` が存在する
+- `.timer(countingDownIn:` と `.timer(countingUpIn:` が存在し、count-up intervalがSTD..<STD+61minに固定される
+- `Arriving in` / `Scheduled Arrival Time Passed` / `plannedArrivalUTC..<staleDate` がLive Activity operational bodyに存在しない
 - `LegacyOperationalStatusView` は検査範囲外とする
 
-実レンダリングは `DEVICE_VERIFICATION_CHECKLIST.md` D-7 の device-only acceptance とする。timer contract（`maxFieldCount == 2`、`maxPrecision == 60s`、UTC interval 境界）は別の補助テストで固定する。
+実レンダリングは `DEVICE_VERIFICATION_CHECKLIST.md` D-7 の device-only acceptance とする。timer contract（countdown `maxFieldCount == 2`、departure-elapsed count-up `maxFieldCount == 1`、`maxPrecision == 60s`、UTC interval 境界）は別の補助テストで固定する。
 
 ### 既存テストの維持
 
@@ -159,7 +160,7 @@ T-15（iPhone / iPad で同一 Connection card 構成）は変更しない。Tim
 - import fingerprint ledger / queue / transaction 境界
 - browser popup lifecycle / focus acquisition
 - Timeline の Connection card レイアウト（T-15 の対象）
-- **status の文言そのもの**（`Report in` / `Dep in` / `Scheduled Departure Time Passed` / `Arriving in` / `Scheduled Arrival Time Passed`）。変えるのは**時間の書式だけ**
+- **status prefix / semantic contract**（`Report in` / `Dep in` / `Departure time passed`）。elapsed valueはOS localizationを許容する。旧arrival copyはretired
 
 ---
 
