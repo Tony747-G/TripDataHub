@@ -1,6 +1,6 @@
 # TDH Build Week — UI/UX Reliability Fix / SWE Instruction
 
-- Status: PM handoff (implementation 未着手)
+- Status: Historical implementation handoff; current authoritative contract is §0.1 and implementation/acceptance is recorded in the current checklist
 - PM: Product Manager (TripDataHub)
 - Assignee: SWE (implementation authority)
 - QA: invariant / regression validation
@@ -658,20 +658,20 @@ The imported schedule contains revisions and will replace the current version.
 ### Phase 4 — P1: Timeline / Live Activity UI
 
 1. Live Activity route 行（`TripDataCountdownWidget.swift:224-233`）: `Spacer` 2 個＋装飾文字列 `・・・✈・・・` の HStack が wrap 原因。**`ANC 23:24 → SGN 02:45` の 1 行固定**に置換。飛行機アイコンは、全対象幅で wrap しないことを実機で確認できた場合のみ可。装飾より layout stability 優先
-2. Connection card: `LegConnectionTextBuilder.blockAndConnectionText` は `"Block: 02:44 / Connection at CGO: 2:31"` という **単一文字列**を返しており、幅依存の途中 wrap は不可避。**構造化した値を返す API に変更**する:
+2. Connection card: `LegConnectionTextBuilder.blockAndConnectionText` は block / connection を **単一文字列**で返しており、幅依存の途中 wrap は不可避。**構造化した値を返す API に変更**する。authoritative acceptance fixture の Trip 12165 では次の値となる:
 
 ```swift
 struct BlockConnectionDisplay {
-    let blockText: String            // "Block: 02:44"
-    let connectionText: String?      // "Connection at CGO: 2:31"
+    let blockText: String            // "Block: 02:48"
+    let connectionText: String?      // "Connection at CGO: 2:26"
 }
 ```
 
    呼び出し 4 箇所（`ScheduleTimelineRendererView:164`, `TimelineTabView:1259`, `iPadTimelineSidebarView:731`, `OpenTimeTripDetailView:188`）を 2 行・両方右揃えの `VStack(alignment: .trailing)` に更新。**iPhone / iPhone Pro Max / iPad で同一構造**。既存の単一文字列 API は削除する（並行実装を残さない）
 
-### Phase 5 — P1（P0 完了後に別途判断）— In-Flight Progress
+### Phase 5 — HISTORICAL / SUPERSEDED proposal: In-Flight Progress
 
-`ANC ━━━━●━━━━ SGN` / `Arriving in 4h 12m`。`elapsed scheduled time / scheduled block duration` による time-based progress。**機体位置と誤解されない**デザインにすること（例: ラベルに `scheduled progress` と明示、位置マーカーを航空機アイコンにしない）。**P0 完了までは着手しない。**
+This proposal predates the 2026-08-17 STD-only PO contract and is **not a current implementation instruction**. A future trustworthy realtime source would require a separate build and a new ADR; scheduled time passage alone must not recreate arrival, in-flight, or completed semantics.
 
 ---
 

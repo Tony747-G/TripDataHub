@@ -9,11 +9,9 @@
 
 ## 0. この検証の位置づけ（誤読防止・必ず読むこと）
 
-**Simulator 検証は実運用 acceptance の代替ではない。**
+This DEBUG fixture validates the production STD-only builder, shared descriptor, and ActivityKit presentation without persisting synthetic schedules. A later PO decision approved production-path Simulator ActivityKit/SpringBoard evidence for B/D acceptance; test-host rendering alone remains insufficient.
 
-ここで PASS しても、次の実運用トリップで確認すべき項目は変わらず残る（実 T-6h 表示、Report → Departure 遷移、実機での Device TZ 変更、airborne `.inFlight`、STA 経過、STA+1h stale、到着後の relaunch、revised 後に旧 leg が復活しないこと）。
-
-Definition of Done の「実機で iPhone + iPad を確認」は**次のトリップまで開いたまま**である。本 harness の PASS を DoD 達成と報告しないこと。
+The retired airborne/arrival contract (`.inFlight`, STA-based status/stale, arrival countdown) is not a fixture acceptance target. Actual ATD/ATA/STA remain parser/history data only. Revised-import cleanup still requires authentic source PDFs and is not proven by this fixture.
 
 ---
 
@@ -60,7 +58,7 @@ Leg 2  ICN → ANC   DEP 2026-08-18 09:00Z  ARR 2026-08-18 18:00Z   ATD nil  ATA
 
 `NextReportWindowBuilder.build` は **domicile への到着が 1 つも無いと `continue` して window を生成しない**。Leg 2 の `ICN → ANC` がその条件を満たしている。
 
-1 leg に減らすと `reportTimeUTC` が nil になり、`.preReport` ではなく `.postReportPreDeparture`（`Dep in`）になって**検証の意味が変わる**。
+1 leg に減らすと `reportTimeUTC` が nil になり、`.preReport` ではなく `.preDeparture`（`Dep in`）になって**検証の意味が変わる**。
 
 ### 2-B. `.preReport` に到達するための必須条件
 
@@ -207,7 +205,7 @@ production coordinator を通す以上、**Simulator 上に本物の ActivityKit
 
 ### B-13 — Presentation window independence
 
-T-47 の 2 variant を Simulator でも確認する。**Operational State は同一で、presentation eligibility だけが変わる**こと。
+T-47 の 3 variants（hidden / widget / liveActivity）を Simulator でも確認する。**Operational State は同一で、presentation eligibility だけが変わる**こと。
 
 ### current leg selection
 

@@ -1,5 +1,9 @@
 # SWE 実施指示 — Priority 2 Simulator triage（D-1〜D-7）
 
+> **HISTORICAL / SUPERSEDED (2026-08-20)**
+>
+> This file records the original 2026-08-17 triage procedure; it is not the current acceptance instruction. Later PO decisions replaced arrival-driven realtime states with the four-state STD-only contract, approved production-path Simulator ActivityKit/SpringBoard evidence for D-series, and closed D-series as PASS after timer-clamp and Dynamic Island layout reacceptance. Authentic `Trip_12165.pdf` established `Block: 02:48` and `Connection at CGO: 2:26`; the `02:44` / `2:31` values below are retired historical expectations. Home Screen Widget visual acceptance remains F-9 deferred.
+
 - 対象 commit: `953d8ba`（build-week/operational-reliability・push 済み）
 - 種別: **検証のみ。production code を変更しない**
 - commit / stage / push は行わない

@@ -121,7 +121,9 @@ log collect --device --last 30m
 | 2 | 機内モード OFF → 復帰 | `CrewAccess import file uploaded: <file>` が出る |
 | 3 | iPad を復帰 | そのトリップが iPad に出る |
 
-### 3.3 LogTen バックログが通信失敗で消えない ★今回の修正点
+### 3.3 HISTORICAL / RETIRED — LogTen CSV workflow
+
+> Product Owner decision: LogTen CSV Export is removed from the current release and Build Week acceptance scope. The historical steps below are retained as design evidence only. Do not add/restore a Settings path, invoke a DEBUG/direct-call substitute, or use this section as a release gate.
 
 | # | 手順 | 期待 |
 |---|---|---|
@@ -231,7 +233,7 @@ log collect --device --last 30m
 - [ ] Timeline / Calendar / iPad ワークスペースの表示崩れなし
 - [ ] 次回レポート通知が正しくスケジュールされる
 - [ ] ウィジェット（カウントダウン）が更新される
-- [ ] LogTen CSV エクスポートの内容が妥当
+- [N/A — RETIRED] LogTen CSV export（current release scope 外）
 - [ ] Demo Mode（App Review 資格情報）で同期が走らない
 
 ---
@@ -241,7 +243,7 @@ log collect --device --last 30m
 各項目について:
 
 ```
-項目: 3.3 LogTen バックログ
+項目: 3.3 LogTen バックログ（HISTORICAL / RETIRED）
 端末: iPhone 15 Pro / iOS 18.x, iPad Air / iPadOS 18.x
 結果: PASS / FAIL
 実際の挙動:

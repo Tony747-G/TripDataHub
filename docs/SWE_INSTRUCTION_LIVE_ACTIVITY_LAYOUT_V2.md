@@ -148,7 +148,7 @@ Text(.currentDate,
 - `Arriving in` / `Scheduled Arrival Time Passed` / `plannedArrivalUTC..<staleDate` がLive Activity operational bodyに存在しない
 - `LegacyOperationalStatusView` は検査範囲外とする
 
-実レンダリングは `DEVICE_VERIFICATION_CHECKLIST.md` D-7 の device-only acceptance とする。timer contract（countdown `maxFieldCount == 2`、departure-elapsed count-up `maxFieldCount == 1`、`maxPrecision == 60s`、UTC interval 境界）は別の補助テストで固定する。
+実レンダリングは `DEVICE_VERIFICATION_CHECKLIST.md` D-7 の production-path ActivityKit / SpringBoard acceptance とする。後発 PO 決定により、承認済み DEBUG runtime hook を通した Simulator evidence も有効である。test-host rendering 単独は代替にならない。timer contract（countdown `maxFieldCount == 2`、departure-elapsed count-up `maxFieldCount == 1`、`maxPrecision == 60s`、UTC interval 境界）は別の補助テストで固定する。
 
 ### 既存テストの維持
 

@@ -1,5 +1,9 @@
 # SWE 実施指示（追補）— Priority 2 Simulator triage 残項目
 
+> **HISTORICAL / SUPERSEDED (2026-08-20)**
+>
+> This addendum preserves the reasoning and evidence available on 2026-08-17; do not execute it as the current gate. Later PO decisions approved the real ActivityKit → SpringBoard Simulator path, retired arrival-driven realtime states, and closed D-series after STD-only timer-clamp and layout reacceptance. Authentic Trip 12165 values are `Block: 02:48` and `Connection at CGO: 2:26`; older values and “real-operation arrival state” requirements are historical only. Home Screen Widget pixels moved to F-9 deferred.
+
 - 前提: `SWE_INSTRUCTION_PRIORITY2_SIMULATOR_TRIAGE.md` の初回実施結果（INCOMPLETE・確定 FAIL なし）を受けたもの
 - 種別: **検証のみ。production code / DEBUG fixture を変更しない**
 - commit / stage / push は行わない
