@@ -27,7 +27,7 @@ Build Week 中に「意図的に今はやらない」と判断した項目の一
 **今やらない理由**:
 
 1. Live Activity 側を `3hr 29min` に寄せるには自前文字列へ戻すことになり、**dash redaction と値凍結を再発させた実装そのもの**に戻る。P0 の成果を捨てることになる
-2. Timeline 側を `3 hours, 29 minutes` に寄せると、Timeline は横幅が狭いため `Scheduled Arrival Time Passed 3 hours, 29 minutes` で折り返しリスクが高い。D-6 の回帰を作りかねない
+2. Timeline 側を `3 hours, 29 minutes` に寄せると、Timeline は横幅が狭いため、現行 STD-only contract の stress case `Departure time passed 60 minutes` で折り返しリスクが高い。D-6 の回帰を作りかねない
 3. 運航上どちらも誤読しない。原則「Incorrect operational information is worse than no information」に照らして、情報の正しさは損なわれていない
 
 **再評価条件**: 利用者から可読性の指摘が出たとき、または Timeline のレイアウトを別件で作り直すとき。
@@ -52,15 +52,15 @@ Home Screen Widget と DI compact / minimal は `LegacyOperationalStatusView` �
 
 ## F-3. Dynamic Island expanded の nightly XCUITest
 
-**状態**: `deferred`（Priority 5 完了後に着手）
+**状態**: `deferred`（nightly automation は non-gating）
 
 D-7 の自動化は 3 方式すべてで不成立と確定した。ただし **Lock Screen を諦め Dynamic Island expanded を使う**経路だけは潰しきれていない。expanded は同じ WidgetKit extension プロセスで `LiveActivityOperationalStatusView` を描画するため、redaction が起きるなら同じく起きる。
 
 構成案: `XCUIApplication(bundleIdentifier: "com.apple.springboard")` から座標長押しで展開 → `xcrun simctl io booted screenshot` → OCR。分境界は固定 UTC を注入できないので**実時間 60 秒待って値の変化を assert** する。
 
-**今やらない理由**: 実行時間 70 秒超・SpringBoard 座標依存で脆く、CI 必須にできない。Build Week の残検証（Priority 2〜5）より優先度が低い。
+**今やらない理由**: 実行時間 70 秒超・SpringBoard 座標依存で脆く、CI gate として信頼できない。手動の production-path ActivityKit / SpringBoard acceptance は完了しており、この automation は nightly の補助証拠に限られる。
 
-**再評価条件**: Priority 5 完了後。nightly（非 gating）としてのみ検討する。
+**再評価条件**: nightly automation への投資が、保守コストと脆弱性を上回る価値を持つと判断されたとき。実装する場合も non-gating とする。
 
 **関連**: `SWE_INSTRUCTION_IOS18_BASELINE_AND_T50.md` §B-1 / `PM Resolution`。
 
@@ -76,6 +76,34 @@ app-hosted unit test bundle を `CODE_SIGNING_ALLOWED=NO` で回すと、CloudKi
 
 **再評価条件**: **CI を組む段で必ず刺さる。** その時点で対処する。
 
+**2026-08-17 追記 — 影響はテストホストに限らない**
+
+entitlement を持たないビルドは、**通常の cold launch でも起動時に落ちる。**
+
+```
+In order to use CloudKit, your process must have a
+com.apple.developer.icloud-services entitlement.
+→ CKContainer.__allocating_init(identifier:) → EXC_BREAKPOINT / SIGTRAP
+  AppViewModel.syncProfileWithCloudKit()  (AppViewModel.swift:7438)
+```
+
+`CKContainer(identifier:)` は entitlement 欠落時にハードトラップする。1.2.26 (84) の Simulator ビルドで実際に発生し、Priority 3 の C-6 を 1 度ブロックした。
+
+**2026-08-17 追記 — Simulator ビルドの entitlement 確認方法（重要）**
+
+`codesign -d --entitlements :-` は **Simulator ビルドでは空の dict を返す。これは異常ではない。** Xcode 26 の Simulator ビルドは entitlements を署名 blob ではなく **実行ファイルの `__TEXT,__entitlements` セクション**に Simulated entitlements として埋め込む。
+
+| ビルド | codesign entitlements | Mach-O `__TEXT,__entitlements` |
+|---|---|---|
+| 1.2.27 (85) 正常 | 空 dict | **存在**（0x2e2）。`com.apple.developer.icloud-services = [CloudKit]` を含む |
+| 1.2.26 (84) 破損 | 無し | **無し** |
+
+**Simulator ビルドの正しい確認手順**:
+
+1. `<Build>/TripDataHub.app-Simulated.xcent` の内容を見る
+2. 実行ファイルの `__TEXT,__entitlements` セクションの有無とサイズを見る
+3. `codesign -d --entitlements :-` の結果で判断しない
+
 **関連**: `SIMULATOR_TROUBLESHOOTING.md`。
 
 ---
@@ -90,13 +118,13 @@ app-hosted unit test bundle を `CODE_SIGNING_ALLOWED=NO` で回すと、CloudKi
 
 ---
 
-## F-6. Phase 5 — In-Flight Progress
+## F-6. HISTORICAL / RETIRED — Phase 5 In-Flight Progress
 
-**状態**: `deferred`（P0 完了後に着手予定の**機能開発**。バグ follow-up ではない）
+**状態**: `deferred`（旧 scheduled/in-flight progress proposal は retired）
 
-Build Week の当初スコープで「P0 完了まで着手しない」と決めた項目。
+Build Week 当初の、schedule経過から in-flight progress を表現する提案。2026-08-17 の Product Owner decisionにより、信頼できない時間経過から `Departed` / `In flight` / `Arriving` / `Arrived` を推測しない STD-only contractへ置換された。現行product instructionとして実装してはならない。
 
-**再評価条件**: Priority 2〜5 と実運航 acceptance が閉じたとき。
+**再評価条件**: **trustworthy realtime source**、そのsourceとoperational semanticsを定義する**new ADR**、および**explicit PO approval**の3点がすべて揃ったとき。それまでは再開しない。
 
 ---
 
