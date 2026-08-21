@@ -1028,7 +1028,6 @@
 				INFOPLIST_FILE = TripDataHub/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "TripData Hub";
 				INFOPLIST_KEY_CFBundleIconName = AppIcon;
-				INFOPLIST_KEY_UIAppFonts = Resources/Fonts/MaterialIcons.ttf;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
@@ -1145,7 +1144,6 @@
 				INFOPLIST_FILE = TripDataHub/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "TripData Hub";
 				INFOPLIST_KEY_CFBundleIconName = AppIcon;
-				INFOPLIST_KEY_UIAppFonts = Resources/Fonts/MaterialIcons.ttf;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
