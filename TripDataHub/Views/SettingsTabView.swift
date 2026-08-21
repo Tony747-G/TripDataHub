@@ -11,7 +11,7 @@ struct SettingsTabView: View {
     @AppStorage("bid_transition_timeline_enabled") private var bidTransitionTimelineEnabled = true
     @AppStorage(OperationalSettings.crewBaseKey) private var crewBaseRawValue = OperationalSettings.defaultCrewBase.rawValue
     @AppStorage("notification_48h_enabled") private var notify48h = false
-    @AppStorage("notification_24h_enabled") private var notify24h = false
+    @AppStorage("notification_24h_enabled") private var notify24h = true
     @AppStorage(ProfileStorageKeys.faaMedicalExpiryDate) private var faaMedicalExpiryDate = ""
     @AppStorage(ProfileStorageKeys.passportExpiryDate) private var passportExpiryDate = ""
     @AppStorage(ProfileStorageKeys.chinaVisaExpiryDate) private var chinaVisaExpiryDate = ""

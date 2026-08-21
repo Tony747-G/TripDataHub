@@ -1560,6 +1560,59 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         )
     }
 
+    func test_notificationPreferencesUseProductDefaultsWhenKeysAreAbsent() {
+        let defaults = makeNotificationDefaults()
+
+        let prefs = makeMinimalViewModel(syncStateDefaults: defaults).notificationPreferences
+
+        XCTAssertFalse(prefs.notify48h)
+        XCTAssertTrue(prefs.notify24h)
+        XCTAssertFalse(prefs.notify12h)
+        XCTAssertTrue(prefs.anyEnabled)
+    }
+
+    func test_notificationPreferencesPreserveExplicitStoredFalseValues() {
+        let defaults = makeNotificationDefaults()
+        defaults.set(false, forKey: notification48hKey)
+        defaults.set(false, forKey: notification24hKey)
+
+        let prefs = makeMinimalViewModel(syncStateDefaults: defaults).notificationPreferences
+
+        XCTAssertFalse(prefs.notify48h)
+        XCTAssertFalse(prefs.notify24h)
+        XCTAssertFalse(prefs.anyEnabled)
+    }
+
+    func test_notificationPreferencesPreserveExplicitStoredTrueValues() {
+        let defaults = makeNotificationDefaults()
+        defaults.set(true, forKey: notification48hKey)
+        defaults.set(true, forKey: notification24hKey)
+
+        let prefs = makeMinimalViewModel(syncStateDefaults: defaults).notificationPreferences
+
+        XCTAssertTrue(prefs.notify48h)
+        XCTAssertTrue(prefs.notify24h)
+        XCTAssertFalse(prefs.notify12h)
+        XCTAssertTrue(prefs.anyEnabled)
+    }
+
+    func test_authorizedRescheduleUsesProductDefaultsWhenKeysAreAbsent() async {
+        let defaults = makeNotificationDefaults()
+        let notifications = RecordingNotificationService()
+        let vm = makeMinimalViewModel(
+            notificationService: notifications,
+            syncStateDefaults: defaults
+        )
+
+        await vm.updateNotificationPreferencesFromSettings(triggeredByEnablingToggle: false)
+
+        let requests = await notifications.requests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.notify48h, false)
+        XCTAssertEqual(requests.first?.notify24h, true)
+        XCTAssertEqual(requests.first?.notify12h, false)
+    }
+
     /// 7. An actual reschedule driven by the legacy preference must not request a T-12h threshold.
     func test_rescheduleFromLegacy12hPreferenceRequestsNoTwelveHourThreshold() async {
         let defaults = makeNotificationDefaults()

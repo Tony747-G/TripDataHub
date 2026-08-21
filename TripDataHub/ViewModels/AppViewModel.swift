@@ -7825,7 +7825,7 @@ final class AppViewModel: ObservableObject {
     var notificationPreferences: (notify48h: Bool, notify24h: Bool, notify12h: Bool, anyEnabled: Bool) {
         let defaults = syncStateDefaults
         let n48 = defaults.object(forKey: notification48hKey) as? Bool ?? false
-        let n24 = defaults.object(forKey: notification24hKey) as? Bool ?? false
+        let n24 = defaults.object(forKey: notification24hKey) as? Bool ?? true
         let n12 = false
         return (n48, n24, n12, n48 || n24)
     }
