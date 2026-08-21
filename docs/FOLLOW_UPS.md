@@ -52,15 +52,15 @@ Home Screen Widget と DI compact / minimal は `LegacyOperationalStatusView` �
 
 ## F-3. Dynamic Island expanded の nightly XCUITest
 
-**状態**: `deferred`（nightly automation は non-gating）
+**状態**: `KEEP DEFERRED`（nightly automation は non-gating）
 
 D-7 の自動化は 3 方式すべてで不成立と確定した。ただし **Lock Screen を諦め Dynamic Island expanded を使う**経路だけは潰しきれていない。expanded は同じ WidgetKit extension プロセスで `LiveActivityOperationalStatusView` を描画するため、redaction が起きるなら同じく起きる。
 
 構成案: `XCUIApplication(bundleIdentifier: "com.apple.springboard")` から座標長押しで展開 → `xcrun simctl io booted screenshot` → OCR。分境界は固定 UTC を注入できないので**実時間 60 秒待って値の変化を assert** する。
 
-**今やらない理由**: 実行時間 70 秒超・SpringBoard 座標依存で脆く、CI gate として信頼できない。手動の production-path ActivityKit / SpringBoard acceptance は完了しており、この automation は nightly の補助証拠に限られる。
+**今やらない理由**: Dynamic Island expanded を安定して開く公開 API / accessibility path がなく、座標だけに依存する操作は脆い。実行時間も 70 秒を超え、CI gate として信頼できない。手動の production-path ActivityKit / SpringBoard D-series acceptance が authoritative runtime evidence として完了しているため、この automation は nightly の補助証拠に限られる。
 
-**再評価条件**: nightly automation への投資が、保守コストと脆弱性を上回る価値を持つと判断されたとき。実装する場合も non-gating とする。
+**再評価条件**: nightly automation への投資が、保守コストと脆弱性を上回る価値を持つと判断されたとき。実装する場合も acceptance gate ではなく、失敗時に人間が確認する non-gating artifact collector とする。
 
 **関連**: `SWE_INSTRUCTION_IOS18_BASELINE_AND_T50.md` §B-1 / `PM Resolution`。
 
@@ -68,11 +68,11 @@ D-7 の自動化は 3 方式すべてで不成立と確定した。ただし **L
 
 ## F-4. CI: `CODE_SIGNING_ALLOWED=NO` で test host が起動前クラッシュ
 
-**状態**: `deferred`
+**状態**: `KEEP DEFERRED`
 
-app-hosted unit test bundle を `CODE_SIGNING_ALLOWED=NO` で回すと、CloudKit が必要な simulated entitlements なしで初期化され、XCTest が接続する前に TripDataHub が落ちる。通常の署名付き Simulator 構成では 499 tests が通る。
+app-hosted unit test bundle を `CODE_SIGNING_ALLOWED=NO` で回すと、Simulator entitlement の生成・埋め込みが無効になり、CloudKit が必要な simulated entitlements なしで初期化される。その結果、XCTest が接続する前に TripDataHub が落ちる。通常の署名付き Simulator 構成、および Release / TestFlight は影響を受けない。
 
-**今やらない理由**: 現在は署名付き構成で回っており、検証は成立している。急がない。
+**今やらない理由**: 現在は署名付き構成で回っており、検証は成立している。future CI では app-hosted tests に通常の local Simulator signing を使用する。Release signing や production behavior を変更する問題ではない。
 
 **再評価条件**: **CI を組む段で必ず刺さる。** その時点で対処する。
 
@@ -110,9 +110,19 @@ com.apple.developer.icloud-services entitlement.
 
 ## F-5. Print Preview readiness の文言
 
-**状態**: `deferred`
+**状態**: `DEFER — needs typed readiness state machine`
 
-**再評価条件**: browser / import 周りを別件で触るとき。
+現在の状態は同義ではない。
+
+```
+navigationLoaded != pdfAvailable != previewReady
+```
+
+navigation 完了後に非同期 status が更新されるため、より新しい readiness 表示を stale な navigation status が上書きすることが構造上あり得る。一方、無効な import action 自体は guard されており、単純な文言差し替えだけでは状態契約を正しく表せない。
+
+**今やらない理由**: typed readiness state machine と、非同期 event の優先順位を定義する必要がある。TestFlight 直前の wording patch では閉じない。
+
+**再評価条件**: browser / import の状態機械を別件で改修するとき。
 
 **関連**: T-36〜T-40。
 
@@ -120,7 +130,7 @@ com.apple.developer.icloud-services entitlement.
 
 ## F-6. HISTORICAL / RETIRED — Phase 5 In-Flight Progress
 
-**状態**: `deferred`（旧 scheduled/in-flight progress proposal は retired）
+**状態**: `RETIRED`
 
 Build Week 当初の、schedule経過から in-flight progress を表現する提案。2026-08-17 の Product Owner decisionにより、信頼できない時間経過から `Departed` / `In flight` / `Arriving` / `Arrived` を推測しない STD-only contractへ置換された。現行product instructionとして実装してはならない。
 
@@ -130,9 +140,9 @@ Build Week 当初の、schedule経過から in-flight progress を表現する�
 
 ## F-7. XcodeGen 世代差分がビルドのたびに再発する
 
-**状態**: `deferred`
+**状態**: `DEFER — needs standalone XcodeGen reproducibility project`
 
-`project.yml` を変えていなくても、XcodeGen 2.46.0 でビルドすると `.xcodeproj` が再生成され、baseline（2.44 系生成）との世代差分が毎回現れる。
+last reproducible point は commit `49f3167`。その時点では XcodeGen 2.46.0 の正規 wrapper invocation で生成差分が 0 になる。現在の checked-in project は、その後の XcodeGen 出力と Xcode 26 normalization が混在する hybrid baseline で、`project.yml` と現行 invocation だけから再現できない。
 
 ```
 LastUpgradeCheck 1430 → 2660 / xcscheme LastUpgradeVersion 2650 → 2660
@@ -141,19 +151,17 @@ lastKnownFileType → explicitFileType（全 product）
 INFOPLIST_KEY_UIAppFonts / UISupportedInterfaceOrientations（_iPad）: 配列 → 単一文字列
 ```
 
-Blocker A では baseline を復元して手で 2 行だけ当てる形で回避したが、**その回避は一回限りで、ビルドのたびに戻ってくる**ことが 2026-08-17 に実証された。
+一時 copy での再生成では、現行 baseline に対して wrapper invocation でも pbxproj に意味差分が発生し、bare `xcodegen generate` では shared scheme にも追加差分が発生した。したがって TestFlight 前は **checked-in `.xcodeproj` を Release source of truth とし、再生成しない。**
 
-**対処済み**: 2026-08-17 に A-2 検証（built `Info.plist` の baseline 比較・archive・appex 2 本・build script）を実施し、**生成物に差がないことを確認したうえで新世代を正式 baseline として受け入れた**（commit 4 = generator migration）。以後この差分は出ない。
+**今やらない理由**: 恒久対応には XcodeGen version の pin、generation wrapper、spec ownership、Xcode post-generation normalization、CI diff gate を一つの再現性プロジェクトとして決める必要がある。release 直前の surgical fix に収まらない。
 
-**残る課題**: XcodeGen を再度上げたときに同じことが起きる。恒久策の候補は ① XcodeGen version の pin（`mise` / `Brewfile`）、② `.xcodeproj` を生成物として gitignore し常時生成、のいずれか。**どちらも Build Week のスコープ外。**
-
-**再評価条件**: CI を組むとき、または XcodeGen を次に更新するとき。
+**再評価条件**: standalone XcodeGen reproducibility project を着手するとき。CI を組むとき、または XcodeGen を次に更新するときが契機になる。
 
 ---
 
 ## F-8. `Info.plist` と `INFOPLIST_KEY_*` の二重管理
 
-**状態**: `deferred`
+**状態**: `PASS`
 
 checked-in の `TripDataHub/Info.plist` と `project.yml` の `INFOPLIST_KEY_*` build settings が**両方存在し、Xcode が merge している**。
 
@@ -178,33 +186,32 @@ archive 内の MaterialIcons.ttf           上記 1 件のみ
 
 `UISupportedInterfaceOrientations` は両者の文字列が一致するため merge 後に dedup され、4 値のまま問題が出ていない。**たまたま噛み合っているだけ**である。
 
-**今やらない理由**: フォントは現に動いており（Timeline のアイコンが表示されている）、正規化して**間違ったほうを消すと Timeline のアイコンが全滅する**。利用者から見た改善がゼロで、破壊のリスクだけがある。
+**完了内容**: dead path だけを削除した。
 
-**再評価条件**: Info.plist / build settings を別件で触るとき。実配置は確認済みなので、着手時は `project.yml` の `INFOPLIST_KEY_UIAppFonts` を削除し、**削除後に再度 archive して `MaterialIcons.ttf` が bundle 直下に残ること**を確認すること。
+- `project.yml`: dead `INFOPLIST_KEY_UIAppFonts` declaration を削除
+- `TripDataHub/Info.plist`: `Resources/Fonts/MaterialIcons.ttf` を削除し、live `MaterialIcons.ttf` を維持
+- checked-in `project.pbxproj`: 対応する Debug / Release の 2 行だけを surgical に削除
+
+Release artifact では `MaterialIcons.ttf` が bundle root に exactly once 存在し、`Resources/Fonts/` は存在しない。source / bundle SHA-256 は一致し、Timeline の Material Icons は tofu・blank・fallback なしで実描画 PASS。Release app / Widget / Share extension build も PASS。
+
+orientation 等の他の Info.plist / build-setting 二重管理はこの font registration cleanup の対象外であり、F-7 の reproducibility project と混同しない。
 
 ---
 
-## F-9. Home Screen Widget の前景色契約が実画面で未検証
+## F-9. Home Screen Widget active visual acceptance
 
-**状態**: `deferred`（2026-08-17 Tony 判断）
+**状態**: `PASS`
 
-commit `1938e4b` で Widget の `.widget` 分岐にも `.environment(\.colorScheme, .dark)` を入れたが、**実画面での確認をしていない。**
+canonical fixture（`DEBUG-ANC-ICN-ANC` / `STD = now + 5h`）を変更せず、DEBUG-only の `homeWidgetPreReport` scenario（`STD = now + 9h`）を追加して production WidgetKit / SpringBoard 経路を検証した。
 
-**未検証の理由**: `FlightPresentationPolicy` の `.widget` window は T-12h〜T-6h。DEBUG fixture は `STD = now + 5h` で `.liveActivity` window に入るため、Simulator で Widget を出せない。出すには fixture の追加が必要で、Priority 2 のスコープ外と判断した。
+**実画面 acceptance**:
 
-**今の根拠**:
+| family | Light | Dark |
+|---|---|---|
+| `systemSmall` | PASS | PASS |
+| `systemMedium` | PASS | PASS |
 
-- T-51S が `.environment(\.colorScheme,.dark)` / `.containerBackground(for:.widget)` / `LinearGradient(` の 3 点を対で検査している（構文レベル）
-- 同一の修正が Lock Screen / DI expanded で **iOS 18.6 / 26.5 × Light / Dark の 4 通りすべて PASS**
-
-**残るリスク（明示しておく）**:
-
-1. **`containerBackground(for:.widget)` は `activityBackgroundTint` と別機構である。** Lock Screen の PASS が Widget の PASS を論理的に保証するわけではない
-2. **実運航で観測しても iOS 18 Light は覆われない。** 検証端末が iOS 18 系でない限り、この組み合わせは恒久的に未検証のまま残る
-
-**再評価条件**: ① Widget を別件で触るとき、② iOS 18 系の実機が使えるとき、③ `.widget` window（`STD = now + 9h` 等）へ到達する DEBUG fixture を追加したとき。
-
-**追加する場合の注意**: canonical fixture（`DEBUG-ANC-ICN-ANC` / `STD = now + 5h`）は **T-45〜T-49 の前提**なので変更しない。別の入口として追加すること。
+`systemSmall` は family-aware な 2 行構成（semantic prefix / system timer）とし、`systemMedium` は 1 行を維持した。flight / route identity、approved prefix、hours / minutes、minute precision、contrast が可読で、ellipsis・秒・dash・blank・clipping はない。shared descriptor、wording、timer semantics は変更していない。
 
 ---
 
