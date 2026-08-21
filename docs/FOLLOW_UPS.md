@@ -54,13 +54,13 @@ Home Screen Widget と DI compact / minimal は `LegacyOperationalStatusView` �
 
 **状態**: `KEEP DEFERRED`（nightly automation は non-gating）
 
-D-7 の自動化は 3 方式すべてで不成立と確定した。ただし **Lock Screen を諦め Dynamic Island expanded を使う**経路だけは潰しきれていない。expanded は同じ WidgetKit extension プロセスで `LiveActivityOperationalStatusView` を描画するため、redaction が起きるなら同じく起きる。
+isolated feasibility investigation により、Dynamic Island expanded は SpringBoard accessibility tree の semantic element `regular.view` を `press(forDuration: 1.2)` することで、座標・frame 計算・screen size dependency なしに展開できると実測した。expanded 上の OS-rendered duration も `StaticText` として取得でき、実時間の minute boundary update を iOS 18.6 / 26.5 で観測できた。iOS 26.5 では同一 probe が 3/3 run PASS し、private client identifier、Activity UUID、pointer 値には依存していない。
 
-構成案: `XCUIApplication(bundleIdentifier: "com.apple.springboard")` から座標長押しで展開 → `xcrun simctl io booted screenshot` → OCR。分境界は固定 UTC を注入できないので**実時間 60 秒待って値の変化を assert** する。
+一方、historical pre-P0 implementation `Text(timerInterval: Date.now...target, countsDown: true)` を一時復元した mutation test では、T-50S は期待どおり RED になり Dynamic Island expanded の描画も変化したが、過去の Lock Screen defect `3:15:--` は再現せず F-3 redproof は GREEN のままだった。これにより「同じ WidgetKit extension rendering なので Lock Screen の redaction を Dynamic Island expanded でも検出できる」という前提は反証された。mutation は rollback 済みで、production Swift の最終差分は 0。
 
-**今やらない理由**: Dynamic Island expanded を安定して開く公開 API / accessibility path がなく、座標だけに依存する操作は脆い。実行時間も 70 秒を超え、CI gate として信頼できない。手動の production-path ActivityKit / SpringBoard D-series acceptance が authoritative runtime evidence として完了しているため、この automation は nightly の補助証拠に限られる。
+**今やらない理由**: Dynamic Island expanded の semantic automation 自体は可能だが、historical defect の発生面は Lock Screen であり、expanded Dynamic Island は対象 regression の authoritative witness にならない。手動の production-path ActivityKit / SpringBoard D-series acceptance は完了しており、検出対象と一致しない probe を nightly automation や acceptance gate として本線へ導入しない。
 
-**再評価条件**: nightly automation への投資が、保守コストと脆弱性を上回る価値を持つと判断されたとき。実装する場合も acceptance gate ではなく、失敗時に人間が確認する non-gating artifact collector とする。
+**再評価条件**: Lock Screen を対象に、automation path、redaction state の accessibility exposure、Simulator / physical-device 差を調査する独立 follow-up が承認されたとき。現 isolated probe code は調査資産として保持し、本線への merge 対象にしない。
 
 **関連**: `SWE_INSTRUCTION_IOS18_BASELINE_AND_T50.md` §B-1 / `PM Resolution`。
 
