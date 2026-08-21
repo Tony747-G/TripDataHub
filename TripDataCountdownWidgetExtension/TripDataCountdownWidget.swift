@@ -157,11 +157,8 @@ private struct FlightCountdownWidgetEntryView: View {
                         .lineLimit(2)
                         .minimumScaleFactor(0.85)
                     if let presentation = snapshot.presentation {
-                        OperationalCountdownStatusView(presentation: presentation)
-                            .font(.subheadline.weight(.semibold))
+                        HomeWidgetOperationalStatusView(presentation: presentation)
                             .foregroundStyle(.green)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.9)
                     }
                 }
             }
@@ -197,6 +194,34 @@ private struct FlightCountdownWidgetEntryView: View {
 
     private func routeText(_ snapshot: FlightCountdownSnapshot) -> String {
         "\(snapshot.departureAirportIATA) \(snapshot.departureTimeText) -> \(snapshot.arrivalDateText) \(snapshot.arrivalTimeText) \(snapshot.arrivalAirportIATA)"
+    }
+}
+
+private struct HomeWidgetOperationalStatusView: View {
+    @Environment(\.widgetFamily) private var widgetFamily
+
+    let presentation: OperationalCountdownPresentation
+
+    @ViewBuilder
+    var body: some View {
+        if widgetFamily == .systemSmall {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(presentation.prefix)
+                    .lineLimit(1)
+                OperationalCountdownStatusView(
+                    presentation: presentation,
+                    showsPrefix: false
+                )
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            }
+            .font(.caption.weight(.semibold))
+        } else {
+            OperationalCountdownStatusView(presentation: presentation)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+        }
     }
 }
 

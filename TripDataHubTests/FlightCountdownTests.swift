@@ -316,6 +316,59 @@ final class Phase4LayoutTests: XCTestCase {
         XCTAssertTrue(activitySource.contains(".activityBackgroundTint(Color.black)"))
     }
 
+    func test_F9_homeWidgetUsesTwoStatusRowsOnlyForSystemSmall() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(
+                "TripDataCountdownWidgetExtension/TripDataCountdownWidget.swift"
+            ),
+            encoding: .utf8
+        )
+        let statusStart = try XCTUnwrap(
+            source.range(of: "private struct HomeWidgetOperationalStatusView")
+        ).lowerBound
+        let statusEnd = try XCTUnwrap(
+            source.range(
+                of: "private struct FlightCountdownLiveActivityView",
+                range: statusStart..<source.endIndex
+            )
+        ).lowerBound
+        let statusSource = compactSyntax(String(source[statusStart..<statusEnd]))
+
+        XCTAssertTrue(statusSource.contains("@Environment(\\.widgetFamily)"))
+        XCTAssertTrue(statusSource.contains("ifwidgetFamily==.systemSmall"))
+        XCTAssertTrue(statusSource.contains("VStack(alignment:.leading,spacing:1)"))
+        XCTAssertTrue(statusSource.contains("Text(presentation.prefix)"))
+        XCTAssertTrue(
+            statusSource.contains(
+                "OperationalCountdownStatusView(presentation:presentation,showsPrefix:false)"
+            )
+        )
+        XCTAssertTrue(statusSource.contains(".font(.caption.weight(.semibold))"))
+        XCTAssertFalse(statusSource.contains(".truncationMode("))
+
+        let departure = FlightCountdownFixture.departure
+        let report = departure.addingTimeInterval(-90 * 60)
+        let presentations: [(FlightOperationalState, Date?, String)] = [
+            (.preReport, report, "Report in"),
+            (.preDeparture, report, "Dep in"),
+            (.departureTimePassed, report, "Departure time passed")
+        ]
+
+        for (state, reportTimeUTC, expectedPrefix) in presentations {
+            let presentation = try XCTUnwrap(
+                OperationalCountdownPresentation.make(
+                    state: state,
+                    plannedDepartureUTC: departure,
+                    reportTimeUTC: reportTimeUTC
+                )
+            )
+            XCTAssertEqual(presentation.prefix, expectedPrefix)
+        }
+    }
+
     private func compactSyntax(_ source: String) -> String {
         source.replacingOccurrences(
             of: #"\s+"#,
@@ -1298,15 +1351,21 @@ final class DebugFlightCountdownFixtureTests: XCTestCase {
     private let canonicalNowUTC = ISO8601DateFormatter().date(from: "2026-08-16T18:30:00Z")!
 
     func test_debugRuntimeScenariosGenerateExpectedPlanningRelationshipsAndProductionStates() throws {
-        let variants: [(FlightCountdownDebugScenario, TimeInterval, FlightOperationalState)] = [
-            (.preReport, 5 * 60 * 60, .preReport),
-            (.preDeparture, 30 * 60, .preDeparture),
-            (.departureTimePassed0, 0, .departureTimePassed),
-            (.departureTimePassed1, -60, .departureTimePassed),
-            (.departureTimePassed60, -(60 * 60), .departureTimePassed)
+        let variants: [(
+            FlightCountdownDebugScenario,
+            TimeInterval,
+            FlightOperationalState,
+            FlightPresentationVisibility
+        )] = [
+            (.preReport, 5 * 60 * 60, .preReport, .liveActivity),
+            (.homeWidgetPreReport, 9 * 60 * 60, .preReport, .widget),
+            (.preDeparture, 30 * 60, .preDeparture, .liveActivity),
+            (.departureTimePassed0, 0, .departureTimePassed, .liveActivity),
+            (.departureTimePassed1, -60, .departureTimePassed, .liveActivity),
+            (.departureTimePassed60, -(60 * 60), .departureTimePassed, .liveActivity)
         ]
 
-        for (scenario, expectedDepartureOffset, expectedState) in variants {
+        for (scenario, expectedDepartureOffset, expectedState, expectedVisibility) in variants {
             let schedules = AppViewModel.debugFlightCountdownInteractiveSchedules(
                 nowUTC: canonicalNowUTC,
                 scenario: scenario
@@ -1333,7 +1392,7 @@ final class DebugFlightCountdownFixtureTests: XCTestCase {
             )
             XCTAssertEqual(output.state, expectedState)
             XCTAssertEqual(output.presentation.state, expectedState)
-            XCTAssertEqual(output.visibility, .liveActivity)
+            XCTAssertEqual(output.visibility, expectedVisibility)
         }
     }
 

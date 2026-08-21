@@ -3,6 +3,7 @@ import Foundation
 
 enum FlightCountdownDebugScenario: String, CaseIterable, Identifiable {
     case preReport
+    case homeWidgetPreReport
     case preDeparture
     case departureTimePassed0
     case departureTimePassed1
@@ -14,6 +15,8 @@ enum FlightCountdownDebugScenario: String, CaseIterable, Identifiable {
         switch self {
         case .preReport:
             "Report in"
+        case .homeWidgetPreReport:
+            "Home Widget: Report in"
         case .preDeparture:
             "Dep in"
         case .departureTimePassed0:
@@ -31,6 +34,8 @@ enum FlightCountdownDebugScenario: String, CaseIterable, Identifiable {
         switch self {
         case .preReport:
             5 * 60 * 60
+        case .homeWidgetPreReport:
+            9 * 60 * 60
         case .preDeparture:
             30 * 60
         case .departureTimePassed0:
