@@ -274,6 +274,7 @@ private final class FakeNextReportNotificationService: NextReportNotificationSer
 
     func authorizationStatus() async -> UNAuthorizationStatus { status }
     func requestAuthorization() async throws -> Bool { status == .authorized }
+    func invalidateNextReportNotifications() async {}
     func reschedule(
         schedules: [PayPeriodSchedule],
         notify48h: Bool,
@@ -307,8 +308,8 @@ private struct FakeFriendScheduleCloudKitService: FriendScheduleCloudKitServicin
     func cancelFriendRequest(myGEMSID: String, friendGEMSID: String) async throws {}
     func deleteSharedScheduleData(gemsID: String) async throws {}
     func deleteFriendSharingData(gemsID: String) async throws {}
-    func refreshConnections(myGEMSID: String, connections: [FriendConnection], friendResetAt: Date?) async throws -> [FriendConnection] {
-        connections
+    func refreshConnections(myGEMSID: String, connections: [FriendConnection], friendResetAt: Date?) async throws -> FriendConnectionRefreshResult {
+        FriendConnectionRefreshResult(connections: connections)
     }
 }
 

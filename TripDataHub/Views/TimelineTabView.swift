@@ -20,12 +20,13 @@ struct TimelineTabView: View {
     @State private var friendMatchAlert: FriendMatchPresentation?
     @State private var friendScheduleMatches: FriendScheduleMatches = .empty
     @State private var tripActionSelection: TimelineTripActionSelection?
+    @State private var tripPendingDeletion: TimelineTripActionSelection?
     @State private var tripJSONExportOutput: TripJSONExportOutput?
     @State private var tripJSONExportErrorMessage: String?
     @State private var showingAddEvent = false
     @State private var selectedManualOperationalEvent: ManualOperationalEvent?
+    @State private var selectedFlightLeg: TripLeg?
     // Caches updated in refreshLegData() — avoids recomputing expensive values on every body eval.
-    @State private var cachedReportWindows: [NextReportTripWindow] = []
     @State private var cachedDaySections: [TimelineDaySection] = []
     @State private var cachedTripBoundaryAfterLegIDs: Set<UUID> = []
     @State private var cachedTripStartLegByBoundaryLegID: [UUID: TripLeg] = [:]
@@ -69,7 +70,6 @@ struct TimelineTabView: View {
     private static var localTimeFormatters: [String: DateFormatter] = [:]
     private static var localDayKeyFormatters: [String: DateFormatter] = [:]
     private static var localHeaderFormatters: [String: DateFormatter] = [:]
-    private static var reportTimestampFormatters: [String: DateFormatter] = [:]
 
     private static func localHeaderFormatter(for tzID: String) -> DateFormatter {
         if let cached = localHeaderFormatters[tzID] { return cached }
@@ -79,17 +79,6 @@ struct TimelineTabView: View {
         fmt.dateFormat = "yyyy-MM-dd  HH:mm"
         fmt.timeZone = TimeZone(identifier: tzID)
         localHeaderFormatters[tzID] = fmt
-        return fmt
-    }
-
-    private static func reportTimestampFormatter(for tzID: String) -> DateFormatter {
-        if let cached = reportTimestampFormatters[tzID] { return cached }
-        let fmt = DateFormatter()
-        fmt.calendar = Calendar(identifier: .gregorian)
-        fmt.locale = Locale(identifier: "en_US")
-        fmt.dateFormat = "EEE, MMM d yyyy  HH:mm"
-        fmt.timeZone = TimeZone(identifier: tzID)
-        reportTimestampFormatters[tzID] = fmt
         return fmt
     }
 
@@ -142,13 +131,8 @@ struct TimelineTabView: View {
                 VStack(spacing: 0) {
                     timelineTopBar
                     importSummaryBanner
-                    if shouldShowNextReportCardOnTop {
-                        nextReportCard
-                    }
+                    operationalCountdownCard
                     timelineContent
-                    if !shouldShowNextReportCardOnTop {
-                        nextReportCard
-                    }
                     Color.gray.opacity(0.10)
                         .frame(height: 10)
                 }
@@ -179,14 +163,7 @@ struct TimelineTabView: View {
                     Label("Export Bid Period JSON", systemImage: "calendar.badge.clock")
                 }
                 Button("Delete Trip", role: .destructive) {
-                    if let pairing = tripActionSelection?.pairing {
-                        let ids = Set(
-                            viewModel.crewAccessSchedules
-                                .filter { $0.legs.contains { $0.pairing == pairing } }
-                                .map(\.id)
-                        )
-                        Task { await viewModel.deleteCrewAccessTrips(ids: ids) }
-                    }
+                    tripPendingDeletion = tripActionSelection
                     dismissTripActions()
                 }
                 Button("Cancel", role: .cancel) {
@@ -194,6 +171,22 @@ struct TimelineTabView: View {
                 }
             } message: {
                 Text("Choose an action for this trip.")
+            }
+            .alert(
+                tripPendingDeletion.map { "Delete Trip \($0.pairing)?" } ?? "Delete Trip?",
+                isPresented: Binding(
+                    get: { tripPendingDeletion != nil },
+                    set: { if !$0 { tripPendingDeletion = nil } }
+                )
+            ) {
+                Button("Delete Trip", role: .destructive) {
+                    deletePendingTrip()
+                }
+                Button("Cancel", role: .cancel) {
+                    tripPendingDeletion = nil
+                }
+            } message: {
+                Text("This will remove the trip from Timeline and synced devices.")
             }
 #if canImport(UIKit)
             .sheet(item: $tripJSONExportOutput, onDismiss: removeTripJSONExportFile) { output in
@@ -221,6 +214,14 @@ struct TimelineTabView: View {
             .sheet(item: $selectedManualOperationalEvent) { event in
                 ManualEventDetailSheet(operationalEvent: event)
                     .environmentObject(viewModel)
+            }
+            .sheet(item: $selectedFlightLeg) { leg in
+                FlightLegDetailSheet(leg: leg) { registration in
+                    try await viewModel.updateCrewAccessRegistration(
+                        for: leg,
+                        registration: registration
+                    )
+                }
             }
         }
     }
@@ -258,6 +259,17 @@ struct TimelineTabView: View {
 
     private func dismissTripActions() {
         tripActionSelection = nil
+    }
+
+    private func deletePendingTrip() {
+        guard let pairing = tripPendingDeletion?.pairing else { return }
+        let ids = Set(
+            viewModel.crewAccessSchedules
+                .filter { $0.legs.contains { $0.pairing == pairing } }
+                .map(\.id)
+        )
+        tripPendingDeletion = nil
+        Task { await viewModel.deleteCrewAccessTrips(ids: ids) }
     }
 
     private func exportSelectedTripJSON() {
@@ -461,48 +473,34 @@ struct TimelineTabView: View {
         }
     }
 
-    private var nextReportCard: some View {
-        Group {
-            TimelineView(.periodic(from: Date(), by: 60)) { _ in
-                if let info = nextReportInfo {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 8) {
-                            Text("NEXT REPORT")
-                                .appScaledFont(.caption, weight: .bold, scale: fontScale)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                            Text("Trip \(info.pairing)")
-                                .appScaledFont(.caption, scale: fontScale)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                        }
-                        HStack {
-                            Text(nextReportTimestampText(for: info.reportTime))
-                                .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
-                                .foregroundStyle(dateHeaderTextColor)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.75)
-                                .layoutPriority(1)
-                            Spacer()
-                            Text(countdownText(to: info.reportTime))
-                                .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
-                                .foregroundStyle(countdownColor(to: info.reportTime))
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.75)
-                                .layoutPriority(1)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-                    .background(.thinMaterial)
-                    .accessibilityIdentifier("timeline.nextReportCard")
-                } else {
-                    EmptyView()
+    @ViewBuilder
+    private var operationalCountdownCard: some View {
+        if let output = viewModel.operationalCountdownOutput {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text("OPERATIONAL COUNTDOWN")
+                        .appScaledFont(.caption, weight: .bold, scale: fontScale)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(output.leg.flightNumber ?? output.leg.id)
+                        .appScaledFont(.caption, scale: fontScale)
+                        .foregroundStyle(.secondary)
                 }
+                Text("\(output.leg.departureAirportIATA) → \(output.leg.arrivalAirportIATA)")
+                    .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
+                    .foregroundStyle(dateHeaderTextColor)
+                    .lineLimit(1)
+                OperationalCountdownStatusView(presentation: output.presentation)
+                    .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
+                    .foregroundStyle(output.state == .departureTimePassed ? .orange : .green)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            .background(.thinMaterial)
+            .accessibilityIdentifier("timeline.operationalCountdownCard")
         }
     }
 
@@ -511,15 +509,16 @@ struct TimelineTabView: View {
         let hasFlightMatch = !flightMatches.isEmpty
         return TimelineFlightRow(
             leg: leg,
-            isPast: isPastFlightRow(leg),
+            isPast: leg.isCompleted || isPastFlightRow(leg),
             fontScale: fontScale,
             timeRangeText: timeRangeText(for: leg),
             dayDiff: dayShift(for: leg),
-            blockText: blockAndLayoverText(for: leg, nextLegByID: nextLegByID),
+            blockConnectionDisplay: blockConnectionDisplay(for: leg, nextLegByID: nextLegByID),
             iconColor: hasFlightMatch ? friendMatchAmber : .primary,
             onFriendMatchTap: hasFlightMatch
                 ? { friendMatchAlert = flightMatchAlert(for: leg, matches: flightMatches) }
-                : nil
+                : nil,
+            onFlightTap: { selectedFlightLeg = leg }
         )
     }
 
@@ -735,24 +734,6 @@ struct TimelineTabView: View {
         return "\(targetLeg.id.uuidString)|\(selectedClockDisplay.rawValue)"
     }
 
-    /// Lightweight: selects from pre-built cachedReportWindows using current time.
-    private var nextReportInfo: NextReportInfo? {
-        let now = Date()
-        guard let window = NextReportWindowBuilder.nextReportWindow(
-            from: cachedReportWindows,
-            now: now
-        ) else { return nil }
-        return NextReportInfo(pairing: window.pairing, reportTime: window.reportTime)
-    }
-
-    private var hasActiveTripWindow: Bool {
-        NextReportWindowBuilder.hasActiveTrip(in: cachedReportWindows, now: Date())
-    }
-
-    private var shouldShowNextReportCardOnTop: Bool {
-        nextReportInfo != nil && !hasActiveTripWindow
-    }
-
     private func refreshFriendScheduleMatches() {
         guard AppEnvironment.isFriendSharingVisible else {
             friendScheduleMatches = .empty
@@ -771,13 +752,6 @@ struct TimelineTabView: View {
         let schedules = currentTimelineSchedules
         let data = TimelineLegData(schedules: schedules)
         legData = data
-
-        // Cache report windows (expensive build, runs once per schedule change).
-        cachedReportWindows = NextReportWindowBuilder.build(
-            schedules: schedules,
-            domicileAirportCode: selectedCrewDomicile.reportAirportCode,
-            domicileTimeZone: selectedDomicileTimeZone
-        ).sorted { $0.reportTime < $1.reportTime }
 
         // Cache day sections (depends on selectedClockDisplay via dayKey).
         cachedDaySections = buildDisplayDaySections(
@@ -848,10 +822,6 @@ struct TimelineTabView: View {
         }
     }
 
-    private func nextReportTimestampText(for reportTime: Date) -> String {
-        "\(Self.reportTimestampFormatter(for: selectedDomicileTimeZone.identifier).string(from: reportTime)) \(selectedCrewDomicile.displayName)"
-    }
-
     private func localHeaderTimeText() -> String {
         Self.localHeaderFormatter(for: selectedDomicileTimeZone.identifier).string(from: Date())
     }
@@ -914,43 +884,6 @@ struct TimelineTabView: View {
         return Calendar(identifier: .gregorian).dateComponents([.day], from: depDay, to: arrDay).day ?? 0
     }
 
-    private func countdownText(to target: Date) -> String {
-        let deltaSeconds = Int(target.timeIntervalSince(Date()))
-        let sign = deltaSeconds >= 0 ? "-" : "+"
-        let absMinutes = abs(deltaSeconds) / 60
-        let days = absMinutes / (24 * 60)
-        let hours = (absMinutes % (24 * 60)) / 60
-        let minutes = absMinutes % 60
-        if days == 0 {
-            return "(\(sign)\(String(format: "%02d", hours))h \(String(format: "%02d", minutes))m)"
-        }
-        return "(\(sign)\(String(format: "%02d", days))d \(String(format: "%02d", hours))h \(String(format: "%02d", minutes))m)"
-    }
-
-    private func countdownColor(to target: Date) -> Color {
-        let remainingSeconds = target.timeIntervalSince(Date())
-        let remainingHours = remainingSeconds / 3600.0
-
-        if remainingHours <= 12 {
-            if colorScheme == .light {
-                return Color(red: 0.68, green: 0.08, blue: 0.08)
-            }
-            return .red
-        }
-        if remainingHours <= 24 {
-            if colorScheme == .light {
-                return Color(red: 0.72, green: 0.34, blue: 0.00)
-            }
-            return .orange
-        }
-        if remainingHours <= 48 {
-            if colorScheme == .light {
-                return Color(red: 0.72, green: 0.52, blue: 0.00)
-            }
-            return .yellow
-        }
-        return dateHeaderTextColor
-    }
 
     private func isPastLeg(_ leg: TripLeg, nextLeg: TripLeg? = nil) -> Bool {
         if shouldShowLayover(leg: leg, connectionMap: nextLeg.map { [leg.id: $0] } ?? [:]) {
@@ -1224,16 +1157,22 @@ struct TimelineTabView: View {
         return "\(safeMinutes / 60)h \(safeMinutes % 60)m"
     }
 
-    private func blockAndLayoverText(for leg: TripLeg, nextLegByID: [UUID: TripLeg]) -> String {
-        let text = LegConnectionTextBuilder.blockAndConnectionText(for: leg, nextLegByID: nextLegByID)
-        // レイオーバーカードを表示する場合は " / LO at ..." 部分を削除して Block のみ残す
-        if shouldShowLayover(leg: leg, connectionMap: nextLegByID),
-           let slashRange = text.range(of: " / ") {
-            return String(text[..<slashRange.lowerBound])
+    private func blockConnectionDisplay(
+        for leg: TripLeg,
+        nextLegByID: [UUID: TripLeg]
+    ) -> BlockConnectionDisplay {
+        let display = LegConnectionTextBuilder.blockAndConnectionDisplay(
+            for: leg,
+            nextLegByID: nextLegByID
+        )
+        // レイオーバーカードを表示する場合は connection 行を重複表示しない。
+        if shouldShowLayover(leg: leg, connectionMap: nextLegByID) {
+            return display.blockOnly
         }
-        return text
-            .replacingOccurrences(of: "Layover at ", with: "LO at ")
-            .replacingOccurrences(of: "Layover:", with: "LO:")
+        return display.mappingConnection {
+            $0.replacingOccurrences(of: "Layover at ", with: "LO at ")
+                .replacingOccurrences(of: "Layover:", with: "LO:")
+        }
     }
 
     private func isTripBoundary(current: TripLeg, next: TripLeg) -> Bool {
@@ -1328,11 +1267,6 @@ struct TimelineTabView: View {
     private var emptyStateHint: String? {
         "Go to Settings -> CrewAccess Import. Export using CrewAccess Print as a text-selectable PDF."
     }
-}
-
-private struct NextReportInfo {
-    let pairing: String
-    let reportTime: Date
 }
 
 enum TimelineClockDisplay: String {

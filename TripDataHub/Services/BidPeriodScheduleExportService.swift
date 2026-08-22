@@ -62,7 +62,6 @@ struct BidPeriodExportOwnerInput: Equatable, Sendable {
 enum ExportTripBPRelationship: String, Codable, Equatable, Sendable {
     case assigned
     case overlappingFromPrevious
-    case overlappingFromAdjacent
     case assignmentUnavailable
 }
 
@@ -203,7 +202,7 @@ enum BidPeriodScheduleExportError: LocalizedError, Equatable {
 }
 
 enum BidPeriodScheduleExportService {
-    static let schemaVersion = "1.0"
+    static let schemaVersion = "1.1"
     static let exportType = "bidPeriodSchedule"
     static let boundaryLocalTime = "03:00"
 
@@ -315,9 +314,13 @@ enum BidPeriodScheduleExportService {
         let rawGEMS = firstMeaningful(input.profileGEMS, input.verifiedGEMS)
         let gems = rawGEMS.flatMap { try? TripJSONExportService.normalizedGEMS($0) }
         let fleet = firstMeaningful(input.profileFleet, input.verifiedEquipment)
-        let position = normalizedPosition(firstMeaningful(input.profilePosition, input.verifiedSeat))
+        let position = TripJSONExportService.normalizedPosition(
+            firstMeaningful(input.profilePosition, input.verifiedSeat)
+        )
         let equipment = firstMeaningful(input.verifiedEquipment, input.profileFleet)
-        let seat = normalizedPosition(firstMeaningful(input.verifiedSeat, input.profilePosition))
+        let seat = TripJSONExportService.normalizedPosition(
+            firstMeaningful(input.verifiedSeat, input.profilePosition)
+        )
         let seniorityNumber = firstMeaningful(input.seniorityNumber)
         let dateOfHire = firstMeaningful(input.verifiedDateOfHire)
 
@@ -373,7 +376,11 @@ enum BidPeriodScheduleExportService {
         rootIssues: inout [ExportDiagnosticIssue]
     ) -> BidPeriodExportTrip {
         let sortedLegs = trip.legs.sorted(by: legSort)
-        let firstDeparture = sortedLegs.compactMap { TripJSONExportService.parseInstant($0.depUTC ?? "") }.min()
+        // Bid Period assignment is identity, so it resolves Scheduled before Actual (INV-012).
+        // A delayed departure must not reassign an already-exported trip to another Bid Period.
+        let firstDeparture = sortedLegs
+            .compactMap { TripJSONExportService.parseInstant($0.plannedDepartureUTC ?? "") }
+            .min()
         let assignedBidPeriod = firstDeparture.flatMap { bidPeriod(for: $0, domicile: domicile) }
         let tripID = stableTripID(pairing: trip.pairing, startUTC: trip.startUTC)
         let schedule = PayPeriodSchedule(
@@ -396,16 +403,37 @@ enum BidPeriodScheduleExportService {
 
         if let payload {
             do {
-                events = try TripJSONExportService.publicEvents(
+                let richEvents = try TripJSONExportService.publicEvents(
                     payload: payload,
                     schedule: schedule,
-                    tripID: tripID,
-                    includeGroundTransport: true
+                    tripID: tripID
                 )
-                source = .crewAccessRich
                 let summaryResult = exportTripSummary(from: payload)
-                summary = summaryResult.summary
-                unavailableFieldGroups.append(contentsOf: summaryResult.unavailableFieldGroups)
+                if richEvents.isEmpty,
+                   !payload.items.isEmpty,
+                   payload.items.allSatisfy({
+                       $0.flight.caseInsensitiveCompare("GND") == .orderedSame
+                   }) {
+                    events = []
+                    source = .crewAccessRich
+                    summary = summaryResult.summary
+                    unavailableFieldGroups.append(contentsOf: summaryResult.unavailableFieldGroups)
+                    unavailableFieldGroups.append("groundTransport")
+                    tripIssues.append(issue(
+                        code: "publicEventTypesDeferred",
+                        subjectID: tripID,
+                        fieldGroup: "groundTransport",
+                        message: "The stored trip contains only Ground Transport rows, which are deferred from the public schema."
+                    ))
+                } else {
+                    guard !richEvents.isEmpty else {
+                        throw TripJSONExportError.tripDataUnavailable
+                    }
+                    events = richEvents
+                    source = .crewAccessRich
+                    summary = summaryResult.summary
+                    unavailableFieldGroups.append(contentsOf: summaryResult.unavailableFieldGroups)
+                }
             } catch {
                 source = .displayedScheduleFallback
                 summary = nil
@@ -445,11 +473,8 @@ enum BidPeriodScheduleExportService {
         let relationship: ExportTripBPRelationship
         if assignedBidPeriod?.id == selectedBidPeriod.id {
             relationship = .assigned
-        } else if let assignedBidPeriod,
-                  assignedBidPeriod.startDateUTC < selectedBidPeriod.startDateUTC {
-            relationship = .overlappingFromPrevious
         } else if assignedBidPeriod != nil {
-            relationship = .overlappingFromAdjacent
+            relationship = .overlappingFromPrevious
         } else {
             relationship = .assignmentUnavailable
             tripIssues.append(issue(
@@ -603,6 +628,9 @@ enum BidPeriodScheduleExportService {
 
         for index in legs.indices {
             let leg = legs[index]
+            guard fallbackEventType(for: leg) != .groundTransport else {
+                continue
+            }
             let startValue = leg.depUTC ?? leg.stdUTC ?? ""
             let endValue = leg.arrUTC ?? leg.staUTC ?? ""
             guard let start = try? TripJSONExportService.exportTimestamp(
@@ -632,20 +660,44 @@ enum BidPeriodScheduleExportService {
                 flightNumber: leg.flight.isEmpty ? nil : leg.flight,
                 origin: leg.depAirport.isEmpty ? nil : leg.depAirport,
                 destination: leg.arrAirport.isEmpty ? nil : leg.arrAirport,
-                blockTime: leg.block.isEmpty ? nil : leg.block
+                aircraft: leg.aircraftType,
+                aircraftRegistration: leg.aircraftRegistration,
+                blockTime: leg.block.isEmpty ? nil : leg.block,
+                departure: TripJSONExportService.endpointHistory(
+                    originalScheduled: leg.originalSTDUTC ?? leg.stdUTC,
+                    scheduled: leg.stdUTC,
+                    scheduledObservedAt: leg.scheduledDepartureObservedAtUTC,
+                    actual: leg.atdUTC,
+                    actualObservedAt: leg.actualDepartureObservedAtUTC
+                ),
+                arrival: TripJSONExportService.endpointHistory(
+                    originalScheduled: leg.originalSTAUTC ?? leg.staUTC,
+                    scheduled: leg.staUTC,
+                    scheduledObservedAt: leg.scheduledArrivalObservedAtUTC,
+                    actual: leg.ataUTC,
+                    actualObservedAt: leg.actualArrivalObservedAtUTC
+                )
             )
             events.append(segment)
             nextSequence += 1
 
-            guard legs.indices.contains(index + 1) else { continue }
-            let nextLeg = legs[index + 1]
+            let remainingLegs = legs.suffix(from: index + 1)
+            guard let nextIndex = remainingLegs.firstIndex(where: {
+                fallbackEventType(for: $0) != .groundTransport
+            }) else { continue }
+            let nextLeg = legs[nextIndex]
+            let nextType = fallbackEventType(for: nextLeg)
             let hasStructuredLayover = [
                 leg.layoverStation,
                 leg.layoverHotelName,
                 leg.layoverDuration
             ].contains { normalizedOptional($0) != nil }
             guard hasStructuredLayover,
-                  leg.arrAirport.caseInsensitiveCompare(nextLeg.depAirport) == .orderedSame,
+                  hasContinuousStationChain(
+                    from: leg,
+                    through: legs[(index + 1)..<nextIndex],
+                    to: nextLeg
+                  ),
                   let blockIn = TripJSONExportService.parseInstant(endValue),
                   let nextBlockOut = TripJSONExportService.parseInstant(nextLeg.depUTC ?? nextLeg.stdUTC ?? ""),
                   nextBlockOut > blockIn,
@@ -658,7 +710,6 @@ enum BidPeriodScheduleExportService {
                     timeZoneID: resolvedTimeZoneID(for: nextLeg.depAirport)
                   ) else { continue }
 
-            let nextType = fallbackEventType(for: nextLeg)
             let durationMinutes = Int(nextBlockOut.timeIntervalSince(blockIn) / 60)
             events.append(ExportEvent(
                 id: "event-\(tripID)-layover-\(nextSequence)",
@@ -689,6 +740,31 @@ enum BidPeriodScheduleExportService {
             nextSequence += 1
         }
         return events
+    }
+
+    private static func hasContinuousStationChain(
+        from leg: TripLeg,
+        through intermediateLegs: ArraySlice<TripLeg>,
+        to nextLeg: TripLeg
+    ) -> Bool {
+        var station = leg.arrAirport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !station.isEmpty else { return false }
+
+        for intermediate in intermediateLegs {
+            let departure = intermediate.depAirport
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .uppercased()
+            guard fallbackEventType(for: intermediate) == .groundTransport,
+                  station == departure else {
+                return false
+            }
+            station = intermediate.arrAirport
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .uppercased()
+        }
+        return station == nextLeg.depAirport
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
     }
 
     private static func fallbackEventType(for leg: TripLeg) -> ExportEventType {
@@ -851,12 +927,9 @@ enum BidPeriodScheduleExportService {
     }
 
     private static func stableTripID(pairing: String, startUTC: Date) -> String {
-        let identifier = pairing
-            .lowercased()
-            .replacingOccurrences(of: #"[^a-z0-9]+"#, with: "-", options: .regularExpression)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        let identifier = TripJSONExportService.stableIDComponent(pairing)
         let date = TripJSONExportService.utcString(startUTC).prefix(10)
-        return "trip-\(identifier.isEmpty ? "unknown" : identifier)-\(date)"
+        return "trip-\(identifier)-\(date)"
     }
 
     private static func resolvedTimeZoneID(for airport: String) -> String? {
@@ -865,23 +938,11 @@ enum BidPeriodScheduleExportService {
         )
     }
 
-    private static func normalizedPosition(_ value: String?) -> String? {
-        guard let value else { return nil }
-        let compact = value.uppercased()
-            .replacingOccurrences(of: "/", with: "")
-            .replacingOccurrences(of: ".", with: "")
-            .replacingOccurrences(of: " ", with: "")
-        switch compact {
-        case "CAPTAIN", "CAPT", "CPT", "CA": return "CA"
-        case "FIRSTOFFICER", "FO": return "FO"
-        case "SECONDOFFICER", "SO": return "SO"
-        default: return compact.isEmpty ? nil : compact
-        }
-    }
-
     private static func firstMeaningful(_ values: String...) -> String? {
         values.lazy.compactMap { value -> String? in
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmed = value
+                .split(whereSeparator: \Character.isWhitespace)
+                .joined(separator: " ")
             guard !trimmed.isEmpty,
                   trimmed != "-",
                   trimmed.caseInsensitiveCompare("unknown") != .orderedSame,
@@ -913,8 +974,10 @@ enum BidPeriodScheduleExportService {
     }
 
     private static func legSort(_ lhs: TripLeg, _ rhs: TripLeg) -> Bool {
-        let lhsDate = TripJSONExportService.parseInstant(lhs.depUTC ?? "") ?? .distantFuture
-        let rhsDate = TripJSONExportService.parseInstant(rhs.depUTC ?? "") ?? .distantFuture
+        // Scheduled ordering keeps the exported leg order deterministic and independent of
+        // whether Actual times have been observed yet.
+        let lhsDate = TripJSONExportService.parseInstant(lhs.plannedDepartureUTC ?? "") ?? .distantFuture
+        let rhsDate = TripJSONExportService.parseInstant(rhs.plannedDepartureUTC ?? "") ?? .distantFuture
         if lhsDate != rhsDate { return lhsDate < rhsDate }
         if lhs.leg != rhs.leg { return lhs.leg < rhs.leg }
         return lhs.id.uuidString < rhs.id.uuidString

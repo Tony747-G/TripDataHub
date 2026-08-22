@@ -6,10 +6,25 @@ struct FlightCountdownLeg: Codable, Equatable, Hashable, Identifiable {
     let isDeadhead: Bool
     let departureAirportIATA: String
     let arrivalAirportIATA: String
-    let scheduledDepartureUTC: Date
-    let scheduledArrivalUTC: Date
+    let plannedDepartureUTC: Date
+    let plannedArrivalUTC: Date
+    let reportTimeUTC: Date?
     let departureTimeZoneID: String
     let arrivalTimeZoneID: String
+}
+
+enum FlightCountdownLegExclusionReason: String, Error, Equatable {
+    case missingPlannedDeparture
+    case invalidPlannedDeparture
+    case missingPlannedArrival
+    case invalidPlannedArrival
+    case unresolvedDepartureTimeZone
+    case unresolvedArrivalTimeZone
+}
+
+struct FlightCountdownLegExclusion: Equatable {
+    let legID: UUID
+    let reason: FlightCountdownLegExclusionReason
 }
 
 struct CountdownDisplayStrings: Codable, Equatable, Hashable {
@@ -18,93 +33,62 @@ struct CountdownDisplayStrings: Codable, Equatable, Hashable {
     let arrivalDateText: String
     let arrivalTimeText: String
     let routeText: String
-    let statusText: String
 }
 
 struct CountdownEngineOutput: Codable, Equatable, Hashable {
     let leg: FlightCountdownLeg
-    let phase: CountdownPresentationPhase
+    let state: FlightOperationalState
+    let visibility: FlightPresentationVisibility
+    let presentation: OperationalCountdownPresentation
     let display: CountdownDisplayStrings
 }
 
+struct EvaluatedFlightCountdownLeg: Equatable {
+    let leg: FlightCountdownLeg
+    let state: FlightOperationalState
+}
+
 enum FlightCountdownEngine {
-    // DateFormatter caches keyed by timezone ID. The lock protects dictionary mutations;
-    // formatters themselves are immutable after creation so concurrent reads are safe.
     private static let formatterLock = NSLock()
     private static var dateFormatterCache: [String: DateFormatter] = [:]
     private static var timeFormatterCache: [String: DateFormatter] = [:]
 
+    static func state(for leg: FlightCountdownLeg, nowUTC: Date) -> FlightOperationalState {
+        FlightOperationalState.evaluate(
+            plannedDepartureUTC: leg.plannedDepartureUTC,
+            reportTimeUTC: leg.reportTimeUTC,
+            nowUTC: nowUTC
+        )
+    }
+
     static func selectRelevantLeg(
         from legs: [FlightCountdownLeg],
         nowUTC: Date
-    ) -> FlightCountdownLeg? {
-        let eligibleLegs = legs.filter { leg in
-            nowUTC >= leg.scheduledDepartureUTC.addingTimeInterval(-FlightCountdownSharedStore.widgetLeadTime)
-                && nowUTC < leg.scheduledDepartureUTC.addingTimeInterval(FlightCountdownSharedStore.delayedTailTime)
+    ) -> EvaluatedFlightCountdownLeg? {
+        let evaluated = legs.map { EvaluatedFlightCountdownLeg(leg: $0, state: state(for: $0, nowUTC: nowUTC)) }
+
+        if let departurePassed = latestDeparture(in: evaluated.filter { $0.state == .departureTimePassed }) {
+            return departurePassed
         }
 
-        let liveUpcoming = eligibleLegs
-            .filter { phase(for: $0, nowUTC: nowUTC) == .liveCountdown }
-            .sorted(by: compareLegs(_:_:))
-        if let liveUpcomingLeg = liveUpcoming.first {
-            return liveUpcomingLeg
-        }
-
-        let widgetUpcoming = eligibleLegs
-            .filter { phase(for: $0, nowUTC: nowUTC) == .widget }
-            .sorted(by: compareLegs(_:_:))
-        if let widgetUpcomingLeg = widgetUpcoming.first {
-            return widgetUpcomingLeg
-        }
-
-        let liveDelayed = eligibleLegs
-            .filter { phase(for: $0, nowUTC: nowUTC) == .liveDelayed }
-            .sorted(by: compareDelayedLegs(_:_:))
-        if let liveDelayedLeg = liveDelayed.first {
-            return liveDelayedLeg
-        }
-
-        return nil
+        return evaluated
+            .filter { $0.state == .preDeparture || $0.state == .preReport }
+            .sorted(by: compareUpcoming(_:_:))
+            .first
     }
 
-    static func phase(
-        for leg: FlightCountdownLeg,
-        nowUTC: Date
-    ) -> CountdownPresentationPhase {
-        FlightCountdownSharedStore.phase(scheduledDepartureUTC: leg.scheduledDepartureUTC, now: nowUTC)
-    }
-
-    static func statusText(
-        for leg: FlightCountdownLeg,
-        nowUTC: Date
-    ) -> String? {
-        let currentPhase = phase(for: leg, nowUTC: nowUTC)
-        switch currentPhase {
-        case .widget, .liveCountdown:
-            return "Departure in \(FlightCountdownSharedStore.durationText(from: nowUTC, to: leg.scheduledDepartureUTC))"
-        case .liveDelayed:
-            return "Delayed \(FlightCountdownSharedStore.durationText(from: leg.scheduledDepartureUTC, to: nowUTC))"
-        case .none, .finished:
-            return nil
-        }
-    }
-
-    static func displayStrings(for leg: FlightCountdownLeg, nowUTC: Date) -> CountdownDisplayStrings? {
-        guard let statusText = statusText(for: leg, nowUTC: nowUTC) else {
-            return nil
-        }
-        let departureDateText = localDateText(for: leg.scheduledDepartureUTC, timeZoneID: leg.departureTimeZoneID)
-        let departureTimeText = localTimeText(for: leg.scheduledDepartureUTC, timeZoneID: leg.departureTimeZoneID)
-        let arrivalDateText = localDateText(for: leg.scheduledArrivalUTC, timeZoneID: leg.arrivalTimeZoneID)
-        let arrivalTimeText = localTimeText(for: leg.scheduledArrivalUTC, timeZoneID: leg.arrivalTimeZoneID)
+    static func displayStrings(for leg: FlightCountdownLeg) -> CountdownDisplayStrings {
+        let departureDateText = localDateText(for: leg.plannedDepartureUTC, timeZoneID: leg.departureTimeZoneID)
+        let departureTimeText = localTimeText(for: leg.plannedDepartureUTC, timeZoneID: leg.departureTimeZoneID)
+        let arrivalDateText = localDateText(for: leg.plannedArrivalUTC, timeZoneID: leg.arrivalTimeZoneID)
+        let arrivalTimeText = localTimeText(for: leg.plannedArrivalUTC, timeZoneID: leg.arrivalTimeZoneID)
         let routeText = "\(leg.departureAirportIATA) \(departureTimeText) -> \(arrivalDateText) \(arrivalTimeText) \(leg.arrivalAirportIATA)"
         return CountdownDisplayStrings(
             departureDateText: departureDateText,
             departureTimeText: departureTimeText,
             arrivalDateText: arrivalDateText,
             arrivalTimeText: arrivalTimeText,
-            routeText: routeText,
-            statusText: statusText
+            routeText: routeText
         )
     }
 
@@ -112,70 +96,83 @@ enum FlightCountdownEngine {
         from legs: [FlightCountdownLeg],
         nowUTC: Date
     ) -> CountdownEngineOutput? {
-        guard let leg = selectRelevantLeg(from: legs, nowUTC: nowUTC) else {
+        guard let evaluated = selectRelevantLeg(from: legs, nowUTC: nowUTC),
+              let presentation = OperationalCountdownPresentation.make(
+                  state: evaluated.state,
+                  plannedDepartureUTC: evaluated.leg.plannedDepartureUTC,
+                  reportTimeUTC: evaluated.leg.reportTimeUTC
+              ) else {
             return nil
         }
-        let currentPhase = phase(for: leg, nowUTC: nowUTC)
-        guard let display = displayStrings(for: leg, nowUTC: nowUTC) else {
-            return nil
-        }
-        return CountdownEngineOutput(leg: leg, phase: currentPhase, display: display)
+        let display = displayStrings(for: evaluated.leg)
+        let visibility = FlightPresentationPolicy.visibility(
+            for: evaluated.state,
+            plannedDepartureUTC: evaluated.leg.plannedDepartureUTC,
+            nowUTC: nowUTC
+        )
+        return CountdownEngineOutput(
+            leg: evaluated.leg,
+            state: evaluated.state,
+            visibility: visibility,
+            presentation: presentation,
+            display: display
+        )
     }
 
-    private static func compareLegs(_ lhs: FlightCountdownLeg, _ rhs: FlightCountdownLeg) -> Bool {
-        if lhs.scheduledDepartureUTC != rhs.scheduledDepartureUTC {
-            return lhs.scheduledDepartureUTC < rhs.scheduledDepartureUTC
-        }
-        if lhs.scheduledArrivalUTC != rhs.scheduledArrivalUTC {
-            return lhs.scheduledArrivalUTC < rhs.scheduledArrivalUTC
-        }
-        return lhs.id < rhs.id
+    private static func latestDeparture(in legs: [EvaluatedFlightCountdownLeg]) -> EvaluatedFlightCountdownLeg? {
+        legs.sorted {
+            if $0.leg.plannedDepartureUTC != $1.leg.plannedDepartureUTC {
+                return $0.leg.plannedDepartureUTC > $1.leg.plannedDepartureUTC
+            }
+            return $0.leg.id < $1.leg.id
+        }.first
     }
 
-    private static func compareDelayedLegs(_ lhs: FlightCountdownLeg, _ rhs: FlightCountdownLeg) -> Bool {
-        if lhs.scheduledDepartureUTC != rhs.scheduledDepartureUTC {
-            return lhs.scheduledDepartureUTC > rhs.scheduledDepartureUTC
+    private static func compareUpcoming(
+        _ lhs: EvaluatedFlightCountdownLeg,
+        _ rhs: EvaluatedFlightCountdownLeg
+    ) -> Bool {
+        if lhs.leg.plannedDepartureUTC != rhs.leg.plannedDepartureUTC {
+            return lhs.leg.plannedDepartureUTC < rhs.leg.plannedDepartureUTC
         }
-        if lhs.scheduledArrivalUTC != rhs.scheduledArrivalUTC {
-            return lhs.scheduledArrivalUTC > rhs.scheduledArrivalUTC
+        if lhs.leg.plannedArrivalUTC != rhs.leg.plannedArrivalUTC {
+            return lhs.leg.plannedArrivalUTC < rhs.leg.plannedArrivalUTC
         }
-        return lhs.id < rhs.id
+        return lhs.leg.id < rhs.leg.id
     }
 
-    // Lock covers both dictionary access and the formatting call so no formatter
-    // is ever used outside the lock — avoiding the DateFormatter thread-safety ambiguity.
     private static func localDateText(for utcDate: Date, timeZoneID: String) -> String {
         formatterLock.lock(); defer { formatterLock.unlock() }
-        let f: DateFormatter
+        let formatter: DateFormatter
         if let existing = dateFormatterCache[timeZoneID] {
-            f = existing
+            formatter = existing
         } else {
-            let newF = DateFormatter()
-            newF.calendar = Calendar(identifier: .gregorian)
-            newF.locale = Locale(identifier: "en_US_POSIX")
-            newF.timeZone = TimeZone(identifier: timeZoneID) ?? TimeZone(secondsFromGMT: 0)
-            newF.dateFormat = "MMM d"
-            dateFormatterCache[timeZoneID] = newF
-            f = newF
+            let newFormatter = DateFormatter()
+            newFormatter.calendar = Calendar(identifier: .gregorian)
+            newFormatter.locale = Locale(identifier: "en_US_POSIX")
+            newFormatter.timeZone = TimeZone(identifier: timeZoneID) ?? TimeZone(secondsFromGMT: 0)
+            newFormatter.dateFormat = "MMM d"
+            dateFormatterCache[timeZoneID] = newFormatter
+            formatter = newFormatter
         }
-        return f.string(from: utcDate)
+        return formatter.string(from: utcDate)
     }
 
     private static func localTimeText(for utcDate: Date, timeZoneID: String) -> String {
         formatterLock.lock(); defer { formatterLock.unlock() }
-        let f: DateFormatter
+        let formatter: DateFormatter
         if let existing = timeFormatterCache[timeZoneID] {
-            f = existing
+            formatter = existing
         } else {
-            let newF = DateFormatter()
-            newF.calendar = Calendar(identifier: .gregorian)
-            newF.locale = Locale(identifier: "en_US_POSIX")
-            newF.timeZone = TimeZone(identifier: timeZoneID) ?? TimeZone(secondsFromGMT: 0)
-            newF.dateFormat = "HH:mm"
-            timeFormatterCache[timeZoneID] = newF
-            f = newF
+            let newFormatter = DateFormatter()
+            newFormatter.calendar = Calendar(identifier: .gregorian)
+            newFormatter.locale = Locale(identifier: "en_US_POSIX")
+            newFormatter.timeZone = TimeZone(identifier: timeZoneID) ?? TimeZone(secondsFromGMT: 0)
+            newFormatter.dateFormat = "HH:mm"
+            timeFormatterCache[timeZoneID] = newFormatter
+            formatter = newFormatter
         }
-        return f.string(from: utcDate)
+        return formatter.string(from: utcDate)
     }
 }
 
@@ -185,32 +182,50 @@ extension TripLeg {
         return normalized == "DH" || normalized == "CML"
     }
 
-    func countdownLeg(tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared) -> FlightCountdownLeg? {
-        guard let scheduledDepartureUTC = LegConnectionTextBuilder.parseUTC(depUTC),
-              let scheduledArrivalUTC = LegConnectionTextBuilder.parseUTC(arrUTC),
-              let departureTimeZoneID = tzResolver.resolve(depAirport),
-              let arrivalTimeZoneID = tzResolver.resolve(arrAirport)
-        else {
-            return nil
+    func countdownLeg(
+        reportTimeUTC: Date? = nil,
+        tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared
+    ) -> FlightCountdownLeg? {
+        try? countdownLegResult(reportTimeUTC: reportTimeUTC, tzResolver: tzResolver).get()
+    }
+
+    func countdownLegResult(
+        reportTimeUTC: Date? = nil,
+        tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared
+    ) -> Result<FlightCountdownLeg, FlightCountdownLegExclusionReason> {
+        guard let plannedDepartureText = plannedDepartureUTC else {
+            return .failure(.missingPlannedDeparture)
+        }
+        guard let plannedDeparture = LegConnectionTextBuilder.parseUTC(plannedDepartureText) else {
+            return .failure(.invalidPlannedDeparture)
+        }
+        guard let plannedArrivalText = plannedArrivalUTC else {
+            return .failure(.missingPlannedArrival)
+        }
+        guard let plannedArrival = LegConnectionTextBuilder.parseUTC(plannedArrivalText) else {
+            return .failure(.invalidPlannedArrival)
+        }
+        guard let departureTimeZoneID = tzResolver.resolve(depAirport) else {
+            return .failure(.unresolvedDepartureTimeZone)
+        }
+        guard let arrivalTimeZoneID = tzResolver.resolve(arrAirport) else {
+            return .failure(.unresolvedArrivalTimeZone)
         }
 
         let cleanedFlight = flight.trimmingCharacters(in: .whitespacesAndNewlines)
-        return FlightCountdownLeg(
-            id: id.uuidString,
-            flightNumber: cleanedFlight.isEmpty ? nil : cleanedFlight,
-            isDeadhead: isDeadheadLeg,
-            departureAirportIATA: depAirport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
-            arrivalAirportIATA: arrAirport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
-            scheduledDepartureUTC: scheduledDepartureUTC,
-            scheduledArrivalUTC: scheduledArrivalUTC,
-            departureTimeZoneID: departureTimeZoneID,
-            arrivalTimeZoneID: arrivalTimeZoneID
+        return .success(
+            FlightCountdownLeg(
+                id: id.uuidString,
+                flightNumber: cleanedFlight.isEmpty ? nil : cleanedFlight,
+                isDeadhead: isDeadheadLeg,
+                departureAirportIATA: depAirport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+                arrivalAirportIATA: arrAirport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+                plannedDepartureUTC: plannedDeparture,
+                plannedArrivalUTC: plannedArrival,
+                reportTimeUTC: reportTimeUTC,
+                departureTimeZoneID: departureTimeZoneID,
+                arrivalTimeZoneID: arrivalTimeZoneID
+            )
         )
-    }
-}
-
-extension Array where Element == PayPeriodSchedule {
-    func countdownLegs(tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared) -> [FlightCountdownLeg] {
-        flatMap(\.legs).compactMap { $0.countdownLeg(tzResolver: tzResolver) }
     }
 }

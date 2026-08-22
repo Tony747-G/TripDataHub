@@ -14,15 +14,13 @@ struct IPadTimelineSidebarView: View {
     @State private var friendScheduleMatches: FriendScheduleMatches = .empty
     @State private var friendMatchAlert: FriendMatchPresentation? = nil
     @State private var selectedManualOperationalEvent: ManualOperationalEvent?
+    @State private var selectedFlightLeg: TripLeg?
     // Cached per-schedule-update data — computed once in refreshLegData(), not on every body eval.
     @State private var legData = TimelineLegData(schedules: [])
     @State private var cachedTripStartLegIDs: Set<UUID> = []
     @State private var tripDataKeyByLegID: [UUID: String] = [:]
     @State private var firstRowIDByTripID: [String: String] = [:]
     @State private var firstTripSummaryIDByTripID: [String: String] = [:]
-    /// Heavy window computation cached; time-based selection stays computed so it
-    /// reflects current time as the clock advances without re-running the full build.
-    @State private var cachedReportWindows: [NextReportTripWindow] = []
 
     private var dateHeaderTextColor: Color {
         ScheduleColors.timelineDateHeaderText(for: colorScheme)
@@ -80,17 +78,6 @@ struct IPadTimelineSidebarView: View {
         }
     }
 
-    /// Selects the active/next report from the pre-built (cached) windows.
-    /// Computed so that as time advances the displayed report updates without
-    /// re-running the expensive NextReportWindowBuilder.build().
-    private var nextReportInfo: (reportTime: Date, tripLabel: String)? {
-        guard let window = NextReportWindowBuilder.nextReportWindow(
-            from: cachedReportWindows,
-            now: Date()
-        ) else { return nil }
-        return (window.reportTime, window.pairing)
-    }
-
     /// Section (day) IDs that contain at least one leg of the selected trip.
     /// Depends only on cached `legData` (stable) + `selectedTripID`.
     private var selectedSectionIDs: Set<String> {
@@ -106,9 +93,7 @@ struct IPadTimelineSidebarView: View {
         VStack(spacing: 0) {
             if focusedTripID == nil {
                 sidebarHeader
-                if let report = nextReportInfo {
-                    nextReportStrip(report: report)
-                }
+                operationalCountdownStrip
                 Divider()
             }
             ScrollViewReader { proxy in
@@ -143,25 +128,33 @@ struct IPadTimelineSidebarView: View {
                                                 )
                                         }
                                         Group {
-                                            Button {
-                                                guard focusedTripID == nil else { return }
-                                                selectedTripID = selectedTripID == tripID ? nil : tripID
-                                            } label: {
-                                                TimelineFlightRow(
-                                                    leg: leg,
-                                                    isPast: isPastFlightRow(leg),
-                                                    fontScale: timelineFontScale,
-                                                    timeRangeText: timeRangeText(for: leg),
-                                                    dayDiff: dayShift(for: leg),
-                                                    blockText: blockText(for: leg),
-                                                    iconColor: hasFlightMatch ? friendMatchAmber : .primary,
-                                                    onFriendMatchTap: hasFlightMatch ? {
-                                                        friendMatchAlert = flightMatchPresentation(for: leg, matches: flightMatches)
-                                                    } : nil
-                                                )
-                                            }
-                                            .buttonStyle(.plain)
-                                            .background(isHighlighted ? Color.red.opacity(0.10) : (isSelected ? Color.accentColor.opacity(0.12) : Color.clear))
+                                            TimelineFlightRow(
+                                                leg: leg,
+                                                isPast: leg.isCompleted || isPastFlightRow(leg),
+                                                fontScale: timelineFontScale,
+                                                timeRangeText: timeRangeText(for: leg),
+                                                dayDiff: dayShift(for: leg),
+                                                blockConnectionDisplay: blockConnectionDisplay(for: leg),
+                                                iconColor: hasFlightMatch ? friendMatchAmber : .primary,
+                                                // Selection and highlight are transient UI state and must win over the
+                                                // schedule-state tint. Passing them in keeps both backgrounds in the same
+                                                // layer; applying the highlight outside the row let the row's own amber /
+                                                // gray fill paint over the selection indicator.
+                                                backgroundOverride: isHighlighted
+                                                    ? Color.red.opacity(0.10)
+                                                    : (isSelected ? Color.accentColor.opacity(0.12) : nil),
+                                                onFriendMatchTap: hasFlightMatch ? {
+                                                    friendMatchAlert = flightMatchPresentation(for: leg, matches: flightMatches)
+                                                } : nil,
+                                                onFlightTap: {
+                                                    // Select, never deselect. Toggling here meant that opening the Flight
+                                                    // Log for the already-selected trip also cleared the selection.
+                                                    if focusedTripID == nil {
+                                                        selectedTripID = tripID
+                                                    }
+                                                    selectedFlightLeg = leg
+                                                }
+                                            )
                                             .overlay(alignment: .leading) {
                                                 if isSelected {
                                                     Rectangle()
@@ -391,6 +384,14 @@ struct IPadTimelineSidebarView: View {
             ManualEventDetailSheet(operationalEvent: event)
                 .environmentObject(viewModel)
         }
+        .sheet(item: $selectedFlightLeg) { leg in
+            FlightLegDetailSheet(leg: leg) { registration in
+                try await viewModel.updateCrewAccessRegistration(
+                    for: leg,
+                    registration: registration
+                )
+            }
+        }
     }
 
     /// Layover中→Layoverカード、Trip先頭（未開始）→Trip summaryカード、
@@ -456,64 +457,36 @@ struct IPadTimelineSidebarView: View {
             .overlay(alignment: .bottom) { Divider() }
     }
 
-    // MARK: Next Report Strip — identical structure to iPhone's nextReportCard
+    // MARK: Operational Countdown Strip — same descriptor as iPhone/Widget/Live Activity
 
-    private func nextReportStrip(report: (reportTime: Date, tripLabel: String)) -> some View {
-        TimelineView(.periodic(from: Date(), by: 60)) { _ in
+    @ViewBuilder
+    private var operationalCountdownStrip: some View {
+        if let output = viewModel.operationalCountdownOutput {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
-                    Text("NEXT REPORT")
+                    Text("OPERATIONAL COUNTDOWN")
                         .appScaledFont(.caption, weight: .bold, scale: timelineFontScale)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                    Text("Trip \(report.tripLabel)")
+                    Spacer()
+                    Text(output.leg.flightNumber ?? output.leg.id)
                         .appScaledFont(.caption, scale: timelineFontScale)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
                 }
-                HStack {
-                    Text(Self.reportTimeFormatter(for: selectedDomicileTimeZone.identifier).string(from: report.reportTime) + " \(selectedCrewDomicile.displayName)")
-                        .appScaledFont(.subheadline, weight: .bold, scale: timelineFontScale)
-                        .foregroundStyle(dateHeaderTextColor)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                        .layoutPriority(1)
-                    Spacer()
-                    Text(countdownText(to: report.reportTime))
-                        .appScaledFont(.subheadline, weight: .bold, scale: timelineFontScale)
-                        .foregroundStyle(countdownColor(to: report.reportTime))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                        .layoutPriority(1)
-                }
+                Text("\(output.leg.departureAirportIATA) → \(output.leg.arrivalAirportIATA)")
+                    .appScaledFont(.subheadline, weight: .bold, scale: timelineFontScale)
+                    .foregroundStyle(dateHeaderTextColor)
+                    .lineLimit(1)
+                OperationalCountdownStatusView(presentation: output.presentation)
+                    .appScaledFont(.subheadline, weight: .bold, scale: timelineFontScale)
+                    .foregroundStyle(output.state == .departureTimePassed ? .orange : .green)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
             .background(.thinMaterial)
         }
-    }
-
-    private func countdownText(to target: Date) -> String {
-        let deltaSeconds = Int(target.timeIntervalSince(Date()))
-        let sign = deltaSeconds >= 0 ? "-" : "+"
-        let absMinutes = abs(deltaSeconds) / 60
-        let days = absMinutes / (24 * 60)
-        let hours = (absMinutes % (24 * 60)) / 60
-        let minutes = absMinutes % 60
-        if days == 0 {
-            return "(\(sign)\(String(format: "%02d", hours))h \(String(format: "%02d", minutes))m)"
-        }
-        return "(\(sign)\(String(format: "%02d", days))d \(String(format: "%02d", hours))h \(String(format: "%02d", minutes))m)"
-    }
-
-    private func countdownColor(to target: Date) -> Color {
-        let remainingHours = target.timeIntervalSince(Date()) / 3600.0
-        if remainingHours <= 12 { return .red }
-        if remainingHours <= 24 { return .orange }
-        return dateHeaderTextColor
     }
 
     // MARK: Trip summary card
@@ -688,19 +661,6 @@ struct IPadTimelineSidebarView: View {
     private static var localTimeFormatters: [String: DateFormatter] = [:]
     private static var localDayKeyFormatters: [String: DateFormatter] = [:]
 
-    private static func reportTimeFormatter(for tzID: String) -> DateFormatter {
-        if let cached = reportTimeFormatters[tzID] { return cached }
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US")
-        formatter.timeZone = TimeZone(identifier: tzID)
-        formatter.dateFormat = "EEE, MMM d yyyy  HH:mm"
-        reportTimeFormatters[tzID] = formatter
-        return formatter
-    }
-
-    private static var reportTimeFormatters: [String: DateFormatter] = [:]
-
     private static let utcTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -710,15 +670,18 @@ struct IPadTimelineSidebarView: View {
         return formatter
     }()
 
-    private func blockText(for leg: TripLeg) -> String {
-        let text = LegConnectionTextBuilder.blockAndConnectionText(for: leg, nextLegByID: legData.nextLegByID)
-        if shouldShowLayover(leg: leg),
-           let slashRange = text.range(of: " / ") {
-            return String(text[..<slashRange.lowerBound])
+    private func blockConnectionDisplay(for leg: TripLeg) -> BlockConnectionDisplay {
+        let display = LegConnectionTextBuilder.blockAndConnectionDisplay(
+            for: leg,
+            nextLegByID: legData.nextLegByID
+        )
+        if shouldShowLayover(leg: leg) {
+            return display.blockOnly
         }
-        return text
-            .replacingOccurrences(of: "Layover at ", with: "LO at ")
-            .replacingOccurrences(of: "Layover:", with: "LO:")
+        return display.mappingConnection {
+            $0.replacingOccurrences(of: "Layover at ", with: "LO at ")
+                .replacingOccurrences(of: "Layover:", with: "LO:")
+        }
     }
 
     private func arrivalLocalDateLabel(for leg: TripLeg) -> String {
@@ -828,15 +791,6 @@ struct IPadTimelineSidebarView: View {
         firstRowIDByTripID = rowMap
         firstTripSummaryIDByTripID = summaryMap
 
-        // Cache only the window list; time-based selection stays in computed nextReportInfo.
-        // Focused mode hides the next-report strip, so skip the window build entirely.
-        cachedReportWindows = focusedTripID == nil
-            ? NextReportWindowBuilder.build(
-                schedules: schedules,
-                domicileAirportCode: selectedCrewDomicile.reportAirportCode,
-                domicileTimeZone: selectedDomicileTimeZone
-            ).sorted { $0.reportTime < $1.reportTime }
-            : []
     }
 
     private func refreshTripDataCards() {
@@ -935,6 +889,9 @@ struct CalendarTripTimelinePopup: View {
     @State private var scrollTrigger = UUID()
     @State private var unusedSelection: String?
     @State private var timelineContentHeight: CGFloat?
+    @State private var tripJSONExportOutput: TripJSONExportOutput?
+    @State private var tripJSONExportErrorMessage: String?
+    @State private var isExportingTripJSON = false
 
     private static let maxTimelineHeight: CGFloat = 530
 
@@ -962,6 +919,15 @@ struct CalendarTripTimelinePopup: View {
                     Text("Trip Id: \(tripDisplayID)")
                         .font(.system(size: 16, weight: .bold))
                     Spacer()
+                    Button {
+                        Task { await exportTripJSON() }
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 18, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isExportingTripJSON)
+                    .accessibilityLabel("Export Trip JSON")
                     Button {
                         onDismiss()
                     } label: {
@@ -997,6 +963,68 @@ struct CalendarTripTimelinePopup: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 40)
         }
+#if canImport(UIKit)
+        .sheet(item: $tripJSONExportOutput, onDismiss: removeTripJSONExportFile) { output in
+            ActivityView(activityItems: [output.url]) { _ in
+                TripJSONExportService.removeTemporaryFiles(for: output)
+                tripJSONExportOutput = nil
+            }
+        }
+#endif
+        .alert("Unable to Export JSON", isPresented: Binding(
+            get: { tripJSONExportErrorMessage != nil },
+            set: { if !$0 { tripJSONExportErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { tripJSONExportErrorMessage = nil }
+        } message: {
+            Text(tripJSONExportErrorMessage ?? "The trip could not be exported.")
+        }
+    }
+
+    @MainActor
+    private func exportTripJSON() async {
+        guard !isExportingTripJSON else { return }
+        guard let schedule = exportSchedule else {
+            tripJSONExportErrorMessage = TripJSONExportError.tripDataUnavailable.localizedDescription
+            return
+        }
+        isExportingTripJSON = true
+        defer { isExportingTripJSON = false }
+
+        do {
+            removeTripJSONExportFile()
+            tripJSONExportOutput = try await viewModel.prepareCrewAccessTripJSONExport(for: schedule)
+        } catch {
+            tripJSONExportErrorMessage = error.localizedDescription
+        }
+    }
+
+    private var exportSchedule: PayPeriodSchedule? {
+        let matchingSchedules = viewModel.crewAccessSchedules.filter { schedule in
+            schedule.legs.contains { leg in
+                "\(leg.payPeriod)|\(leg.pairing)" == tripID
+            }
+        }
+        let legs = matchingSchedules.flatMap(\.legs).filter {
+            "\($0.payPeriod)|\($0.pairing)" == tripID
+        }
+        guard !legs.isEmpty else { return nil }
+        return PayPeriodSchedule(
+            id: tripID,
+            label: legs[0].payPeriod,
+            tripCount: 1,
+            legCount: legs.count,
+            openTimeCount: 0,
+            updatedAt: matchingSchedules.map(\.updatedAt).max() ?? .distantPast,
+            legs: legs,
+            openTimeTrips: []
+        )
+    }
+
+    private func removeTripJSONExportFile() {
+        guard let output = tripJSONExportOutput else { return }
+        TripJSONExportService.removeTemporaryFiles(for: output)
+        tripJSONExportOutput = nil
     }
 }
 

@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 
 final class LaunchBehaviorUITests: XCTestCase {
@@ -5,19 +6,33 @@ final class LaunchBehaviorUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    func test_timelineLaunchShowsNextReportCardBeforeDateHeaderBetweenTrips() {
+    func test_timelineLaunchShowsOperationalCountdownBeforeDateHeaderBetweenTrips() {
         let app = XCUIApplication()
         app.launchArguments += ["UITEST_TIMELINE_SEED"]
         app.launch()
 
-        // Use matching(identifier:) rather than subscript to ensure lookup by accessibility identifier.
-        let dateHeader = app.staticTexts.matching(identifier: "timeline.dayHeader.2026-06-09").firstMatch
+        // The launch fixture is deliberately relative to the test clock, so the day ID must not
+        // be hard-coded. This finds the first rendered Timeline day header by its stable prefix.
+        let dateHeader = app.staticTexts.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "timeline.dayHeader.")
+        ).firstMatch
         XCTAssertTrue(dateHeader.waitForExistence(timeout: 10))
 
-        let nextReportCard = app.staticTexts.matching(identifier: "timeline.nextReportCard").firstMatch
-        XCTAssertTrue(nextReportCard.waitForExistence(timeout: 5))
-        XCTAssertTrue(nextReportCard.isHittable)
-        XCTAssertLessThan(nextReportCard.frame.minY, dateHeader.frame.minY)
+        let operationalCountdown = app.staticTexts.matching(
+            identifier: "timeline.operationalCountdownCard"
+        ).firstMatch
+        XCTAssertTrue(operationalCountdown.waitForExistence(timeout: 5))
+        XCTAssertTrue(operationalCountdown.isHittable)
+
+        let reportPrefix = app.staticTexts.matching(
+            NSPredicate(
+                format: "identifier == %@ AND label == %@",
+                "timeline.operationalCountdownCard",
+                "Report in"
+            )
+        ).firstMatch
+        XCTAssertTrue(reportPrefix.waitForExistence(timeout: 5))
+        XCTAssertLessThan(operationalCountdown.frame.minY, dateHeader.frame.minY)
     }
 
     func test_settingsLoggedOutStateShowsTripBoardLoginAction() {
@@ -27,25 +42,24 @@ final class LaunchBehaviorUITests: XCTestCase {
 
         openSettings(in: app)
 
-        let loginButton = app.buttons["settings.tripboardAction"]
+        let loginButton = scrollToTripBoardAction(in: app)
         XCTAssertTrue(loginButton.waitForExistence(timeout: 5))
         XCTAssertEqual(loginButton.label, "TripBoard Log-in")
     }
 
-    func test_settingsOpenTimeDemoModeShowsDemoLoadAction() {
+    func test_settingsHidesInternalDemoAndDiagnosticsControls() {
         let app = XCUIApplication()
         app.launchArguments += ["UITEST_LOGGED_OUT_VERIFIED"]
-        app.launchArguments += ["UITEST_OPENTIME_DEMO"]
         app.launch()
 
         openSettings(in: app)
 
-        let demoSwitch = app.switches["settings.openTimeDemoMode"]
-        XCTAssertTrue(demoSwitch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.switches["settings.openTimeDemoMode"].exists)
+        XCTAssertFalse(app.staticTexts["Sync Diagnostics"].exists)
 
-        let demoLoadButton = app.buttons["settings.tripboardAction"]
-        XCTAssertTrue(demoLoadButton.waitForExistence(timeout: 5))
-        XCTAssertEqual(demoLoadButton.label, "Load Demo OpenTime")
+        let tripBoardButton = scrollToTripBoardAction(in: app)
+        XCTAssertTrue(tripBoardButton.waitForExistence(timeout: 5))
+        XCTAssertEqual(tripBoardButton.label, "TripBoard Log-in")
     }
 
     func test_phoneNavigationUsesExpandableMenuWithoutTabBar() {
@@ -60,7 +74,6 @@ final class LaunchBehaviorUITests: XCTestCase {
         menuButton.tap()
 
         XCTAssertTrue(app.buttons["Timeline"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.buttons["Calendar"].exists)
         XCTAssertTrue(app.buttons["Browser"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["Add Event"].exists)
         XCTAssertTrue(app.buttons["Settings"].exists)
@@ -70,17 +83,30 @@ final class LaunchBehaviorUITests: XCTestCase {
         screenshot.lifetime = .keepAlways
         add(screenshot)
 
-        app.buttons["Calendar"].tap()
-        // Match any bid-period header rather than a hardcoded id: the calendar
-        // opens on *today's* BP, so a literal like "BP26-04" rots as soon as the
-        // next bid period starts.
+    }
+
+    /// Calendar is a required iPad workspace surface. It is deliberately hidden from the iPhone
+    /// floating menu while that phone UI is redesigned, so this test is skipped on iPhone and must
+    /// be run against an iPadOS Simulator in CI/release verification.
+    func test_iPadCalendarShowsCurrentBidPeriod() throws {
+        try XCTSkipUnless(
+            UIDevice.current.userInterfaceIdiom == .pad,
+            "The Calendar UI is verified on iPadOS only."
+        )
+
+        let app = XCUIApplication()
+        app.launchArguments += ["UITEST_TIMELINE_SEED"]
+        app.launch()
+
+        // Match any bid-period header rather than a hardcoded id: the calendar opens on today's
+        // BP, so a literal such as BP26-04 becomes stale at the next bid-period transition.
         let bidPeriodHeader = app.staticTexts
             .matching(NSPredicate(format: "label MATCHES %@", #"BP\d{2}-\d{2}"#))
             .firstMatch
-        XCTAssertTrue(bidPeriodHeader.waitForExistence(timeout: 5))
+        XCTAssertTrue(bidPeriodHeader.waitForExistence(timeout: 10))
 
         let calendarScreenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        calendarScreenshot.name = "iPhone calendar layout"
+        calendarScreenshot.name = "iPad calendar layout"
         calendarScreenshot.lifetime = .keepAlways
         add(calendarScreenshot)
     }
@@ -93,6 +119,16 @@ final class LaunchBehaviorUITests: XCTestCase {
         let settingsButton = app.buttons["Settings"]
         XCTAssertTrue(settingsButton.waitForExistence(timeout: 2))
         settingsButton.tap()
+    }
+
+    private func scrollToTripBoardAction(in app: XCUIApplication) -> XCUIElement {
+        let action = app.buttons["settings.tripboardAction"]
+        var remainingScrolls = 6
+        while (!action.exists || !action.isHittable) && remainingScrolls > 0 {
+            app.swipeUp()
+            remainingScrolls -= 1
+        }
+        return action
     }
 
 }

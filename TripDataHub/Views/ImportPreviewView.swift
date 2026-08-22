@@ -1,9 +1,48 @@
 import SwiftUI
 
+enum ImportPreviewPresentationPolicy {
+    static func browserPreviewIsPresented(
+        pendingImportID: UUID?,
+        presentsImportPreview: Bool
+    ) -> Bool {
+        presentsImportPreview && pendingImportID != nil
+    }
+
+    static func externalPreviewIsPresented(
+        pendingImportID: UUID?,
+        browserIsPresented: Bool
+    ) -> Bool {
+        pendingImportID != nil && !browserIsPresented
+    }
+}
+
+struct ImportReplacementConfirmation: Identifiable, Equatable {
+    let expectedReplacementIDs: Set<String>
+    let message: String
+
+    var id: String {
+        expectedReplacementIDs.sorted().joined(separator: "|")
+    }
+
+    init?(candidates: [AppViewModel.TripImportReplacementCandidate]) {
+        guard !candidates.isEmpty else { return nil }
+        expectedReplacementIDs = Set(candidates.map(\.id))
+        message = candidates.map { candidate in
+            switch candidate.reason {
+            case .sameTripID:
+                return "Trip \(candidate.tripId) already exists.\nThe imported schedule contains revisions and will replace the current version."
+            case .timeOverlap:
+                return "Trip \(candidate.tripId) overlaps this import.\nIt will be removed from Timeline and synced devices."
+            }
+        }
+        .joined(separator: "\n\n")
+    }
+}
+
 struct ImportPreviewView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @Environment(\.dismiss) private var dismiss
-    @State private var showingReplacementConfirm = false
+    @State private var replacementConfirmation: ImportReplacementConfirmation?
 #if DEBUG
     @State private var isShowingDiagnostics = false
 #endif
@@ -12,6 +51,15 @@ struct ImportPreviewView: View {
         Group {
             if let pending = viewModel.pendingImport {
                 List {
+                    if let message = viewModel.crewAccessImportMessage,
+                       !message.isEmpty {
+                        Section("Import Status") {
+                            Text(message)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
                     if viewModel.hasQueuedImport {
                         Section {
                             Label(
@@ -151,18 +199,24 @@ struct ImportPreviewView: View {
                     }
 
                     Section {
-                        Button("Confirm Import") {
-                            let replacements = viewModel.pendingImportReplacementCandidates
-                            if replacements.isEmpty {
+                        let replacements = viewModel.pendingImportReplacementCandidates
+                        if replacements.isEmpty {
+                            Button("Confirm Import") {
                                 Task {
-                                    await viewModel.confirmPendingImport()
-                                    dismiss()
+                                    if await viewModel.confirmPendingImport(expectedReplacementIDs: []) {
+                                        dismiss()
+                                    }
                                 }
-                            } else {
-                                showingReplacementConfirm = true
                             }
+                            .disabled(!pending.canConfirm)
+                        } else {
+                            Button("Replace and Import", role: .destructive) {
+                                replacementConfirmation = ImportReplacementConfirmation(
+                                    candidates: viewModel.pendingImportReplacementCandidates
+                                )
+                            }
+                            .disabled(!pending.canConfirm)
                         }
-                        .disabled(!pending.canConfirm)
 
                         Button("Cancel", role: .destructive) {
                             Task {
@@ -171,30 +225,6 @@ struct ImportPreviewView: View {
                             }
                         }
                     }
-                }
-                .confirmationDialog(
-                    "Replace existing trip(s)?",
-                    isPresented: $showingReplacementConfirm,
-                    titleVisibility: .visible
-                ) {
-                    Button("Replace and Import", role: .destructive) {
-                        Task {
-                            await viewModel.confirmPendingImport()
-                            dismiss()
-                        }
-                    }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    let replacements = viewModel.pendingImportReplacementCandidates
-                    let lines = replacements.map { c -> String in
-                        switch c.reason {
-                        case .sameTripID:
-                            return "Trip \(c.tripId) will be replaced."
-                        case .timeOverlap:
-                            return "Trip \(c.tripId) overlaps and will be removed from Timeline and synced devices."
-                        }
-                    }
-                    Text(lines.joined(separator: "\n"))
                 }
             } else {
                 ContentUnavailableView(
@@ -208,5 +238,21 @@ struct ImportPreviewView: View {
 #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
 #endif
+        .alert(item: $replacementConfirmation) { confirmation in
+            Alert(
+                title: Text("Replace Existing Trip?"),
+                message: Text(confirmation.message),
+                primaryButton: .destructive(Text("Replace and Import")) {
+                    Task {
+                        if await viewModel.confirmPendingImport(
+                            expectedReplacementIDs: confirmation.expectedReplacementIDs
+                        ) {
+                            dismiss()
+                        }
+                    }
+                },
+                secondaryButton: .cancel()
+            )
+        }
     }
 }

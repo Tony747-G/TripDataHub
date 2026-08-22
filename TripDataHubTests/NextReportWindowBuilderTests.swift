@@ -1,3 +1,4 @@
+import UserNotifications
 import XCTest
 @testable import TripDataHub
 
@@ -5,6 +6,19 @@ import XCTest
 /// This area regressed before ("stale next report notifications") with no test
 /// coverage; the builder decides which trips notify and at what report time.
 final class NextReportWindowBuilderTests: XCTestCase {
+
+    func test_notificationUsesAbsoluteTimeIntervalWithoutCalendarComponentOverconstraint() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let fireDate = now.addingTimeInterval(48 * 60 * 60 + 17)
+
+        let trigger = NextReportNotificationService.notificationTrigger(
+            fireDate: fireDate,
+            now: now
+        )
+
+        XCTAssertEqual(trigger.timeInterval, 48 * 60 * 60 + 17)
+        XCTAssertFalse(trigger.repeats)
+    }
 
     private static let anchorageTimeZone = TimeZone(identifier: "America/Anchorage")!
 
@@ -34,6 +48,100 @@ final class NextReportWindowBuilderTests: XCTestCase {
         XCTAssertEqual(window.tripStartDomicile, iso("2026-06-14T13:00:00Z"))
         XCTAssertEqual(window.reportTime, iso("2026-06-14T11:30:00Z"), "Report is 90 minutes before domicile departure")
         XCTAssertEqual(window.tripEndDomicile, iso("2026-06-17T12:00:00Z"))
+    }
+
+    func test_T13_reportLeadUsesLower48RuleAndFallsBackToNinetyMinutes() throws {
+        let departure = "2026-06-14T13:00:00Z"
+        let arrival = "2026-06-14T17:00:00Z"
+        let returnDeparture = "2026-06-15T13:00:00Z"
+        let returnArrival = "2026-06-15T17:00:00Z"
+
+        func reportTime(domicile: String, destination: String) throws -> Date {
+            let schedule = makeSchedule(legs: [
+                makeLeg(
+                    pairing: "T13001", leg: 1,
+                    dep: domicile, arr: destination,
+                    depUTC: departure, arrUTC: arrival
+                ),
+                makeLeg(
+                    pairing: "T13001", leg: 2,
+                    dep: destination, arr: domicile,
+                    depUTC: returnDeparture, arrUTC: returnArrival
+                )
+            ])
+            return try XCTUnwrap(
+                NextReportWindowBuilder.build(
+                    schedules: [schedule],
+                    domicileAirportCode: domicile,
+                    domicileTimeZone: Self.anchorageTimeZone
+                ).first
+            ).reportTime
+        }
+
+        XCTAssertEqual(try reportTime(domicile: "SDF", destination: "MIA"), iso("2026-06-14T12:00:00Z"))
+        XCTAssertEqual(try reportTime(domicile: "ANC", destination: "SDF"), iso("2026-06-14T11:30:00Z"))
+        XCTAssertEqual(try reportTime(domicile: "SDF", destination: "HNL"), iso("2026-06-14T11:30:00Z"))
+        XCTAssertEqual(try reportTime(domicile: "SDF", destination: "ZZZ"), iso("2026-06-14T11:30:00Z"))
+    }
+
+    func test_T24_reportWindowAndTimelineDutyStartShareOneLeadTimePolicy() throws {
+        func observedLeadMinutes(
+            origin: String,
+            destination: String,
+            domicileTimeZone: TimeZone
+        ) throws -> (reportWindow: Int, timeline: Int) {
+            let departure = iso("2026-06-14T13:00:00Z")
+            let outbound = makeLeg(
+                pairing: "T24001", leg: 1,
+                dep: origin, arr: destination,
+                depUTC: "2026-06-14T13:00:00Z", arrUTC: "2026-06-14T17:00:00Z"
+            )
+            let inbound = makeLeg(
+                pairing: "T24001", leg: 2,
+                dep: destination, arr: origin,
+                depUTC: "2026-06-15T13:00:00Z", arrUTC: "2026-06-15T17:00:00Z"
+            )
+            let window = try XCTUnwrap(
+                NextReportWindowBuilder.build(
+                    schedules: [makeSchedule(legs: [outbound, inbound])],
+                    domicileAirportCode: origin,
+                    domicileTimeZone: domicileTimeZone
+                ).first
+            )
+            let rest = try XCTUnwrap(
+                TimelineLayoverSupport.restInfo(
+                    arrDate: iso("2026-06-13T00:00:00Z"),
+                    nextLeg: outbound
+                )
+            )
+            return (
+                Int(departure.timeIntervalSince(window.reportTime) / 60),
+                Int(departure.timeIntervalSince(rest.dutyStartUTC) / 60)
+            )
+        }
+
+        let asia = try observedLeadMinutes(
+            origin: "ICN",
+            destination: "CGO",
+            domicileTimeZone: TimeZone(identifier: "Asia/Seoul")!
+        )
+        let europe = try observedLeadMinutes(
+            origin: "FRA",
+            destination: "AMS",
+            domicileTimeZone: TimeZone(identifier: "Europe/Berlin")!
+        )
+        let lower48 = try observedLeadMinutes(
+            origin: "SDF",
+            destination: "MIA",
+            domicileTimeZone: TimeZone(identifier: "America/Kentucky/Louisville")!
+        )
+
+        XCTAssertEqual(asia.reportWindow, 90)
+        XCTAssertEqual(asia.timeline, asia.reportWindow)
+        XCTAssertEqual(europe.reportWindow, 90)
+        XCTAssertEqual(europe.timeline, europe.reportWindow)
+        XCTAssertEqual(lower48.reportWindow, 60)
+        XCTAssertEqual(lower48.timeline, lower48.reportWindow)
     }
 
     func test_build_skipsTripWithoutDomicileDeparture() {

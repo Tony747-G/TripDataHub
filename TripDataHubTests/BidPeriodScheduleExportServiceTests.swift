@@ -9,7 +9,7 @@ final class BidPeriodScheduleExportServiceTests: XCTestCase {
     func test_filenameAndEmbeddedIdentifierAgree() throws {
         let export = BidPeriodScheduleExportService.makeExport(input: try input())
 
-        XCTAssertEqual(export.schemaVersion, "1.0")
+        XCTAssertEqual(export.schemaVersion, "1.1")
         XCTAssertEqual(export.bidPeriod.identifier, "BP26-04")
         XCTAssertEqual(BidPeriodScheduleExportService.filename(for: export), "BP26-04.json")
         let object = try jsonObject(export)
@@ -131,6 +131,44 @@ final class BidPeriodScheduleExportServiceTests: XCTestCase {
         XCTAssertTrue(export.diagnostics.partial)
     }
 
+    func test_emptyMatchingRichPayloadFallsBackWithDiagnostics() throws {
+        let displayed = schedule(
+            id: "empty-rich",
+            pairing: "T4005",
+            departure: "2026-06-01T12:00:00Z",
+            arrival: "2026-06-01T16:00:00Z"
+        )
+        let emptyRich = CrewAccessTripJSON(
+            schemaVersion: 1,
+            source: "fictional-test",
+            sourceVersion: "1",
+            mappingVersion: "test",
+            generatedAt: "2026-06-01T00:00:00Z",
+            tripId: "T4005",
+            tripInformationDate: "2026-06-01",
+            creditTime: nil,
+            tripDays: nil,
+            tafb: nil,
+            dutyTotals: [],
+            hotelDetails: [],
+            crew: [],
+            items: []
+        )
+
+        let export = BidPeriodScheduleExportService.makeExport(input: try input(
+            schedules: [displayed],
+            crewAccessPayloads: [emptyRich]
+        ))
+
+        let trip = try XCTUnwrap(export.trips.first)
+        XCTAssertEqual(trip.source, .displayedScheduleFallback)
+        XCTAssertEqual(trip.events.count, 1)
+        XCTAssertTrue(trip.diagnostics.issues.contains {
+            $0.code == "richCrewAccessPayloadInvalid"
+        })
+        XCTAssertTrue(export.diagnostics.partial)
+    }
+
     func test_mapsAvailableRichTripSummaryToStructuredValues() throws {
         let richSchedule = schedule(
             id: "rich-summary",
@@ -172,6 +210,90 @@ final class BidPeriodScheduleExportServiceTests: XCTestCase {
         XCTAssertEqual((encodedSummary["tripDays"] as? [String: Any])?["days"] as? Int, 3)
     }
 
+    func test_richFlightPreservesEndpointHistoryAndRegistrationInBidPeriodJSON() throws {
+        let originalDeparture = "2026-06-01T12:00:00Z"
+        let originalArrival = "2026-06-01T16:00:00Z"
+        let revisedDeparture = "2026-06-01T12:20:00Z"
+        let revisedArrival = "2026-06-01T16:20:00Z"
+        let actualDeparture = "2026-06-01T12:27:00Z"
+        let actualArrival = "2026-06-01T16:31:00Z"
+        let displayed = schedule(
+            id: "history-rich",
+            pairing: "T7010",
+            departure: actualDeparture,
+            arrival: actualArrival
+        )
+        let richPayload = CrewAccessTripJSON(
+            schemaVersion: 2,
+            source: "fictional-test",
+            sourceVersion: "1",
+            mappingVersion: "test",
+            generatedAt: "2026-06-01T18:00:00Z",
+            pdfCreatedUtc: "2026-06-01T17:00:00Z",
+            tripId: "T7010",
+            tripInformationDate: "2026-06-01",
+            creditTime: nil,
+            tripDays: nil,
+            tafb: nil,
+            dutyTotals: [],
+            hotelDetails: [],
+            crew: [],
+            items: [
+                CrewAccessTripItemJSON(
+                    sequence: 1,
+                    depAirport: "ANC",
+                    arrAirport: "SEA",
+                    deadhead: false,
+                    flight: "5X101",
+                    startUtc: actualDeparture,
+                    endUtc: actualArrival,
+                    startLocalDisplay: actualDeparture,
+                    endLocalDisplay: actualArrival,
+                    originTz: "America/Anchorage",
+                    destinationTz: "America/Los_Angeles",
+                    timeDerivation: "from_utc",
+                    aircraft: "747",
+                    block: "04:04",
+                    stdUtc: revisedDeparture,
+                    staUtc: revisedArrival,
+                    atdUtc: actualDeparture,
+                    ataUtc: actualArrival,
+                    tailNumber: "N123EX",
+                    stableLegId: deterministicUUID("history-rich").uuidString,
+                    originalStdUtc: originalDeparture,
+                    originalStaUtc: originalArrival,
+                    scheduledDepartureObservedAtUtc: "2026-05-31T20:00:00Z",
+                    scheduledArrivalObservedAtUtc: "2026-05-31T20:00:00Z",
+                    actualDepartureObservedAtUtc: "2026-06-01T17:00:00Z",
+                    actualArrivalObservedAtUtc: "2026-06-01T17:00:00Z"
+                )
+            ]
+        )
+
+        let export = BidPeriodScheduleExportService.makeExport(input: try input(
+            schedules: [displayed],
+            crewAccessPayloads: [richPayload]
+        ))
+
+        let event = try XCTUnwrap(export.trips.first?.events.first)
+        XCTAssertEqual(event.aircraft, "747")
+        XCTAssertEqual(event.aircraftRegistration, "N123EX")
+        XCTAssertEqual(event.departure?.originalScheduled?.instant, originalDeparture)
+        XCTAssertEqual(event.departure?.scheduled?.instant, revisedDeparture)
+        XCTAssertEqual(event.departure?.actual?.instant, actualDeparture)
+        XCTAssertEqual(event.arrival?.originalScheduled?.instant, originalArrival)
+        XCTAssertEqual(event.arrival?.scheduled?.instant, revisedArrival)
+        XCTAssertEqual(event.arrival?.actual?.instant, actualArrival)
+
+        let object = try jsonObject(export)
+        let trips = try XCTUnwrap(object["trips"] as? [[String: Any]])
+        let events = try XCTUnwrap(trips.first?["events"] as? [[String: Any]])
+        let encoded = try XCTUnwrap(events.first)
+        XCTAssertEqual(encoded["aircraftRegistration"] as? String, "N123EX")
+        XCTAssertNotNil(encoded["departure"] as? [String: Any])
+        XCTAssertNotNil(encoded["arrival"] as? [String: Any])
+    }
+
     func test_fallbackPreservesStoredLayoverAndHotelName() throws {
         let first = leg(
             id: "layover-first",
@@ -203,6 +325,114 @@ final class BidPeriodScheduleExportServiceTests: XCTestCase {
         XCTAssertEqual(trip.events.map(\.sequence), [1, 2, 3])
         XCTAssertEqual(trip.events[1].station, "SEA")
         XCTAssertEqual(trip.events[1].hotel?.name, "Example Airport Hotel")
+    }
+
+    func test_fallbackSkipsGroundTransportWithoutDroppingLayover() throws {
+        let first = leg(
+            id: "ground-bridge-first",
+            pairing: "T4115",
+            legNumber: 1,
+            departure: "2026-06-01T12:00:00Z",
+            arrival: "2026-06-01T16:00:00Z",
+            origin: "ANC",
+            destination: "SDF",
+            layoverStation: "SDF",
+            layoverHotelName: "Example Airport Hotel",
+            layoverDuration: "22:00"
+        )
+        let ground = leg(
+            id: "ground-bridge-middle",
+            pairing: "T4115",
+            legNumber: 2,
+            departure: "2026-06-02T10:00:00Z",
+            arrival: "2026-06-02T12:00:00Z",
+            origin: "SDF",
+            destination: "MEM",
+            status: "GND"
+        )
+        let final = leg(
+            id: "ground-bridge-final",
+            pairing: "T4115",
+            legNumber: 3,
+            departure: "2026-06-02T14:00:00Z",
+            arrival: "2026-06-02T18:00:00Z",
+            origin: "MEM",
+            destination: "ANC"
+        )
+        let export = BidPeriodScheduleExportService.makeExport(input: try input(schedules: [
+            schedule(id: "ground-bridge", legs: [final, ground, first])
+        ]))
+
+        let trip = try XCTUnwrap(export.trips.first)
+        XCTAssertEqual(trip.events.map(\.type), [.flight, .layover, .flight])
+        XCTAssertEqual(trip.events.map(\.sequence), [1, 2, 3])
+        XCTAssertFalse(trip.events.contains { $0.flightNumber == "GND" })
+        XCTAssertEqual(trip.events[1].station, "SDF")
+        XCTAssertEqual(trip.events[1].hotel?.name, "Example Airport Hotel")
+        XCTAssertEqual(trip.events[1].previousSegmentID, trip.events[0].id)
+        XCTAssertEqual(trip.events[1].nextSegmentID, trip.events[2].id)
+    }
+
+    func test_groundTransportOnlyRichPayloadIsDeferredWithoutInvalidPayloadDiagnostic() throws {
+        let groundLeg = leg(
+            id: "ground-only",
+            pairing: "T4116",
+            legNumber: 1,
+            departure: "2026-06-01T12:00:00Z",
+            arrival: "2026-06-01T14:00:00Z",
+            origin: "SDF",
+            destination: "MEM",
+            status: "GND"
+        )
+        let groundPayload = CrewAccessTripJSON(
+            schemaVersion: 1,
+            source: "fictional-test",
+            sourceVersion: "1",
+            mappingVersion: "test",
+            generatedAt: "2026-06-01T00:00:00Z",
+            tripId: "T4116",
+            tripInformationDate: "2026-06-01",
+            creditTime: nil,
+            tripDays: "1",
+            tafb: nil,
+            dutyTotals: [],
+            hotelDetails: [],
+            crew: [],
+            items: [
+                CrewAccessTripItemJSON(
+                    sequence: 1,
+                    depAirport: "SDF",
+                    arrAirport: "MEM",
+                    deadhead: false,
+                    flight: "GND",
+                    startUtc: "2026-06-01T12:00:00Z",
+                    endUtc: "2026-06-01T14:00:00Z",
+                    startLocalDisplay: "ignored",
+                    endLocalDisplay: "ignored",
+                    originTz: "America/Kentucky/Louisville",
+                    destinationTz: "America/Chicago",
+                    timeDerivation: "from_utc",
+                    aircraft: "",
+                    block: "",
+                    stdUtc: "2026-06-01T12:00:00Z",
+                    staUtc: "2026-06-01T14:00:00Z",
+                    atdUtc: nil,
+                    ataUtc: nil,
+                    tailNumber: nil
+                )
+            ]
+        )
+        let export = BidPeriodScheduleExportService.makeExport(input: try input(
+            schedules: [schedule(id: "ground-only", legs: [groundLeg])],
+            crewAccessPayloads: [groundPayload]
+        ))
+
+        let trip = try XCTUnwrap(export.trips.first)
+        XCTAssertEqual(trip.source, .crewAccessRich)
+        XCTAssertTrue(trip.events.isEmpty)
+        XCTAssertTrue(trip.diagnostics.unavailableFieldGroups.contains("groundTransport"))
+        XCTAssertTrue(trip.diagnostics.issues.contains { $0.code == "publicEventTypesDeferred" })
+        XCTAssertFalse(trip.diagnostics.issues.contains { $0.code == "richCrewAccessPayloadInvalid" })
     }
 
     func test_exportsAllCalendarCategoriesWithCategoryAndSource() throws {
@@ -269,6 +499,25 @@ final class BidPeriodScheduleExportServiceTests: XCTestCase {
             Set(export.diagnostics.issues.filter { $0.scope == "owner" }.compactMap(\.fieldGroup)),
             Set(["name", "gems", "fleet", "position", "seniorityNumber", "dateOfHire"])
         )
+    }
+
+    func test_ownerNameCollapsesWhitespace() throws {
+        let owner = BidPeriodExportOwnerInput(
+            profileName: "  Avery \n Example  ",
+            profileGEMS: "0000001",
+            profileFleet: "747",
+            profilePosition: "FO",
+            verifiedName: "",
+            verifiedGEMS: "",
+            verifiedEquipment: "747",
+            verifiedSeat: "FO",
+            verifiedDateOfHire: "2020-01-01",
+            seniorityNumber: "99999"
+        )
+
+        let export = BidPeriodScheduleExportService.makeExport(input: try input(owner: owner))
+
+        XCTAssertEqual(export.owner.name, "AVERY EXAMPLE")
     }
 
     func test_orderingIsDeterministicForTripsLegsAndCalendarEvents() throws {
@@ -444,6 +693,7 @@ final class BidPeriodScheduleExportServiceTests: XCTestCase {
         arrival: String,
         origin: String,
         destination: String,
+        status: String = "",
         layoverStation: String? = nil,
         layoverHotelName: String? = nil,
         layoverDuration: String? = nil
@@ -460,7 +710,7 @@ final class BidPeriodScheduleExportServiceTests: XCTestCase {
             arrLocal: arrival,
             depUTC: departure,
             arrUTC: arrival,
-            status: "",
+            status: status,
             block: "04:00",
             layoverStation: layoverStation,
             layoverHotelName: layoverHotelName,

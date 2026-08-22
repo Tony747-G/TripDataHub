@@ -145,6 +145,26 @@ extension TripLeg {
     }
 }
 
+struct BlockConnectionDisplay: Equatable, Sendable {
+    let blockText: String
+    let connectionText: String?
+
+    var lines: [String] {
+        [blockText, connectionText].compactMap { $0 }
+    }
+
+    var blockOnly: BlockConnectionDisplay {
+        BlockConnectionDisplay(blockText: blockText, connectionText: nil)
+    }
+
+    func mappingConnection(_ transform: (String) -> String) -> BlockConnectionDisplay {
+        BlockConnectionDisplay(
+            blockText: blockText,
+            connectionText: connectionText.map(transform)
+        )
+    }
+}
+
 enum LegConnectionTextBuilder {
     private static let preciseUTCFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -185,13 +205,13 @@ enum LegConnectionTextBuilder {
         return (minutes: minutes, airport: airport, sameStation: sameStation)
     }
 
-    static func blockAndConnectionText(
+    static func blockAndConnectionDisplay(
         for leg: TripLeg,
         nextLegByID: [UUID: TripLeg]
-    ) -> String {
+    ) -> BlockConnectionDisplay {
         let blockText = "Block: \(leg.block)"
         guard let info = connectionInfo(after: leg, nextLegByID: nextLegByID) else {
-            return blockText
+            return BlockConnectionDisplay(blockText: blockText, connectionText: nil)
         }
 
         let hh = info.minutes / 60
@@ -206,9 +226,12 @@ enum LegConnectionTextBuilder {
             label = "Layover"
         }
 
-        if info.airport.isEmpty {
-            return "\(blockText) / \(label): \(duration)"
-        }
-        return "\(blockText) / \(label) at \(info.airport): \(duration)"
+        let connectionText = info.airport.isEmpty
+            ? "\(label): \(duration)"
+            : "\(label) at \(info.airport): \(duration)"
+        return BlockConnectionDisplay(
+            blockText: blockText,
+            connectionText: connectionText
+        )
     }
 }

@@ -1,5 +1,27 @@
 import SwiftUI
 
+/// Timeline row colouring contract (INV-012):
+///
+/// - White (`originalScheduled`) — the schedule as first observed, still ahead.
+/// - Amber (`revisedScheduled`)  — the schedule was revised and the leg is still active or future.
+/// - Gray  (`actual`)            — the leg is finished: both actuals observed, or simply past.
+///
+/// Completion outranks revision. A leg that was revised and has since been flown is history, so it
+/// is gray; leaving it amber would mark every once-delayed past flight as "needs attention"
+/// forever. A leg with only an ATD is airborne, not finished, so it keeps its scheduled colour.
+enum TimelineFlightVisualState: Equatable {
+    case originalScheduled
+    case revisedScheduled
+    case actual
+
+    static func resolve(for leg: TripLeg, legacyIsPast: Bool) -> Self {
+        if leg.isCompleted { return .actual }
+        if legacyIsPast { return .actual }
+        if leg.hasRevisedSchedule { return .revisedScheduled }
+        return .originalScheduled
+    }
+}
+
 struct FriendMatchPerson: Identifiable, Hashable {
     let id: String
     let displayName: String
@@ -48,7 +70,7 @@ struct FriendMatchPresentationView: View {
 
 /// Shared flight row used by TimelineTabView and ScheduleTimelineRendererView.
 ///
-/// All computed values (timeRangeText, dayDiff, blockText) are pre-computed by the caller,
+/// All computed values (timeRangeText, dayDiff, blockConnectionDisplay) are pre-computed by the caller,
 /// keeping UTC/LCL logic and friend-match state entirely in the owning view.
 /// `iconColor` defaults to `.primary`; pass `friendMatchAmber` for friend highlights.
 /// `onFriendMatchTap` is nil in ScheduleTimelineRendererView (Friends Timeline, no tap needed).
@@ -58,12 +80,28 @@ struct TimelineFlightRow: View {
     let fontScale: CGFloat
     let timeRangeText: String
     let dayDiff: Int
-    let blockText: String
+    let blockConnectionDisplay: BlockConnectionDisplay
     var iconColor: Color = .primary
+    /// Transient UI state (selection, highlight) that must take precedence over the
+    /// schedule-state tint. Rendered in the same layer as `rowBackground` so it cannot be
+    /// painted over by it.
+    var backgroundOverride: Color? = nil
     var onFriendMatchTap: (() -> Void)? = nil
+    var onFlightTap: (() -> Void)? = nil
+
+    /// Minimum tap target for the friend-match icon. The icon itself is 28pt wide, which is below
+    /// the 44pt Human Interface Guidelines minimum, so the gesture gets its own padded hit area.
+    private static let minimumTapTarget: CGFloat = 44
 
     var body: some View {
-        if let tap = onFriendMatchTap {
+        if let tap = onFlightTap {
+            if let friendTap = onFriendMatchTap {
+                flightDetailTappable(tap)
+                    .accessibilityAction(named: "Show friends on this flight", friendTap)
+            } else {
+                flightDetailTappable(tap)
+            }
+        } else if let tap = onFriendMatchTap {
             rowContent
                 .contentShape(Rectangle())
                 .onTapGesture(perform: tap)
@@ -74,19 +112,21 @@ struct TimelineFlightRow: View {
         }
     }
 
+    private func flightDetailTappable(_ tap: @escaping () -> Void) -> some View {
+        rowContent
+            .contentShape(Rectangle())
+            .onTapGesture(perform: tap)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint("Shows flight log details")
+    }
+
     private var rowContent: some View {
         HStack(alignment: .center, spacing: 12) {
             let resolvedIconColor: Color = isPast ? .gray : iconColor
             let iconStatus = leg.flight.caseInsensitiveCompare("GND") == .orderedSame
                 ? "GND"
                 : leg.status
-            MaterialIconView(
-                codePoint: TimelineLegIconSupport.codePoint(for: iconStatus),
-                size: 20 * fontScale,
-                color: resolvedIconColor,
-                fallbackSystemName: TimelineLegIconSupport.fallbackSystemName(for: iconStatus)
-            )
-            .frame(width: 28 * fontScale, alignment: .center)
+            flightIcon(status: iconStatus, color: resolvedIconColor)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
@@ -107,14 +147,215 @@ struct TimelineFlightRow: View {
                         .appScaledFont(.footnote, scale: fontScale)
                         .foregroundStyle(isPast ? .gray : .primary)
                     Spacer()
-                    Text(blockText)
-                        .appScaledFont(.caption, scale: fontScale)
-                        .foregroundStyle(isPast ? .gray : .primary)
+                    BlockConnectionDisplayView(
+                        display: blockConnectionDisplay,
+                        fontScale: fontScale,
+                        foregroundColor: isPast ? .gray : .primary
+                    )
                 }
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 7)
+        .background(rowBackground)
+    }
+
+    @ViewBuilder
+    private func flightIcon(status: String, color: Color) -> some View {
+        let icon = MaterialIconView(
+            codePoint: TimelineLegIconSupport.codePoint(for: status),
+            size: 20 * fontScale,
+            color: color,
+            fallbackSystemName: TimelineLegIconSupport.fallbackSystemName(for: status)
+        )
+        .frame(width: 28 * fontScale, alignment: .center)
+
+        if let tap = onFriendMatchTap, onFlightTap != nil {
+            // The row tap opens the Flight Log, so the friend-match affordance needs its own
+            // target. `frame(minWidth:minHeight:)` before `contentShape` expands the hit area to
+            // 44pt without changing the 28pt visual column width.
+            icon
+                .frame(
+                    minWidth: Self.minimumTapTarget,
+                    minHeight: Self.minimumTapTarget
+                )
+                .contentShape(Rectangle())
+                .highPriorityGesture(TapGesture().onEnded(tap))
+                .accessibilityLabel("Show friends on this flight")
+                .accessibilityAddTraits(.isButton)
+        } else {
+            icon
+        }
+    }
+
+    private var rowBackground: Color {
+        if let backgroundOverride { return backgroundOverride }
+        switch TimelineFlightVisualState.resolve(for: leg, legacyIsPast: isPast) {
+        case .originalScheduled:
+            return Color.clear
+        case .revisedScheduled:
+            return Color.orange.opacity(0.18)
+        case .actual:
+            return Color.gray.opacity(0.10)
+        }
+    }
+}
+
+struct FlightLegDetailSheet: View {
+    let leg: TripLeg
+    let onSaveRegistration: (String?) async throws -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var registration = ""
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
+                    detailRow("DATE:", utcDate(leg.stdUTC ?? leg.depUTC))
+                    detailRow("FLT:", leg.flight.isEmpty ? "—" : leg.flight)
+                    detailRow("TYPE:", display(leg.aircraftType))
+                    GridRow {
+                        Text("A/C:")
+                        TextField("—", text: $registration)
+                            .textInputAutocapitalization(.characters)
+                            .autocorrectionDisabled()
+                            .accessibilityLabel("Aircraft registration")
+                    }
+                    detailRow("FR:", display(leg.depAirport))
+                    detailRow("TO:", display(leg.arrAirport))
+                    GridRow { Color.clear.frame(height: 6); Color.clear.frame(height: 6) }
+                    detailRow("STD:", scheduleTime(original: leg.originalSTDUTC, current: leg.stdUTC))
+                    detailRow("STA:", scheduleTime(original: leg.originalSTAUTC, current: leg.staUTC))
+                    detailRow("ATD:", utcTime(leg.atdUTC))
+                    detailRow("ATA:", utcTime(leg.ataUTC))
+                    GridRow { Color.clear.frame(height: 6); Color.clear.frame(height: 6) }
+                    detailRow("TOTAL TIME:", display(leg.block))
+                    GridRow { Color.clear.frame(height: 6); Color.clear.frame(height: 6) }
+                    // Departure-first, not max(). These are two independent observations, and
+                    // taking the later one labelled an arrival-only observation as though it were
+                    // when the departure schedule was published.
+                    detailRow("Schedule Created:", observedUTC(
+                        leg.scheduledDepartureObservedAtUTC
+                            ?? leg.scheduledArrivalObservedAtUTC
+                    ))
+                    detailRow("Actual Observed:", observedUTC(
+                        leg.actualDepartureObservedAtUTC
+                            ?? leg.actualArrivalObservedAtUTC
+                    ))
+                }
+                .font(.system(.body, design: .monospaced))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .padding(.horizontal)
+                }
+            }
+            .navigationTitle("Flight Log")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        Task { await saveRegistration() }
+                    }
+                    .disabled(isSaving)
+                }
+            }
+        }
+        .onAppear { registration = leg.aircraftRegistration ?? "" }
+        .presentationDetents([.medium, .large])
+    }
+
+    @ViewBuilder
+    private func detailRow(_ label: String, _ value: String) -> some View {
+        GridRow {
+            Text(label)
+            Text(value).textSelection(.enabled)
+        }
+    }
+
+    private func saveRegistration() async {
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            try await onSaveRegistration(registration)
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func display(_ value: String?) -> String {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "—" : trimmed
+    }
+
+    private func scheduleTime(original: String?, current: String?) -> String {
+        let originalText = utcTime(original)
+        let currentText = utcTime(current)
+        guard originalText != "—", currentText != "—", originalText != currentText else {
+            return currentText != "—" ? currentText : originalText
+        }
+        return "\(originalText) → \(currentText)"
+    }
+
+    private func utcDate(_ value: String?) -> String {
+        guard let date = LegConnectionTextBuilder.parseUTC(value) else { return "—" }
+        return Self.utcDateFormatter.string(from: date)
+    }
+
+    private func utcTime(_ value: String?) -> String {
+        guard let date = LegConnectionTextBuilder.parseUTC(value) else { return "—" }
+        return Self.utcTimeFormatter.string(from: date)
+    }
+
+    private func observedUTC(_ value: String?) -> String {
+        guard let date = LegConnectionTextBuilder.parseUTC(value) else { return "—" }
+        return Self.utcObservedFormatter.string(from: date)
+    }
+
+    private static let utcDateFormatter = formatter("yyyy-MM-dd")
+    private static let utcTimeFormatter = formatter("HH:mm'Z'")
+    private static let utcObservedFormatter = formatter("yyyy-MM-dd HH:mm'Z'")
+
+    private static func formatter(_ format: String) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = format
+        return formatter
+    }
+}
+
+struct BlockConnectionDisplayView: View {
+    let display: BlockConnectionDisplay
+    let fontScale: CGFloat
+    let foregroundColor: Color
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 1) {
+            Text(display.blockText)
+                .lineLimit(1)
+            if let connectionText = display.connectionText {
+                Text(connectionText)
+                    .lineLimit(1)
+            }
+        }
+        .appScaledFont(.caption, scale: fontScale)
+        .foregroundStyle(foregroundColor)
+        .multilineTextAlignment(.trailing)
+        .minimumScaleFactor(0.8)
+        .allowsTightening(true)
     }
 }
 

@@ -21,7 +21,7 @@ final class TripJSONExportServiceTests: XCTestCase {
         XCTAssertEqual(Set(object.keys), Set([
             "schemaVersion", "exportedAt", "generator", "owner", "trip", "events"
         ]))
-        XCTAssertEqual(object["schemaVersion"] as? String, "1.2")
+        XCTAssertEqual(object["schemaVersion"] as? String, "1.3")
         XCTAssertNotNil(object["generator"] as? [String: Any])
         XCTAssertNotNil(object["owner"] as? [String: Any])
         XCTAssertNotNil(object["trip"] as? [String: Any])
@@ -151,9 +151,25 @@ final class TripJSONExportServiceTests: XCTestCase {
         XCTAssertThrowsError(try TripJSONExportService.normalizedGEMS("  - /  ")) { error in
             XCTAssertEqual(error as? TripJSONExportError, .invalidOwnerGEMS)
         }
+        XCTAssertThrowsError(try TripJSONExportService.normalizedGEMS("GEMS1234567")) { error in
+            XCTAssertEqual(error as? TripJSONExportError, .invalidOwnerGEMS)
+        }
         XCTAssertThrowsError(try publicExport(
             ownerSource: ownerSource(profileGEMS: "", verifiedGEMS: ""),
             payload: payload(crew: [])
+        )) { error in
+            XCTAssertEqual(error as? TripJSONExportError, .invalidOwnerGEMS)
+        }
+        XCTAssertThrowsError(try publicExport(
+            ownerSource: ownerSource(profileGEMS: "", verifiedGEMS: ""),
+            payload: payload(crew: [
+                CrewAccessCrewJSON(
+                    position: "CA",
+                    seniority: "1",
+                    crewID: "1234567",
+                    name: "OTHER CREW MEMBER"
+                )
+            ])
         )) { error in
             XCTAssertEqual(error as? TripJSONExportError, .invalidOwnerGEMS)
         }
@@ -319,6 +335,65 @@ final class TripJSONExportServiceTests: XCTestCase {
         XCTAssertEqual(event.end.utcOffset, "-04:00")
     }
 
+    func test_operationalTimesUseEffectiveOffsetAcrossDSTFallback() throws {
+        let beforeFallback = try TripJSONExportService.exportTimestamp(
+            "2026-11-01T09:30:00Z",
+            timeZoneID: "America/Anchorage"
+        )
+        let afterFallback = try TripJSONExportService.exportTimestamp(
+            "2026-11-01T10:30:00Z",
+            timeZoneID: "America/Anchorage"
+        )
+
+        XCTAssertEqual(beforeFallback.local, "2026-11-01T01:30:00")
+        XCTAssertEqual(beforeFallback.utcOffset, "-08:00")
+        XCTAssertEqual(afterFallback.local, "2026-11-01T01:30:00")
+        XCTAssertEqual(afterFallback.utcOffset, "-09:00")
+    }
+
+    func test_groundTransportRowsAreDeferredInsteadOfMislabeledAsFlights() throws {
+        let withGroundTransport = payload(items: [
+            item(
+                sequence: 1,
+                flight: "5X101",
+                start: "2026-07-18T16:00:00Z",
+                end: "2026-07-18T21:00:00Z"
+            ),
+            item(
+                sequence: 2,
+                flight: "GND",
+                start: "2026-07-18T22:00:00Z",
+                end: "2026-07-18T23:00:00Z",
+                depAirport: "SDF",
+                arrAirport: "MEM"
+            ),
+            item(
+                sequence: 3,
+                flight: "5X102",
+                start: "2026-07-19T12:00:00Z",
+                end: "2026-07-19T16:00:00Z",
+                depAirport: "MEM",
+                arrAirport: "ANC"
+            )
+        ])
+
+        let export = try publicExport(
+            schedule: schedule(for: withGroundTransport),
+            payload: withGroundTransport
+        )
+
+        XCTAssertEqual(export.events.map(\.type), [.flight, .layover, .flight])
+        XCTAssertEqual(export.events.map(\.sequence), [1, 2, 3])
+        XCTAssertFalse(export.events.contains { $0.flightNumber == "GND" })
+        XCTAssertFalse(export.events.contains { $0.type == .groundTransport })
+        let layover = try XCTUnwrap(export.events.first { $0.type == .layover })
+        XCTAssertEqual(layover.station, "SDF")
+        XCTAssertEqual(layover.hotel?.name, "Example Hotel")
+        XCTAssertNotNil(layover.scheduledRest)
+        XCTAssertEqual(layover.previousSegmentID, export.events[0].id)
+        XCTAssertEqual(layover.nextSegmentID, export.events[2].id)
+    }
+
     func test_eventsSortByInstantThenSequenceThenID() throws {
         let unsorted = payload(items: [
             item(sequence: 9, deadhead: true, flight: "5X999", start: "2026-07-18T22:00:00Z", end: "2026-07-19T01:00:00Z"),
@@ -380,7 +455,7 @@ final class TripJSONExportServiceTests: XCTestCase {
 
         XCTAssertEqual(decoded, original)
         XCTAssertTrue(text.contains("\n"))
-        XCTAssertTrue(text.contains(#""schemaVersion" : "1.2""#))
+        XCTAssertTrue(text.contains(#""schemaVersion" : "1.3""#))
     }
 
     func test_filenameIsDeterministicAndFilesystemSafe() throws {

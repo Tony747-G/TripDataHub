@@ -14,12 +14,36 @@ This is the routing layer for AI sessions working on TripDataHub. It tells you w
 - `docs/ADR/ADR-003-crewaccess-file-cloudkit-sync.md`
 - Before reporting a CloudKit user issue as fixed, verify whether the running build is using Development or Production and check the relevant records in **both** environments. Development/Production drift is a known recurring source of Friend Sharing and schedule-sync bugs.
 
+## If Touching CrewAccess PDF Import or Share Handoff
+
+- `docs/INVARIANTS.md` — especially the import-file source-of-truth and cross-device rules
+- `docs/ADR/ADR-003-crewaccess-file-cloudkit-sync.md`
+- `docs/RCA_SEQUENTIAL_IMPORT_FAILURE.md` — sequential in-app Browser import popup leak RCA
+- `docs/RCA_V2_IMPORT_PREVIEW_STUCK.md` — bidirectional Preview dismissal and CrewAccess report-window teardown RCA
+- `docs/SWE_INSTRUCTION_POPUP_LIFECYCLE.md` — coordinator-owned popup teardown scope and T-26 through T-28
+- `TripDataHub/Services/AppGroupImportHandoff.swift`
+- `TripDataHub/Services/CrewAccessPDFImportService.swift`
+- `TripDataHubTests/AppGroupImportHandoffTests.swift`
+- `TripDataHubTests/CrewAccessParserRegressionTests.swift`
+- Keep the extension limited to PDF acceptance and App Group handoff. Text extraction, parsing, normalization, and persistence belong in the main app.
+
 ## If Touching Time / Timeline / Calendar / iPad Calendar
 
 - `docs/INVARIANTS.md`
 - `docs/BID_PERIODS.md`
 - `docs/MANUAL_EVENTS_LAYER_ARCHITECTURE.md`
 - `docs/ADR/ADR-002-utc-source-of-truth.md`
+
+## If Touching Flight State / Countdown / Live Activity / Notification
+
+- `docs/INVARIANTS.md` — especially INV-013 through INV-018
+- `docs/ADR/ADR-004-flight-operational-state-model.md`
+- `docs/BUILD_WEEK_TDH_RELIABILITY_SWE_INSTRUCTION.md` — phased scope, T-1 through T-25, and acceptance requirements
+- `docs/SWE_INSTRUCTION_DEBUG_TRIP_FIXTURE.md` — DEBUG-only simulator harness, T-45 through T-49, and non-persistence requirements
+- `docs/SWE_INSTRUCTION_LIVE_ACTIVITY_LAYOUT_V2.md` — iOS 18 Live Activity layout/status rendering, T-14, T-50S, and production-path ActivityKit/SpringBoard D-7 acceptance
+- `docs/SWE_INSTRUCTION_IOS18_BASELINE_AND_T50.md` — iOS 18 project baseline, minimal generated-project diff, T-50S, and deferred Dynamic Island automation
+- `docs/SWE_INSTRUCTION_PRIORITY2_SIMULATOR_TRIAGE.md` — historical/superseded 2026-08-17 triage procedure; current status is in `DEVICE_VERIFICATION_CHECKLIST.md`
+- `docs/FOLLOW_UPS.md` — register of deliberately deferred items: F-1 duration format divergence; F-2 Widget format; F-3 DI nightly automation; F-4 CI signing/Simulator entitlements; F-5 Print Preview wording; F-6 retired in-flight-progress proposal pending a trustworthy realtime source; F-7 XcodeGen version drift; F-8 Info.plist/build-setting duplication; F-9 Home Screen Widget visual acceptance
 
 ## If Touching Manual Operational / Personal Events
 

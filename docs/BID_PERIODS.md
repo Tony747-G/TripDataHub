@@ -20,7 +20,7 @@ A BP is the contiguous union of its constituent PPs.
 
 ## Domiciles
 
-Domicile determines LDT. Currently supported (`DomicileSupport.swift`):
+Domicile determines LDT. Currently supported (`TripDataHub/Services/DomicileSupport.swift`):
 
 ```text
 ANC  -> America/Anchorage
@@ -50,7 +50,26 @@ The same dates expressed for an `SDF`-based pilot would correspond to different 
 
 ## Reference: Full BP/PP Table
 
-The full enumerated table for 2025-11-30 through 2027-10-30 lives in `CLAUDE.md` (top of file) and in `BidPeriodService.bidPeriodDefinitions`. When updating, both must move together. This file documents the boundary **rules**, not the full table, to avoid the table drifting in three places.
+This is the human-readable copy of the period definitions. `BidPeriodService.bidPeriodDefinitions` is the runtime source of truth. When changing the table, update this section and the service together, then run the Bid Period tests.
+
+Dates below are inclusive calendar-date coverage. Runtime membership still uses the domicile-local 03:00 half-open boundaries described above.
+
+| Bid Period | Coverage | Pay Periods |
+|---|---|---|
+| BP26-01 | 2025-11-30–2026-01-24 | PP25-13: 2025-11-30–2025-12-27; PP26-01: 2025-12-28–2026-01-24 |
+| BP26-02 | 2026-01-25–2026-03-21 | PP26-02: 2026-01-25–2026-02-21; PP26-03: 2026-02-22–2026-03-21 |
+| BP26-03 | 2026-03-22–2026-05-16 | PP26-04: 2026-03-22–2026-04-18; PP26-05: 2026-04-19–2026-05-16 |
+| BP26-04 | 2026-05-17–2026-07-11 | PP26-06: 2026-05-17–2026-06-13; PP26-07: 2026-06-14–2026-07-11 |
+| BP26-05 | 2026-07-12–2026-09-05 | PP26-08: 2026-07-12–2026-08-08; PP26-09: 2026-08-09–2026-09-05 |
+| BP26-06 | 2026-09-06–2026-10-31 | PP26-10: 2026-09-06–2026-10-03; PP26-11: 2026-10-04–2026-10-31 |
+| BP26-07 | 2026-11-01–2026-11-28 | PP26-12: 2026-11-01–2026-11-28 (four-week BP) |
+| BP27-01 | 2026-11-29–2027-01-23 | PP26-13: 2026-11-29–2026-12-26; PP27-01: 2026-12-27–2027-01-23 |
+| BP27-02 | 2027-01-24–2027-03-20 | PP27-02: 2027-01-24–2027-02-20; PP27-03: 2027-02-21–2027-03-20 |
+| BP27-03 | 2027-03-21–2027-05-15 | PP27-04: 2027-03-21–2027-04-17; PP27-05: 2027-04-18–2027-05-15 |
+| BP27-04 | 2027-05-16–2027-07-10 | PP27-06: 2027-05-16–2027-06-12; PP27-07: 2027-06-13–2027-07-10 |
+| BP27-05 | 2027-07-11–2027-09-04 | PP27-08: 2027-07-11–2027-08-07; PP27-09: 2027-08-08–2027-09-04 |
+| BP27-06 | 2027-09-05–2027-10-30 | PP27-10: 2027-09-05–2027-10-02; PP27-11: 2027-10-03–2027-10-30 |
+| BP27-07 | 2027-10-31–2027-12-25 | PP27-12: 2027-10-31–2027-11-27; PP27-13: 2027-11-28–2027-12-25 |
 
 ## Common Mistakes
 
@@ -62,6 +81,6 @@ The full enumerated table for 2025-11-30 through 2027-10-30 lives in `CLAUDE.md`
 ## Related
 
 - `INV-003` (BP/PP boundary), `INV-004` (Domicile controls LDT) in `docs/INVARIANTS.md`.
-- `BidPeriodService.swift` — boundary math.
-- `DomicileSupport.swift` — TZ resolution.
-- `iPadBidPeriodCalendarView.swift` — calendar grid rendering using `domicile` from verified identity.
+- `TripDataHub/Services/BidPeriodService.swift` — boundary math.
+- `TripDataHub/Services/DomicileSupport.swift` — TZ resolution.
+- `TripDataHub/Views/iPad/iPadBidPeriodCalendarView.swift` — calendar grid rendering using `domicile` from verified identity.

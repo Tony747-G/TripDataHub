@@ -10,6 +10,7 @@ struct NotificationRescheduleResult {
 protocol NextReportNotificationServiceProtocol {
     func authorizationStatus() async -> UNAuthorizationStatus
     func requestAuthorization() async throws -> Bool
+    func invalidateNextReportNotifications() async
     func reschedule(
         schedules: [PayPeriodSchedule],
         notify48h: Bool,
@@ -55,6 +56,17 @@ final class NextReportNotificationService: NextReportNotificationServiceProtocol
         try await center.requestAuthorization(options: [.alert, .sound, .badge])
     }
 
+    func invalidateNextReportNotifications() async {
+        let pendingIDs = await pendingRequestIDsWithPrefix()
+        let deliveredIDs = await deliveredRequestIDsWithPrefix()
+        if !pendingIDs.isEmpty {
+            center.removePendingNotificationRequests(withIdentifiers: pendingIDs)
+        }
+        if !deliveredIDs.isEmpty {
+            center.removeDeliveredNotifications(withIdentifiers: deliveredIDs)
+        }
+    }
+
     func reschedule(
         schedules: [PayPeriodSchedule],
         notify48h: Bool,
@@ -62,15 +74,7 @@ final class NextReportNotificationService: NextReportNotificationServiceProtocol
         notify12h: Bool
     ) async -> NotificationRescheduleResult {
         let enabledThresholds = enabledOffsets(notify48h: notify48h, notify24h: notify24h, notify12h: notify12h)
-        let pendingIDs = await pendingRequestIDsWithPrefix()
-        let deliveredIDs = await deliveredRequestIDsWithPrefix()
-
-        if !pendingIDs.isEmpty {
-            center.removePendingNotificationRequests(withIdentifiers: pendingIDs)
-        }
-        if !deliveredIDs.isEmpty {
-            center.removeDeliveredNotifications(withIdentifiers: deliveredIDs)
-        }
+        await invalidateNextReportNotifications()
 
         guard !enabledThresholds.isEmpty else {
             return NotificationRescheduleResult(requested: 0, scheduled: 0, failed: 0)
@@ -104,12 +108,11 @@ final class NextReportNotificationService: NextReportNotificationServiceProtocol
                 content.sound = .default
                 content.threadIdentifier = "nextreport"
 
-                let triggerDate = Calendar(identifier: .gregorian).dateComponents(
-                    in: domicileTimeZone,
-                    from: fireDate
-                )
-
-                let trigger = UNCalendarNotificationTrigger(dateMatching: triggerDate, repeats: false)
+                // This is an absolute instant. Passing `dateComponents(in:)` wholesale to a
+                // calendar trigger also includes fields such as weekday/week-of-year and can make
+                // an otherwise valid one-shot date impossible to match. A relative trigger keeps
+                // the already-computed UTC instant authoritative.
+                let trigger = Self.notificationTrigger(fireDate: fireDate, now: now)
                 let identifier = "\(requestPrefix)\(window.pairing).\(Int(window.reportTime.timeIntervalSince1970)).\(label)"
                 let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
                 do {
@@ -130,6 +133,13 @@ final class NextReportNotificationService: NextReportNotificationServiceProtocol
         if notify24h { values.append(("24h", 24 * 3600)) }
         if notify12h { values.append(("12h", 12 * 3600)) }
         return values
+    }
+
+    static func notificationTrigger(fireDate: Date, now: Date) -> UNTimeIntervalNotificationTrigger {
+        UNTimeIntervalNotificationTrigger(
+            timeInterval: fireDate.timeIntervalSince(now),
+            repeats: false
+        )
     }
 
     private func pendingRequestIDsWithPrefix() async -> [String] {

@@ -1,7 +1,165 @@
 #if DEBUG
 import Foundation
 
+enum FlightCountdownDebugScenario: String, CaseIterable, Identifiable {
+    case preReport
+    case homeWidgetPreReport
+    case preDeparture
+    case departureTimePassed0
+    case departureTimePassed1
+    case departureTimePassed60
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .preReport:
+            "Report in"
+        case .homeWidgetPreReport:
+            "Home Widget: Report in"
+        case .preDeparture:
+            "Dep in"
+        case .departureTimePassed0:
+            "Departure time passed 0 min"
+        case .departureTimePassed1:
+            "Departure time passed 1 min"
+        case .departureTimePassed60:
+            "Departure time passed 60 min"
+        }
+    }
+
+    /// Sets only the fixture's planned departure relative to the injected `nowUTC`.
+    /// The production builder still derives report time, state, presentation, and Activity payload.
+    var departureOffsetFromNow: TimeInterval {
+        switch self {
+        case .preReport:
+            5 * 60 * 60
+        case .homeWidgetPreReport:
+            9 * 60 * 60
+        case .preDeparture:
+            30 * 60
+        case .departureTimePassed0:
+            0
+        case .departureTimePassed1:
+            -60
+        case .departureTimePassed60:
+            -(60 * 60)
+        }
+    }
+}
+
 extension AppViewModel {
+    static let debugFlightCountdownFixtureID = "DEBUG-ANC-ICN-ANC"
+    static let debugFlightCountdownFirstLegID = UUID(uuidString: "D3B60001-0000-4000-8000-000000000001")!
+    static let debugFlightCountdownSecondLegID = UUID(uuidString: "D3B60002-0000-4000-8000-000000000002")!
+
+    static func debugFlightCountdownCanonicalSchedules() -> [PayPeriodSchedule] {
+        debugFlightCountdownSchedules(
+            firstDepartureUTC: debugFixtureDate("2026-08-16T23:40:00Z"),
+            firstArrivalUTC: debugFixtureDate("2026-08-17T08:00:00Z"),
+            secondDepartureUTC: debugFixtureDate("2026-08-18T09:00:00Z"),
+            secondArrivalUTC: debugFixtureDate("2026-08-18T18:00:00Z")
+        )
+    }
+
+    static func debugFlightCountdownInteractiveSchedules(
+        nowUTC: Date,
+        scenario: FlightCountdownDebugScenario = .preReport
+    ) -> [PayPeriodSchedule] {
+        let firstDepartureUTC = nowUTC.addingTimeInterval(scenario.departureOffsetFromNow)
+        let firstArrivalUTC = firstDepartureUTC.addingTimeInterval((8 * 60 + 20) * 60)
+        let secondDepartureUTC = nowUTC.addingTimeInterval((2 * 24 + 9) * 60 * 60)
+        let secondArrivalUTC = secondDepartureUTC.addingTimeInterval(9 * 60 * 60)
+        return debugFlightCountdownSchedules(
+            firstDepartureUTC: firstDepartureUTC,
+            firstArrivalUTC: firstArrivalUTC,
+            secondDepartureUTC: secondDepartureUTC,
+            secondArrivalUTC: secondArrivalUTC
+        )
+    }
+
+    static func debugFlightCountdownSchedules(
+        firstDepartureUTC: Date,
+        firstArrivalUTC: Date,
+        secondDepartureUTC: Date,
+        secondArrivalUTC: Date
+    ) -> [PayPeriodSchedule] {
+        let payPeriod = "DEBUG-PP"
+        let pairing = debugFlightCountdownFixtureID
+        let firstDeparture = debugFixtureUTCString(firstDepartureUTC)
+        let firstArrival = debugFixtureUTCString(firstArrivalUTC)
+        let secondDeparture = debugFixtureUTCString(secondDepartureUTC)
+        let secondArrival = debugFixtureUTCString(secondArrivalUTC)
+        let legs = [
+            TripLeg(
+                id: debugFlightCountdownFirstLegID,
+                payPeriod: payPeriod,
+                pairing: pairing,
+                leg: 1,
+                flight: "D901",
+                depAirport: "ANC",
+                depLocal: debugFixtureLocalString(firstDepartureUTC),
+                arrAirport: "ICN",
+                arrLocal: debugFixtureLocalString(firstArrivalUTC),
+                depUTC: firstDeparture,
+                arrUTC: firstArrival,
+                status: "-",
+                block: "8:20",
+                stdUTC: firstDeparture,
+                staUTC: firstArrival
+            ),
+            TripLeg(
+                id: debugFlightCountdownSecondLegID,
+                payPeriod: payPeriod,
+                pairing: pairing,
+                leg: 2,
+                flight: "D902",
+                depAirport: "ICN",
+                depLocal: debugFixtureLocalString(secondDepartureUTC),
+                arrAirport: "ANC",
+                arrLocal: debugFixtureLocalString(secondArrivalUTC),
+                depUTC: secondDeparture,
+                arrUTC: secondArrival,
+                status: "-",
+                block: "9:00",
+                stdUTC: secondDeparture,
+                staUTC: secondArrival
+            )
+        ]
+        return [
+            PayPeriodSchedule(
+                id: debugFlightCountdownFixtureID,
+                label: debugFlightCountdownFixtureID,
+                tripCount: 1,
+                legCount: legs.count,
+                openTimeCount: 0,
+                updatedAt: firstDepartureUTC,
+                legs: legs,
+                openTimeTrips: []
+            )
+        ]
+    }
+
+    private static func debugFixtureDate(_ value: String) -> Date {
+        ISO8601DateFormatter().date(from: value)!
+    }
+
+    private static func debugFixtureUTCString(_ value: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: value)
+    }
+
+    private static func debugFixtureLocalString(_ value: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter.string(from: value)
+    }
+
     static var previewSchedules: [PayPeriodSchedule] {
         let legs2602 = [
             TripLeg(
@@ -123,6 +281,26 @@ extension AppViewModel {
     }
 
     private static var uiTestTimelineSchedules: [PayPeriodSchedule] {
+        // Keep this fixture ahead of the wall clock: the Next Report strip only renders before a
+        // future report time. A fixed historical schedule silently turned this UI test into a
+        // permanent failure once June 2026 passed.
+        var utcCalendar = Calendar(identifier: .gregorian)
+        utcCalendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        let start = utcCalendar.date(byAdding: .day, value: 2, to: Date()) ?? Date().addingTimeInterval(2 * 86_400)
+        let outboundArrival = start.addingTimeInterval(6 * 3_600)
+        let returnDeparture = start.addingTimeInterval(24 * 3_600)
+        let returnArrival = start.addingTimeInterval(32 * 3_600)
+
+        let utcFormatter = ISO8601DateFormatter()
+        utcFormatter.formatOptions = [.withInternetDateTime]
+        utcFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+
+        let localFormatter = DateFormatter()
+        localFormatter.calendar = utcCalendar
+        localFormatter.locale = Locale(identifier: "en_US_POSIX")
+        localFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+        localFormatter.dateFormat = "yyyy-MM-dd HH:mm"
+
         let firstLegs = [
             TripLeg(
                 payPeriod: "CA26-01-A70001",
@@ -130,11 +308,11 @@ extension AppViewModel {
                 leg: 1,
                 flight: "063",
                 depAirport: "ANC",
-                depLocal: "2026-06-09 09:15",
+                depLocal: localFormatter.string(from: start),
                 arrAirport: "SDF",
-                arrLocal: "2026-06-09 18:30",
-                depUTC: "2026-06-09T18:15:00Z",
-                arrUTC: "2026-06-10T00:30:00Z",
+                arrLocal: localFormatter.string(from: outboundArrival),
+                depUTC: utcFormatter.string(from: start),
+                arrUTC: utcFormatter.string(from: outboundArrival),
                 status: "-",
                 block: "6:15"
             ),
@@ -144,27 +322,13 @@ extension AppViewModel {
                 leg: 2,
                 flight: "108",
                 depAirport: "SDF",
-                depLocal: "2026-06-10 08:20",
-                arrAirport: "NRT",
-                arrLocal: "2026-06-11 12:05",
-                depUTC: "2026-06-10T13:20:00Z",
-                arrUTC: "2026-06-11T03:05:00Z",
-                status: "-",
-                block: "13:45"
-            ),
-            TripLeg(
-                payPeriod: "CA26-01-A70001",
-                pairing: "A70001",
-                leg: 3,
-                flight: "109",
-                depAirport: "NRT",
-                depLocal: "2026-06-12 16:40",
+                depLocal: localFormatter.string(from: returnDeparture),
                 arrAirport: "ANC",
-                arrLocal: "2026-06-12 08:25",
-                depUTC: "2026-06-12T07:40:00Z",
-                arrUTC: "2026-06-12T17:25:00Z",
+                arrLocal: localFormatter.string(from: returnArrival),
+                depUTC: utcFormatter.string(from: returnDeparture),
+                arrUTC: utcFormatter.string(from: returnArrival),
                 status: "-",
-                block: "8:45"
+                block: "8:00"
             )
         ]
 

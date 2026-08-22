@@ -11,14 +11,14 @@ struct SettingsTabView: View {
     @AppStorage("bid_transition_timeline_enabled") private var bidTransitionTimelineEnabled = true
     @AppStorage(OperationalSettings.crewBaseKey) private var crewBaseRawValue = OperationalSettings.defaultCrewBase.rawValue
     @AppStorage("notification_48h_enabled") private var notify48h = false
-    @AppStorage("notification_24h_enabled") private var notify24h = false
-    @AppStorage("notification_12h_enabled") private var notify12h = false
+    @AppStorage("notification_24h_enabled") private var notify24h = true
     @AppStorage(ProfileStorageKeys.faaMedicalExpiryDate) private var faaMedicalExpiryDate = ""
     @AppStorage(ProfileStorageKeys.passportExpiryDate) private var passportExpiryDate = ""
     @AppStorage(ProfileStorageKeys.chinaVisaExpiryDate) private var chinaVisaExpiryDate = ""
     @State private var showNotificationDeniedAlert = false
-    @State private var showLogTenExportWarning = false
-    @State private var logTenExportOutput: LogTenExportOutput?
+#if DEBUG
+    @State private var debugFlightCountdownScenario: FlightCountdownDebugScenario = .preReport
+#endif
 
     private var appearanceModeBinding: Binding<AppearanceMode> {
         Binding(
@@ -35,35 +35,8 @@ struct SettingsTabView: View {
     }
 
     @ViewBuilder
-    private var logTenExportSection: some View {
-        Section {
-            Button("Export LogTen Pro CSV") {
-                showLogTenExportWarning = true
-            }
-            if let message = viewModel.logTenExportMessage {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-        } header: {
-            Text("LogTen Pro Export (Beta)")
-        } footer: {
-            Text("Exports CrewAccess flights as UTC CSV columns: DATE, Flight Number, FROM, TO, STD, STA, ATD, ATA.")
-                .font(.footnote)
-        }
-    }
-
-    @ViewBuilder
     private var settingsListContent: some View {
         List {
-            SettingsSupportSection()
-
-            SettingsProfileSection()
-
-            if AppEnvironment.isTripBoardFetchVisible {
-                SettingsTripBoardFetchSection(autoFetchOnOpen: $autoFetchOnOpen)
-            }
-
             SettingsDisplaySection(
                 appearanceMode: appearanceModeBinding,
                 fontSizeOption: fontSizeOptionBinding,
@@ -79,21 +52,58 @@ struct SettingsTabView: View {
 
             SettingsNotificationSection(
                 notify48h: $notify48h,
-                notify24h: $notify24h,
-                notify12h: $notify12h
+                notify24h: $notify24h
             )
 
             Section {
                 NavigationLink("CrewAccess Import Help") {
                     CrewAccessImportHelpView()
                 }
+            } header: {
+                sectionHeader("CrewAccess")
             }
 
-            logTenExportSection
-
-            if viewModel.canAccessAdminTools {
-                SettingsAdminSection()
+            if AppEnvironment.isTripBoardFetchVisible {
+                SettingsTripBoardFetchSection(autoFetchOnOpen: $autoFetchOnOpen)
             }
+
+#if DEBUG
+            Section {
+                Picker("Countdown State", selection: $debugFlightCountdownScenario) {
+                    ForEach(FlightCountdownDebugScenario.allCases) { scenario in
+                        Text(scenario.title).tag(scenario)
+                    }
+                }
+                .disabled(viewModel.isDebugFlightCountdownFixtureActive)
+
+                Button {
+                    Task {
+                        if viewModel.isDebugFlightCountdownFixtureActive {
+                            await viewModel.stopDebugFlightCountdownFixture()
+                        } else {
+                            await viewModel.startDebugFlightCountdownFixture(
+                                scenario: debugFlightCountdownScenario
+                            )
+                        }
+                    }
+                } label: {
+                    Label(
+                        viewModel.isDebugFlightCountdownFixtureActive
+                            ? "Stop Flight Countdown Fixture"
+                            : "Start Flight Countdown Fixture",
+                        systemImage: viewModel.isDebugFlightCountdownFixtureActive
+                            ? "stop.circle"
+                            : "airplane.circle"
+                    )
+                }
+            } header: {
+                sectionHeader("DEBUG Validation")
+            } footer: {
+                Text("In-memory only. Does not modify or publish schedule data.")
+            }
+#endif
+
+            SettingsProfileSection()
         }
         .scrollDismissesKeyboard(.interactively)
     }
@@ -115,6 +125,10 @@ struct SettingsTabView: View {
                 .padding(.vertical, 8)
                 .background(.background)
             }
+            // The legacy 12h migration used to live here. It now runs in AppViewModel startup
+            // (`migrateLegacyNotificationPreferencesIfNeeded`), because a migration that only
+            // happens when the user opens Settings is not a migration. Repeating it here would
+            // only add a redundant reschedule on every appearance.
             .onAppear {
                 Task {
                     await viewModel.refreshNotificationAuthorizationStatus()
@@ -122,7 +136,6 @@ struct SettingsTabView: View {
                     if viewModel.notificationAuthorizationStatus == .denied {
                         notify48h = false
                         notify24h = false
-                        notify12h = false
                     }
                 }
             }
@@ -144,47 +157,14 @@ struct SettingsTabView: View {
                     }
                 }
             }
-            .onChange(of: notify12h) { _, newValue in
-                Task {
-                    await viewModel.updateNotificationPreferencesFromSettings(triggeredByEnablingToggle: newValue)
-                    if newValue && viewModel.notificationAuthorizationStatus == .denied {
-                        notify12h = false
-                        showNotificationDeniedAlert = true
-                    }
-                }
-            }
             .alert("Notifications Are Disabled", isPresented: $showNotificationDeniedAlert) {
                 Button("Cancel", role: .cancel) {}
                 Button("Open Settings") {
                     openSystemSettings()
                 }
             } message: {
-                Text("Enable notifications in iOS Settings to receive 48h/24h/12h reminders.")
+                Text("Enable notifications in iOS Settings to receive 48h/24h reminders.")
             }
-            .alert("Export LogTen Pro CSV?", isPresented: $showLogTenExportWarning) {
-                Button("Cancel", role: .cancel) {}
-                Button("AGREE") {
-                    logTenExportOutput = viewModel.exportCrewAccessFlightsLogTenCSV()
-                }
-            } message: {
-                Text("Only past flights included in this export will be marked as exported. Past flights kept only for LogTen export will be removed from the pending export queue after the share completes. Future flights remain saved.")
-            }
-#if canImport(UIKit)
-            .sheet(item: $logTenExportOutput, onDismiss: {
-                if let url = logTenExportOutput?.url {
-                    try? FileManager.default.removeItem(at: url)
-                }
-                logTenExportOutput = nil
-            }) { output in
-                ActivityView(activityItems: [output.url]) { completed in
-                    if completed {
-                        viewModel.markLogTenExportCompleted(output)
-                    }
-                    try? FileManager.default.removeItem(at: output.url)
-                    logTenExportOutput = nil
-                }
-            }
-#endif
         }
     }
 

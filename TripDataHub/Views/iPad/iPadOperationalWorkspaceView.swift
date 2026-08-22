@@ -20,6 +20,7 @@ struct IPadOperationalWorkspaceView: View {
     @AppStorage(ProfileStorageKeys.passportExpiryDate) private var passportExpiryDate = ""
     @AppStorage(ProfileStorageKeys.chinaVisaExpiryDate) private var chinaVisaExpiryDate = ""
     @AppStorage(OperationalSettings.crewBaseKey) private var crewDomicileRawValue = OperationalSettings.defaultCrewBase.rawValue
+    @AppStorage("timeline_clock_display") private var timelineClockDisplayRawValue = TimelineClockDisplay.lcl.rawValue
     @Environment(\.scenePhase) private var scenePhase
 
     private var selectedAppearanceMode: AppearanceMode {
@@ -48,6 +49,9 @@ struct IPadOperationalWorkspaceView: View {
     @State private var bidPeriodPDFExportURL: URL?
     @State private var isExportingBidPeriodPDF = false
     @State private var bidPeriodExportErrorMessage: String?
+    @State private var bidPeriodJSONExportOutput: TripJSONExportOutput?
+    @State private var isExportingBidPeriodJSON = false
+    @State private var bidPeriodJSONExportErrorMessage: String?
     @State private var exportIncludesBidLayer = true
     @State private var exportIncludesPersonalLayer = true
     @State private var isShowingImportPreviewFromExternalOpen = false
@@ -111,11 +115,22 @@ struct IPadOperationalWorkspaceView: View {
             if newPhase == .active {
                 viewModel.consumePendingAppGroupImportIfAvailable()
                 Task {
+                    await viewModel.refreshFlightCountdownPresentation(mode: .reconcile)
                     await viewModel.syncCrewAccessDeviceData(reason: "ipad workspace active")
                     if AppEnvironment.isFriendSharingVisible {
                         await viewModel.syncFriendCloudKit(reason: "ipad workspace active")
                     }
                 }
+            }
+        }
+        .onChange(of: viewModel.scheduleDataRevision) { _, _ in
+            Task {
+                await viewModel.refreshFlightCountdownPresentation(mode: .reconcile)
+            }
+        }
+        .onChange(of: timelineClockDisplayRawValue) { _, _ in
+            Task {
+                await viewModel.refreshFlightCountdownPresentation(mode: .reconcile)
             }
         }
         // Calendar trip bars use the same focused popup in portrait and landscape.
@@ -187,6 +202,12 @@ struct IPadOperationalWorkspaceView: View {
                 }
             }
         }
+        .sheet(item: $bidPeriodJSONExportOutput, onDismiss: removeBidPeriodJSONExportFile) { output in
+            IPadActivityView(activityItems: [output.url]) { _ in
+                TripJSONExportService.removeTemporaryFiles(for: output)
+                bidPeriodJSONExportOutput = nil
+            }
+        }
 #endif
         .sheet(isPresented: $showingBidPeriodExportOptions) {
             NavigationStack {
@@ -231,8 +252,19 @@ struct IPadOperationalWorkspaceView: View {
         } message: {
             Text(bidPeriodExportErrorMessage ?? "Unable to generate the PDF.")
         }
+        .alert("JSON Export Failed", isPresented: Binding(
+            get: { bidPeriodJSONExportErrorMessage != nil },
+            set: { if !$0 { bidPeriodJSONExportErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { bidPeriodJSONExportErrorMessage = nil }
+        } message: {
+            Text(bidPeriodJSONExportErrorMessage ?? "Unable to generate the Bid Period JSON.")
+        }
         .onChange(of: viewModel.pendingImport?.id) { _, newValue in
-            isShowingImportPreviewFromExternalOpen = newValue != nil
+            isShowingImportPreviewFromExternalOpen = ImportPreviewPresentationPolicy.externalPreviewIsPresented(
+                pendingImportID: newValue,
+                browserIsPresented: showingBrowser
+            )
         }
     }
 
@@ -275,6 +307,13 @@ struct IPadOperationalWorkspaceView: View {
             exportIncludesBidLayer = bidTransitionTimelineEnabled
             exportIncludesPersonalLayer = true
             showingBidPeriodExportOptions = true
+        })
+        items.append(ExpandableFloatingMenuItem(
+            id: "export-json",
+            icon: "doc.badge.arrow.up",
+            label: isExportingBidPeriodJSON ? "Exporting..." : "Export JSON"
+        ) {
+            Task { await exportCurrentBidPeriodJSON() }
         })
         items.append(ExpandableFloatingMenuItem(id: "settings", icon: "gearshape", label: "Settings") {
             showingSettings = true
@@ -321,6 +360,34 @@ struct IPadOperationalWorkspaceView: View {
         guard let url = bidPeriodPDFExportURL else { return }
         try? FileManager.default.removeItem(at: url)
         bidPeriodPDFExportURL = nil
+    }
+
+    @MainActor
+    private func exportCurrentBidPeriodJSON() async {
+        guard !isExportingBidPeriodJSON else { return }
+        guard let selectedBidPeriodID else {
+            bidPeriodJSONExportErrorMessage = BidPeriodScheduleExportError
+                .assignedBidPeriodUnavailable
+                .localizedDescription
+            return
+        }
+        isExportingBidPeriodJSON = true
+        defer { isExportingBidPeriodJSON = false }
+
+        do {
+            removeBidPeriodJSONExportFile()
+            bidPeriodJSONExportOutput = try await viewModel.prepareBidPeriodScheduleJSONExport(
+                bidPeriodID: selectedBidPeriodID
+            )
+        } catch {
+            bidPeriodJSONExportErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func removeBidPeriodJSONExportFile() {
+        guard let output = bidPeriodJSONExportOutput else { return }
+        TripJSONExportService.removeTemporaryFiles(for: output)
+        bidPeriodJSONExportOutput = nil
     }
 }
 
@@ -395,7 +462,7 @@ private struct FriendsManagementSection: View {
 
     var body: some View {
         Group {
-        Section("View Friend's Schedule") {
+        Section {
             if viewModel.acceptedFriendConnections.isEmpty {
                 Text("No friends yet.")
                     .font(.footnote)
@@ -405,23 +472,30 @@ private struct FriendsManagementSection: View {
                     NavigationLink {
                         FriendTimelineView(friend: friend)
                     } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            if let nickname = friend.nickname,
-                               !nickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                Text("\(nickname)  (\(friend.employeeID))")
-                                    .font(.headline)
-                            } else {
-                                Text(friend.employeeID)
-                                    .font(.headline)
-                            }
-                            if let updatedAt = friend.sharedSchedules.map(\.updatedAt).max() {
-                                Text("Last Updated: \(updatedAt.formatted(date: .abbreviated, time: .shortened))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            } else if let linkedAt = friend.linkedAt {
-                                Text("Linked: \(linkedAt.formatted(date: .abbreviated, time: .shortened))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            // Same evaluator as the iPhone Friends tab — see
+                            // AppViewModel.scheduleSyncHealth(for:).
+                            FriendScheduleStatusDot(
+                                health: viewModel.scheduleSyncHealth(for: friend)
+                            )
+                            VStack(alignment: .leading, spacing: 4) {
+                                if let nickname = friend.nickname,
+                                   !nickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    Text("\(nickname)  (\(friend.employeeID))")
+                                        .font(.headline)
+                                } else {
+                                    Text(friend.employeeID)
+                                        .font(.headline)
+                                }
+                                if let updatedAt = friend.sharedSchedules.map(\.updatedAt).max() {
+                                    Text("Last Updated: \(updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                } else if let linkedAt = friend.linkedAt {
+                                    Text("Linked: \(linkedAt.formatted(date: .abbreviated, time: .shortened))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
@@ -438,6 +512,15 @@ private struct FriendsManagementSection: View {
                         }
                     }
                 }
+            }
+        } header: {
+            HStack {
+                Text("View Friend's Schedule")
+                Spacer()
+                Button("Sync") {
+                    Task { await viewModel.syncFriendCloudKit(reason: "ipad manual") }
+                }
+                .disabled(viewModel.isSyncingFriendCloudKit)
             }
         }
 
@@ -504,12 +587,6 @@ private struct FriendsManagementSection: View {
             }
         }
 
-        Section {
-            Button("Sync Friends") {
-                Task { await viewModel.syncFriendCloudKit(reason: "ipad manual") }
-            }
-            .disabled(viewModel.isSyncingFriendCloudKit)
-        }
         }
         .confirmationDialog(
             friendPendingRemoval.map { "Unfriend \($0.displayName)?" } ?? "Unfriend?",

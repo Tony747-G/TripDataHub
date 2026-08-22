@@ -504,6 +504,38 @@ struct ManualPersonalEvent: Identifiable, Codable, Hashable {
     }
 }
 
+extension ManualOperationalEvent {
+    /// Copy with a different `updatedAt`, used to lift a re-created event above an existing
+    /// tombstone for the same id.
+    func withUpdatedAt(_ date: Date) throws -> ManualOperationalEvent {
+        try ManualOperationalEvent(
+            id: id,
+            code: code,
+            crewBase: crewBase,
+            startUTC: startUTC,
+            endUTC: endUTC,
+            notes: notes,
+            createdAt: createdAt,
+            updatedAt: date
+        )
+    }
+}
+
+extension ManualPersonalEvent {
+    /// Copy with a different `updatedAt`. See `ManualOperationalEvent.withUpdatedAt(_:)`.
+    func withUpdatedAt(_ date: Date) throws -> ManualPersonalEvent {
+        try ManualPersonalEvent(
+            id: id,
+            code: code,
+            startUTC: startUTC,
+            endUTC: endUTC,
+            notes: notes,
+            createdAt: createdAt,
+            updatedAt: date
+        )
+    }
+}
+
 struct ManualEventTombstone: Codable, Hashable, Identifiable {
     let id: UUID
     let deletedAt: Date
