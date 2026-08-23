@@ -48,6 +48,12 @@ final class CrewAccessParserRegressionTests: XCTestCase {
                 XCTAssertNotEqual(item.stdUtc == nil, item.atdUtc == nil, "\(testCase.pdf) departure must be classified once")
                 XCTAssertNotEqual(item.staUtc == nil, item.ataUtc == nil, "\(testCase.pdf) arrival must be classified once")
                 XCTAssertFalse(item.flight.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                XCTAssertEqual(item.tripImportedAtUtc, payload.generatedAt)
+                if item.atdUtc != nil && item.ataUtc != nil {
+                    XCTAssertEqual(item.actualsImportedAtUtc, payload.generatedAt)
+                } else {
+                    XCTAssertNil(item.actualsImportedAtUtc)
+                }
             }
         }
     }
@@ -265,14 +271,20 @@ final class CrewAccessParserRegressionTests: XCTestCase {
     /// classification it should be pinning: inverting the Created comparison, or breaking the
     /// Created regex so every PDF fell back to "Scheduled", would not have failed a single test.
     ///
-    /// - `generatedAt` is `Date()` at parse time.
+    /// - `generatedAt`, `tripImportedAtUtc`, and `actualsImportedAtUtc` use the single `Date()`
+    ///   captured for this parse/import operation. Their equality is asserted above.
     /// - `stableLegId` is a fresh `UUID()` for every parse of a PDF that has no prior history.
     ///
     /// Everything else is a pure function of the PDF bytes and belongs in the golden.
     private func removeNonDeterministicKeys(from object: Any) -> Any {
         if let dict = object as? [String: Any] {
             var out: [String: Any] = [:]
-            let nonDeterministicKeys: Set<String> = ["generatedAt", "stableLegId"]
+            let nonDeterministicKeys: Set<String> = [
+                "generatedAt",
+                "stableLegId",
+                "tripImportedAtUtc",
+                "actualsImportedAtUtc"
+            ]
             for (key, value) in dict where !nonDeterministicKeys.contains(key) {
                 out[key] = removeNonDeterministicKeys(from: value)
             }

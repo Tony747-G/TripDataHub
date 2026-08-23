@@ -253,10 +253,11 @@ struct FlightLegDetailSheet: View {
     @State private var errorMessage: String?
 
     var body: some View {
+        let presentation = FlightLogPresentation(leg: leg)
         NavigationStack {
             ScrollView {
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
-                    detailRow("DATE:", utcDate(leg.stdUTC ?? leg.depUTC))
+                    detailRow("DATE:", presentation.dateUTC)
                     detailRow("FLT:", leg.flight.isEmpty ? "—" : leg.flight)
                     detailRow("TYPE:", display(leg.aircraftType))
                     GridRow {
@@ -283,10 +284,7 @@ struct FlightLegDetailSheet: View {
                         leg.scheduledDepartureObservedAtUTC
                             ?? leg.scheduledArrivalObservedAtUTC
                     ))
-                    detailRow("Actual Observed:", observedUTC(
-                        leg.actualDepartureObservedAtUTC
-                            ?? leg.actualArrivalObservedAtUTC
-                    ))
+                    detailRow(presentation.importLabel, presentation.importedAtUTC)
                 }
                 .font(.system(.body, design: .monospaced))
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -350,11 +348,6 @@ struct FlightLegDetailSheet: View {
         return "\(originalText) → \(currentText)"
     }
 
-    private func utcDate(_ value: String?) -> String {
-        guard let date = LegConnectionTextBuilder.parseUTC(value) else { return "—" }
-        return Self.utcDateFormatter.string(from: date)
-    }
-
     private func utcTime(_ value: String?) -> String {
         guard let date = LegConnectionTextBuilder.parseUTC(value) else { return "—" }
         return Self.utcTimeFormatter.string(from: date)
@@ -365,9 +358,41 @@ struct FlightLegDetailSheet: View {
         return Self.utcObservedFormatter.string(from: date)
     }
 
-    private static let utcDateFormatter = formatter("yyyy-MM-dd")
     private static let utcTimeFormatter = formatter("HH:mm'Z'")
     private static let utcObservedFormatter = formatter("yyyy-MM-dd HH:mm'Z'")
+
+    private static func formatter(_ format: String) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = format
+        return formatter
+    }
+}
+
+struct FlightLogPresentation: Equatable {
+    let dateUTC: String
+    let importLabel: String
+    let importedAtUTC: String
+
+    init(leg: TripLeg) {
+        dateUTC = Self.format(leg.atdUTC ?? leg.plannedDepartureUTC, with: Self.dateFormatter)
+        let hasCompleteActuals = leg.atdUTC != nil && leg.ataUTC != nil
+        importLabel = hasCompleteActuals ? "ATD/ATA Imported:" : "Trip Imported:"
+        importedAtUTC = Self.format(
+            hasCompleteActuals ? leg.actualsImportedAtUTC : leg.tripImportedAtUTC,
+            with: Self.timestampFormatter
+        )
+    }
+
+    private static func format(_ value: String?, with formatter: DateFormatter) -> String {
+        guard let date = LegConnectionTextBuilder.parseUTC(value) else { return "—" }
+        return formatter.string(from: date)
+    }
+
+    private static let dateFormatter = formatter("yyyy-MM-dd")
+    private static let timestampFormatter = formatter("yyyy-MM-dd HH:mm'Z'")
 
     private static func formatter(_ format: String) -> DateFormatter {
         let formatter = DateFormatter()

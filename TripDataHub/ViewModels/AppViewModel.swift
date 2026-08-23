@@ -3133,10 +3133,20 @@ final class AppViewModel: ObservableObject {
         let existingPayloads = Self.loadCrewAccessTripJSONPayloadsFromImportFilesSync(
             directory: crewAccessImportsDirectory
         ).map(\.payload)
-        let json = Self.mergeCrewAccessLegHistory(
-            incoming: parsedJSON,
-            existingPayloads: existingPayloads
-        )
+        let json: CrewAccessTripJSON
+        do {
+            json = try Self.mergeCrewAccessLegHistory(
+                incoming: parsedJSON,
+                existingPayloads: existingPayloads
+            )
+        } catch let error as CrewAccessActualTimeResolutionError {
+            recordActualTimeValidationError(error)
+            logger.error("[ImportConfirm] rejected reason=actual_time_resolution error=\(error.localizedDescription, privacy: .public)")
+            return false
+        } catch {
+            crewAccessImportMessage = "Could not validate actual UTC times: \(error.localizedDescription)"
+            return false
+        }
 
         do {
             // Compute overlap IDs before any writes so we can roll back cleanly.
@@ -3341,6 +3351,39 @@ final class AppViewModel: ObservableObject {
             finishTerminalCrewAccessImportFailure()
             return false
         }
+    }
+
+    private func recordActualTimeValidationError(_ error: CrewAccessActualTimeResolutionError) {
+        guard let pendingImport else {
+            crewAccessImportMessage = error.localizedDescription
+            return
+        }
+        let code: ImportErrorCode
+        switch error {
+        case .ambiguousDeparture, .ambiguousArrival:
+            code = .actualTimeAmbiguous
+        case .invalidTime, .arrivalBeforeDeparture:
+            code = .actualTimeInvalid
+        }
+        let validationError = ImportErrorItem(
+            code: code,
+            message: error.localizedDescription,
+            remediation: "Correct the UTC ATD/ATA values in CrewAccess, export the trip again, and retry."
+        )
+        self.pendingImport = PendingImport(
+            id: pendingImport.id,
+            source: pendingImport.source,
+            sourceFileName: pendingImport.sourceFileName,
+            tripId: pendingImport.tripId,
+            tripDate: pendingImport.tripDate,
+            parsedSchedule: pendingImport.parsedSchedule,
+            jsonPayload: pendingImport.jsonPayload,
+            warnings: pendingImport.warnings,
+            errors: pendingImport.errors + [validationError],
+            createdAt: pendingImport.createdAt,
+            rawExtractStats: pendingImport.rawExtractStats
+        )
+        crewAccessImportMessage = error.localizedDescription
     }
 
     /// Ends a failed import attempt after rollback has restored the prior durable state.
@@ -5985,6 +6028,10 @@ final class AppViewModel: ObservableObject {
                 scheduledArrivalObservedAtUTC: item.scheduledArrivalObservedAtUtc,
                 actualDepartureObservedAtUTC: item.actualDepartureObservedAtUtc,
                 actualArrivalObservedAtUTC: item.actualArrivalObservedAtUtc,
+                tripImportedAtUTC: item.tripImportedAtUtc ?? payload.generatedAt,
+                actualsImportedAtUTC: item.atdUtc != nil && item.ataUtc != nil
+                    ? (item.actualsImportedAtUtc ?? payload.generatedAt)
+                    : nil,
                 aircraftType: item.aircraft,
                 aircraftRegistration: item.tailNumber
             )
@@ -6021,7 +6068,7 @@ final class AppViewModel: ObservableObject {
     nonisolated static func mergeCrewAccessLegHistory(
         incoming: CrewAccessTripJSON,
         existingPayloads: [CrewAccessTripJSON]
-    ) -> CrewAccessTripJSON {
+    ) throws -> CrewAccessTripJSON {
         let incomingTripKey = crewAccessTripKey(
             tripID: incoming.tripId,
             tripInformationDate: incoming.tripInformationDate,
@@ -6057,7 +6104,7 @@ final class AppViewModel: ObservableObject {
         guard let existing else { return incoming }
 
         var unmatchedExisting = Set(existing.items.indices)
-        let mergedItems = incoming.items.map { item in
+        let mergedItems = try incoming.items.map { item in
             let matchedIndex = matchingExistingCrewAccessLegIndex(
                 for: item,
                 existingItems: existing.items,
@@ -6065,7 +6112,7 @@ final class AppViewModel: ObservableObject {
             )
             guard let matchedIndex else { return item }
             unmatchedExisting.remove(matchedIndex)
-            return mergeCrewAccessLegHistory(incoming: item, existing: existing.items[matchedIndex], existingSchemaVersion: existing.schemaVersion)
+            return try mergeCrewAccessLegHistory(incoming: item, existing: existing.items[matchedIndex], existingSchemaVersion: existing.schemaVersion)
         }
 
         return CrewAccessTripJSON(
@@ -6167,13 +6214,48 @@ final class AppViewModel: ObservableObject {
         incoming: CrewAccessTripItemJSON,
         existing: CrewAccessTripItemJSON,
         existingSchemaVersion: Int
-    ) -> CrewAccessTripItemJSON {
+    ) throws -> CrewAccessTripItemJSON {
         let legacyScheduledDeparture = existingSchemaVersion < 2 ? (existing.stdUtc ?? existing.startUtc) : existing.stdUtc
         let legacyScheduledArrival = existingSchemaVersion < 2 ? (existing.staUtc ?? existing.endUtc) : existing.staUtc
         let scheduledDeparture = incoming.stdUtc ?? legacyScheduledDeparture
         let scheduledArrival = incoming.staUtc ?? legacyScheduledArrival
-        let actualDeparture = incoming.atdUtc ?? existing.atdUtc
-        let actualArrival = incoming.ataUtc ?? existing.ataUtc
+        var actualDeparture = incoming.atdUtc ?? existing.atdUtc
+        var actualArrival = incoming.ataUtc ?? existing.ataUtc
+
+        if let incomingDepartureText = incoming.atdUtc,
+           let parsedIncomingDeparture = LegConnectionTextBuilder.parseUTC(incomingDepartureText),
+           let scheduledDepartureText = scheduledDeparture,
+           let parsedScheduledDeparture = LegConnectionTextBuilder.parseUTC(scheduledDepartureText) {
+            let enteredHHMM = utcHHMM(parsedIncomingDeparture)
+            let resolvedDeparture = try CrewAccessActualTimeResolver.departure(
+                enteredHHMM: enteredHHMM,
+                scheduledDepartureUTC: parsedScheduledDeparture
+            )
+            actualDeparture = utcISO8601(resolvedDeparture)
+        }
+
+        if let incomingArrivalText = incoming.ataUtc,
+           let parsedIncomingArrival = LegConnectionTextBuilder.parseUTC(incomingArrivalText),
+           let scheduledArrivalText = scheduledArrival,
+           let parsedScheduledArrival = LegConnectionTextBuilder.parseUTC(scheduledArrivalText) {
+            let enteredArrivalHHMM = utcHHMM(parsedIncomingArrival)
+            let resolvedArrival = try CrewAccessActualTimeResolver.arrival(
+                enteredHHMM: enteredArrivalHHMM,
+                scheduledArrivalUTC: parsedScheduledArrival
+            )
+            actualArrival = utcISO8601(resolvedArrival)
+        }
+
+        if let actualDeparture,
+           let actualArrival,
+           let departure = LegConnectionTextBuilder.parseUTC(actualDeparture),
+           let arrival = LegConnectionTextBuilder.parseUTC(actualArrival),
+           arrival < departure {
+            throw CrewAccessActualTimeResolutionError.arrivalBeforeDeparture
+        }
+
+        let incomingIsScheduleOnly = incoming.atdUtc == nil && incoming.ataUtc == nil
+        let incomingHasCompleteActuals = incoming.atdUtc != nil && incoming.ataUtc != nil
 
         return CrewAccessTripItemJSON(
             sequence: incoming.sequence,
@@ -6209,8 +6291,30 @@ final class AppViewModel: ObservableObject {
                 : existing.actualDepartureObservedAtUtc,
             actualArrivalObservedAtUtc: incoming.ataUtc != nil
                 ? incoming.actualArrivalObservedAtUtc
-                : existing.actualArrivalObservedAtUtc
+                : existing.actualArrivalObservedAtUtc,
+            tripImportedAtUtc: incomingIsScheduleOnly
+                ? incoming.tripImportedAtUtc
+                : (existing.tripImportedAtUtc ?? incoming.tripImportedAtUtc),
+            actualsImportedAtUtc: incomingHasCompleteActuals
+                ? incoming.actualsImportedAtUtc
+                : existing.actualsImportedAtUtc
         )
+    }
+
+    private nonisolated static func utcHHMM(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: date)
+    }
+
+    private nonisolated static func utcISO8601(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: date)
     }
 
     private nonisolated static func normalizedCrewAccessLegToken(_ value: String) -> String {
@@ -6301,7 +6405,9 @@ final class AppViewModel: ObservableObject {
             scheduledDepartureObservedAtUtc: item.scheduledDepartureObservedAtUtc,
             scheduledArrivalObservedAtUtc: item.scheduledArrivalObservedAtUtc,
             actualDepartureObservedAtUtc: item.actualDepartureObservedAtUtc,
-            actualArrivalObservedAtUtc: item.actualArrivalObservedAtUtc
+            actualArrivalObservedAtUtc: item.actualArrivalObservedAtUtc,
+            tripImportedAtUtc: item.tripImportedAtUtc,
+            actualsImportedAtUtc: item.actualsImportedAtUtc
         )
     }
 

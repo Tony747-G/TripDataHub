@@ -64,6 +64,10 @@ struct TripLeg: Identifiable, Codable, Hashable, Sendable {
     var scheduledArrivalObservedAtUTC: String?
     var actualDepartureObservedAtUTC: String?
     var actualArrivalObservedAtUTC: String?
+    /// TripDataHub import-operation timestamps. These are distinct from CrewAccess PDF
+    /// observation timestamps above.
+    var tripImportedAtUTC: String?
+    var actualsImportedAtUTC: String?
     var aircraftType: String?
     var aircraftRegistration: String?
 
@@ -94,6 +98,8 @@ struct TripLeg: Identifiable, Codable, Hashable, Sendable {
         scheduledArrivalObservedAtUTC: String? = nil,
         actualDepartureObservedAtUTC: String? = nil,
         actualArrivalObservedAtUTC: String? = nil,
+        tripImportedAtUTC: String? = nil,
+        actualsImportedAtUTC: String? = nil,
         aircraftType: String? = nil,
         aircraftRegistration: String? = nil
     ) {
@@ -127,6 +133,8 @@ struct TripLeg: Identifiable, Codable, Hashable, Sendable {
         self.scheduledArrivalObservedAtUTC = scheduledArrivalObservedAtUTC
         self.actualDepartureObservedAtUTC = actualDepartureObservedAtUTC
         self.actualArrivalObservedAtUTC = actualArrivalObservedAtUTC
+        self.tripImportedAtUTC = tripImportedAtUTC
+        self.actualsImportedAtUTC = actualsImportedAtUTC
         self.aircraftType = aircraftType
         self.aircraftRegistration = aircraftRegistration
     }

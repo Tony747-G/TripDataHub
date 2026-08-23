@@ -40,7 +40,7 @@ final class CrewAccessLegHistoryTests: XCTestCase {
             departure: "2026-08-06T05:34:00Z",
             arrival: "2026-08-06T10:30:00Z"
         )
-        let merged = AppViewModel.mergeCrewAccessLegHistory(incoming: revised, existingPayloads: [original])
+        let merged = try AppViewModel.mergeCrewAccessLegHistory(incoming: revised, existingPayloads: [original])
         let leg = try XCTUnwrap(AppViewModel.buildCrewAccessSchedule(from: merged, modifiedAt: .now)?.legs.first)
 
         XCTAssertEqual(leg.originalSTDUTC, "2026-08-05T23:34:00Z")
@@ -62,7 +62,7 @@ final class CrewAccessLegHistoryTests: XCTestCase {
             departure: "2026-08-05T18:00:00Z",
             arrival: "2026-08-06T00:00:00Z"
         )
-        let merged = AppViewModel.mergeCrewAccessLegHistory(incoming: delayed, existingPayloads: [original])
+        let merged = try AppViewModel.mergeCrewAccessLegHistory(incoming: delayed, existingPayloads: [original])
         let item = try XCTUnwrap(merged.items.first)
 
         XCTAssertEqual(item.originalStdUtc, "2026-08-05T12:00:00Z")
@@ -85,7 +85,7 @@ final class CrewAccessLegHistoryTests: XCTestCase {
             flight: "5X061",
             destination: "SDF"
         )
-        let merged = AppViewModel.mergeCrewAccessLegHistory(incoming: changed, existingPayloads: [original])
+        let merged = try AppViewModel.mergeCrewAccessLegHistory(incoming: changed, existingPayloads: [original])
         let item = try XCTUnwrap(merged.items.first)
 
         XCTAssertEqual(item.stableLegId, original.items.first?.stableLegId)
@@ -105,7 +105,7 @@ final class CrewAccessLegHistoryTests: XCTestCase {
             legs: [.init(1, "ANC", "ONT", "5X061", "2026-08-05T19:00:00Z", "2026-08-06T00:00:00Z")]
         )
 
-        let merged = AppViewModel.mergeCrewAccessLegHistory(incoming: revised, existingPayloads: [original])
+        let merged = try AppViewModel.mergeCrewAccessLegHistory(incoming: revised, existingPayloads: [original])
 
         XCTAssertEqual(merged.items.first?.stableLegId, original.items.first?.stableLegId)
         XCTAssertEqual(merged.items.first?.originalStdUtc, "2026-08-05T18:00:00Z")
@@ -122,7 +122,7 @@ final class CrewAccessLegHistoryTests: XCTestCase {
             legs: [.init(1, "ANC", "SDF", "5X059", "2026-08-05T19:00:00Z", "2026-08-06T00:30:00Z")]
         )
 
-        let merged = AppViewModel.mergeCrewAccessLegHistory(incoming: revised, existingPayloads: [original])
+        let merged = try AppViewModel.mergeCrewAccessLegHistory(incoming: revised, existingPayloads: [original])
 
         XCTAssertEqual(merged.items.first?.stableLegId, original.items.first?.stableLegId)
         XCTAssertEqual(merged.items.first?.originalStaUtc, "2026-08-05T23:00:00Z")
@@ -150,7 +150,7 @@ final class CrewAccessLegHistoryTests: XCTestCase {
         let oldLaterLeg = try XCTUnwrap(original.items.first { $0.sequence == 3 })
         let incomingInsertedLeg = try XCTUnwrap(revised.items.first { $0.sequence == 3 })
 
-        let merged = AppViewModel.mergeCrewAccessLegHistory(incoming: revised, existingPayloads: [original])
+        let merged = try AppViewModel.mergeCrewAccessLegHistory(incoming: revised, existingPayloads: [original])
         let insertedLeg = try XCTUnwrap(merged.items.first { $0.sequence == 3 })
         let shiftedLaterLeg = try XCTUnwrap(merged.items.first { $0.sequence == 4 })
 
@@ -174,7 +174,7 @@ final class CrewAccessLegHistoryTests: XCTestCase {
             legs: [.init(3, "A", "B", "101", "2026-08-05T14:00:00Z", "2026-08-05T15:00:00Z")]
         )
 
-        let merged = AppViewModel.mergeCrewAccessLegHistory(incoming: incoming, existingPayloads: [original])
+        let merged = try AppViewModel.mergeCrewAccessLegHistory(incoming: incoming, existingPayloads: [original])
         let item = try XCTUnwrap(merged.items.first)
 
         XCTAssertEqual(item.stableLegId, incoming.items.first?.stableLegId)
@@ -195,7 +195,7 @@ final class CrewAccessLegHistoryTests: XCTestCase {
             arrival: "2026-08-06T04:43:00Z",
             block: "04:58"
         )
-        let merged = AppViewModel.mergeCrewAccessLegHistory(incoming: postTrip, existingPayloads: [preTrip])
+        let merged = try AppViewModel.mergeCrewAccessLegHistory(incoming: postTrip, existingPayloads: [preTrip])
         let leg = try XCTUnwrap(AppViewModel.buildCrewAccessSchedule(from: merged, modifiedAt: .now)?.legs.first)
 
         XCTAssertEqual(leg.stdUTC, "2026-08-05T23:34:00Z")
@@ -218,7 +218,7 @@ final class CrewAccessLegHistoryTests: XCTestCase {
             departure: "2026-08-05T23:45:00Z",
             arrival: "2026-08-06T04:43:00Z"
         )
-        let merged = AppViewModel.mergeCrewAccessLegHistory(incoming: actual, existingPayloads: [original])
+        let merged = try AppViewModel.mergeCrewAccessLegHistory(incoming: actual, existingPayloads: [original])
         let relaunched = try JSONDecoder().decode(
             CrewAccessTripJSON.self,
             from: JSONEncoder().encode(merged)
@@ -279,7 +279,7 @@ final class CrewAccessLegHistoryTests: XCTestCase {
             "precondition: the two generations sit in different Bid Period identities"
         )
 
-        let merged = AppViewModel.mergeCrewAccessLegHistory(
+        let merged = try AppViewModel.mergeCrewAccessLegHistory(
             incoming: revised,
             existingPayloads: [original]
         )
@@ -320,7 +320,7 @@ final class CrewAccessLegHistoryTests: XCTestCase {
             tripInformationDate: "2026-08-05"
         )
 
-        let merged = AppViewModel.mergeCrewAccessLegHistory(
+        let merged = try AppViewModel.mergeCrewAccessLegHistory(
             incoming: thisPeriod,
             existingPayloads: [lastYear]
         )
@@ -347,7 +347,7 @@ final class CrewAccessLegHistoryTests: XCTestCase {
             departure: "2026-08-05T23:34:00Z",
             arrival: "2026-08-06T04:36:00Z"
         )
-        let merged = AppViewModel.mergeCrewAccessLegHistory(
+        let merged = try AppViewModel.mergeCrewAccessLegHistory(
             incoming: payload,
             existingPayloads: [payload]
         )
@@ -382,7 +382,7 @@ final class CrewAccessLegHistoryTests: XCTestCase {
         )
 
         // Feed them in reverse chronological order to prove the ordering is not positional.
-        let merged = AppViewModel.mergeCrewAccessLegHistory(
+        let merged = try AppViewModel.mergeCrewAccessLegHistory(
             incoming: incoming,
             existingPayloads: [newer, older]
         )
@@ -491,6 +491,225 @@ final class CrewAccessLegHistoryTests: XCTestCase {
         XCTAssertTrue(leg.hasActualTimes)
     }
 
+    func test_actualDepartureResolverSelectsPreviousUTCDate() throws {
+        let resolved = try CrewAccessActualTimeResolver.departure(
+            enteredHHMM: "23:55",
+            scheduledDepartureUTC: utcDate("2026-08-23T00:10:00Z")
+        )
+        XCTAssertEqual(utcString(resolved), "2026-08-22T23:55:00Z")
+    }
+
+    func test_actualDepartureResolverSelectsNextUTCDate() throws {
+        let resolved = try CrewAccessActualTimeResolver.departure(
+            enteredHHMM: "00:15",
+            scheduledDepartureUTC: utcDate("2026-08-23T23:30:00Z")
+        )
+        XCTAssertEqual(utcString(resolved), "2026-08-24T00:15:00Z")
+    }
+
+    func test_actualDepartureResolverSelectsSameUTCDateBeforeAndAfterSTD() throws {
+        let std = utcDate("2026-08-23T12:00:00Z")
+        XCTAssertEqual(
+            utcString(try CrewAccessActualTimeResolver.departure(enteredHHMM: "11:50", scheduledDepartureUTC: std)),
+            "2026-08-23T11:50:00Z"
+        )
+        XCTAssertEqual(
+            utcString(try CrewAccessActualTimeResolver.departure(enteredHHMM: "12:20", scheduledDepartureUTC: std)),
+            "2026-08-23T12:20:00Z"
+        )
+    }
+
+    func test_actualDepartureResolverAcceptsBothNearTwelveHourBoundaries() throws {
+        let std = utcDate("2026-08-23T12:00:00Z")
+        XCTAssertEqual(
+            utcString(try CrewAccessActualTimeResolver.departure(enteredHHMM: "00:01", scheduledDepartureUTC: std)),
+            "2026-08-23T00:01:00Z"
+        )
+        XCTAssertEqual(
+            utcString(try CrewAccessActualTimeResolver.departure(enteredHHMM: "23:59", scheduledDepartureUTC: std)),
+            "2026-08-23T23:59:00Z"
+        )
+    }
+
+    func test_actualDepartureResolverRejectsExactTwelveHourAmbiguity() {
+        XCTAssertThrowsError(try CrewAccessActualTimeResolver.departure(
+            enteredHHMM: "00:00",
+            scheduledDepartureUTC: utcDate("2026-08-23T12:00:00Z")
+        )) { error in
+            XCTAssertEqual(error as? CrewAccessActualTimeResolutionError, .ambiguousDeparture("00:00"))
+        }
+    }
+
+    func test_actualDepartureResolverRejectsValueOutsideHHmmContract() {
+        XCTAssertThrowsError(try CrewAccessActualTimeResolver.departure(
+            enteredHHMM: "25:00",
+            scheduledDepartureUTC: utcDate("2026-08-23T12:00:00Z")
+        )) { error in
+            XCTAssertEqual(error as? CrewAccessActualTimeResolutionError, .invalidTime("25:00"))
+        }
+    }
+
+    func test_flightLogPresentationWithoutActualsUsesSTDAndTripImportTextExactly() {
+        var leg = Self.fullyPopulatedLeg()
+        leg.stdUTC = "2026-08-23T00:10:00Z"
+        leg.atdUTC = nil
+        leg.ataUTC = nil
+        leg.tripImportedAtUTC = "2026-08-23T18:42:00Z"
+        leg.actualsImportedAtUTC = nil
+
+        let presentation = FlightLogPresentation(leg: leg)
+        XCTAssertEqual(presentation.dateUTC, "2026-08-23")
+        XCTAssertEqual(presentation.importLabel, "Trip Imported:")
+        XCTAssertEqual(presentation.importedAtUTC, "2026-08-23 18:42Z")
+    }
+
+    func test_flightLogPresentationWithActualsUsesSameDateATDAndActualImportTextExactly() {
+        var leg = Self.fullyPopulatedLeg()
+        leg.atdUTC = "2026-08-23T12:20:00Z"
+        leg.ataUTC = "2026-08-23T17:20:00Z"
+        leg.actualsImportedAtUTC = "2026-08-24T08:17:00Z"
+
+        let presentation = FlightLogPresentation(leg: leg)
+        XCTAssertEqual(presentation.dateUTC, "2026-08-23")
+        XCTAssertEqual(presentation.importLabel, "ATD/ATA Imported:")
+        XCTAssertEqual(presentation.importedAtUTC, "2026-08-24 08:17Z")
+    }
+
+    func test_flightLogPresentationUsesResolvedPreviousAndNextATDDates() {
+        var leg = Self.fullyPopulatedLeg()
+        leg.ataUTC = "2026-08-23T04:55:00Z"
+        leg.actualsImportedAtUTC = "2026-08-24T08:17:00Z"
+
+        leg.atdUTC = "2026-08-22T23:55:00Z"
+        XCTAssertEqual(FlightLogPresentation(leg: leg).dateUTC, "2026-08-22")
+
+        leg.atdUTC = "2026-08-24T00:15:00Z"
+        XCTAssertEqual(FlightLogPresentation(leg: leg).dateUTC, "2026-08-24")
+    }
+
+    func test_actualArrivalResolverSelectsPreviousUTCDateRelativeToSTA() throws {
+        let resolved = try CrewAccessActualTimeResolver.arrival(
+            enteredHHMM: "23:55",
+            scheduledArrivalUTC: utcDate("2026-08-23T00:10:00Z")
+        )
+        XCTAssertEqual(utcString(resolved), "2026-08-22T23:55:00Z")
+    }
+
+    func test_actualArrivalResolverSelectsNextUTCDateRelativeToSTA() throws {
+        let resolved = try CrewAccessActualTimeResolver.arrival(
+            enteredHHMM: "00:15",
+            scheduledArrivalUTC: utcDate("2026-08-23T23:30:00Z")
+        )
+        XCTAssertEqual(utcString(resolved), "2026-08-24T00:15:00Z")
+    }
+
+    func test_actualArrivalResolverRejectsExactTwelveHourAmbiguity() {
+        XCTAssertThrowsError(try CrewAccessActualTimeResolver.arrival(
+            enteredHHMM: "00:00",
+            scheduledArrivalUTC: utcDate("2026-08-23T12:00:00Z")
+        )) { error in
+            XCTAssertEqual(error as? CrewAccessActualTimeResolutionError, .ambiguousArrival("00:00"))
+        }
+    }
+
+    func test_mergePreservesTripImportTimestampAndRecordsOneActualsImportTimestamp() throws {
+        let scheduled = makePayload(
+            created: "2026-08-05T08:00:00Z",
+            departure: "2026-08-05T12:00:00Z",
+            arrival: "2026-08-05T17:00:00Z"
+        )
+        let actual = makePayload(
+            created: "2026-08-06T08:17:00Z",
+            departure: "2026-08-05T12:20:00Z",
+            arrival: "2026-08-05T17:10:00Z"
+        )
+
+        let merged = try AppViewModel.mergeCrewAccessLegHistory(
+            incoming: actual,
+            existingPayloads: [scheduled]
+        )
+        let item = try XCTUnwrap(merged.items.first)
+        XCTAssertEqual(item.tripImportedAtUtc, "2026-08-05T08:00:00Z")
+        XCTAssertEqual(item.actualsImportedAtUtc, "2026-08-06T08:17:00Z")
+
+        let leg = try XCTUnwrap(
+            AppViewModel.buildCrewAccessSchedule(from: merged, modifiedAt: .now)?.legs.first
+        )
+        XCTAssertEqual(leg.tripImportedAtUTC, "2026-08-05T08:00:00Z")
+        XCTAssertEqual(leg.actualsImportedAtUTC, "2026-08-06T08:17:00Z")
+    }
+
+    func test_mergeSurfacesExactTwelveHourATDAmbiguity() {
+        let scheduled = makePayload(
+            created: "2026-08-05T08:00:00Z",
+            departure: "2026-08-05T12:00:00Z",
+            arrival: "2026-08-05T17:00:00Z"
+        )
+        let actual = makePayload(
+            created: "2026-08-07T08:00:00Z",
+            departure: "2026-08-06T00:00:00Z",
+            arrival: "2026-08-06T05:00:00Z"
+        )
+
+        XCTAssertThrowsError(try AppViewModel.mergeCrewAccessLegHistory(
+            incoming: actual,
+            existingPayloads: [scheduled]
+        )) { error in
+            XCTAssertEqual(error as? CrewAccessActualTimeResolutionError, .ambiguousDeparture("00:00"))
+        }
+    }
+
+    func test_mergeSurfacesExactTwelveHourATAAmbiguity() {
+        let scheduled = makePayload(
+            created: "2026-08-05T08:00:00Z",
+            departure: "2026-08-05T11:00:00Z",
+            arrival: "2026-08-05T12:00:00Z"
+        )
+        let actual = makePayload(
+            created: "2026-08-07T08:00:00Z",
+            departure: "2026-08-05T11:10:00Z",
+            arrival: "2026-08-06T00:00:00Z"
+        )
+
+        XCTAssertThrowsError(try AppViewModel.mergeCrewAccessLegHistory(
+            incoming: actual,
+            existingPayloads: [scheduled]
+        )) { error in
+            XCTAssertEqual(error as? CrewAccessActualTimeResolutionError, .ambiguousArrival("00:00"))
+        }
+    }
+
+    func test_mergeRejectsSTAResolvedATAThatPrecedesResolvedATD() {
+        let scheduled = makePayload(
+            created: "2026-08-05T08:00:00Z",
+            departure: "2026-08-05T23:30:00Z",
+            arrival: "2026-08-06T00:10:00Z"
+        )
+        let actual = makePayload(
+            created: "2026-08-07T08:00:00Z",
+            departure: "2026-08-05T00:15:00Z",
+            arrival: "2026-08-06T00:05:00Z"
+        )
+
+        XCTAssertThrowsError(try AppViewModel.mergeCrewAccessLegHistory(
+            incoming: actual,
+            existingPayloads: [scheduled]
+        )) { error in
+            XCTAssertEqual(error as? CrewAccessActualTimeResolutionError, .arrivalBeforeDeparture)
+        }
+    }
+
+    private func utcDate(_ value: String) -> Date {
+        ISO8601DateFormatter().date(from: value)!
+    }
+
+    private func utcString(_ value: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: value)
+    }
+
     private static func fullyPopulatedLeg() -> TripLeg {
         TripLeg(
             id: UUID(uuidString: "11111111-2222-3333-4444-555555555555") ?? UUID(),
@@ -589,7 +808,9 @@ final class CrewAccessLegHistoryTests: XCTestCase {
             scheduledDepartureObservedAtUtc: departureScheduled ? created : nil,
             scheduledArrivalObservedAtUtc: arrivalScheduled ? created : nil,
             actualDepartureObservedAtUtc: departureScheduled ? nil : created,
-            actualArrivalObservedAtUtc: arrivalScheduled ? nil : created
+            actualArrivalObservedAtUtc: arrivalScheduled ? nil : created,
+            tripImportedAtUtc: created,
+            actualsImportedAtUtc: !departureScheduled && !arrivalScheduled ? created : nil
         )
         return CrewAccessTripJSON(
             schemaVersion: 2,
@@ -670,7 +891,9 @@ final class CrewAccessLegHistoryTests: XCTestCase {
                 scheduledDepartureObservedAtUtc: departureScheduled ? created : nil,
                 scheduledArrivalObservedAtUtc: arrivalScheduled ? created : nil,
                 actualDepartureObservedAtUtc: departureScheduled ? nil : created,
-                actualArrivalObservedAtUtc: arrivalScheduled ? nil : created
+                actualArrivalObservedAtUtc: arrivalScheduled ? nil : created,
+                tripImportedAtUtc: created,
+                actualsImportedAtUtc: !departureScheduled && !arrivalScheduled ? created : nil
             )
         }
         return CrewAccessTripJSON(

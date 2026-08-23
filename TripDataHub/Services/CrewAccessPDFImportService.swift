@@ -53,6 +53,8 @@ enum ImportErrorCode: String {
     case missingRequiredFields
     case utcParseFailed
     case ltToUtcNeedsTzButMissing
+    case actualTimeAmbiguous
+    case actualTimeInvalid
 }
 
 struct ImportErrorItem: Identifiable {
@@ -184,6 +186,8 @@ struct CrewAccessTripItemJSON: Codable, Equatable, Sendable {
     let scheduledArrivalObservedAtUtc: String?
     let actualDepartureObservedAtUtc: String?
     let actualArrivalObservedAtUtc: String?
+    let tripImportedAtUtc: String?
+    let actualsImportedAtUtc: String?
 
     // Memberwise initializer (required because custom Decodable init is defined below)
     init(
@@ -212,7 +216,9 @@ struct CrewAccessTripItemJSON: Codable, Equatable, Sendable {
         scheduledDepartureObservedAtUtc: String? = nil,
         scheduledArrivalObservedAtUtc: String? = nil,
         actualDepartureObservedAtUtc: String? = nil,
-        actualArrivalObservedAtUtc: String? = nil
+        actualArrivalObservedAtUtc: String? = nil,
+        tripImportedAtUtc: String? = nil,
+        actualsImportedAtUtc: String? = nil
     ) {
         self.sequence          = sequence
         self.depAirport        = depAirport
@@ -240,6 +246,8 @@ struct CrewAccessTripItemJSON: Codable, Equatable, Sendable {
         self.scheduledArrivalObservedAtUtc = scheduledArrivalObservedAtUtc
         self.actualDepartureObservedAtUtc = actualDepartureObservedAtUtc
         self.actualArrivalObservedAtUtc = actualArrivalObservedAtUtc
+        self.tripImportedAtUtc = tripImportedAtUtc
+        self.actualsImportedAtUtc = actualsImportedAtUtc
     }
 
     // Custom decoder for backward compatibility with JSON files that lack newer fields
@@ -271,6 +279,88 @@ struct CrewAccessTripItemJSON: Codable, Equatable, Sendable {
         scheduledArrivalObservedAtUtc = try c.decodeIfPresent(String.self, forKey: .scheduledArrivalObservedAtUtc)
         actualDepartureObservedAtUtc = try c.decodeIfPresent(String.self, forKey: .actualDepartureObservedAtUtc)
         actualArrivalObservedAtUtc = try c.decodeIfPresent(String.self, forKey: .actualArrivalObservedAtUtc)
+        tripImportedAtUtc = try c.decodeIfPresent(String.self, forKey: .tripImportedAtUtc)
+        actualsImportedAtUtc = try c.decodeIfPresent(String.self, forKey: .actualsImportedAtUtc)
+    }
+}
+
+enum CrewAccessActualTimeResolutionError: Error, Equatable, LocalizedError {
+    case invalidTime(String)
+    case ambiguousDeparture(String)
+    case ambiguousArrival(String)
+    case arrivalBeforeDeparture
+
+    var errorDescription: String? {
+        switch self {
+        case let .invalidTime(value):
+            return "Actual UTC time \(value) is outside the supported HH:mm contract."
+        case let .ambiguousDeparture(value):
+            return "Actual departure \(value) is exactly 12 hours from STD and has an ambiguous UTC date."
+        case let .ambiguousArrival(value):
+            return "Actual arrival \(value) is exactly 12 hours from STA and has an ambiguous UTC date."
+        case .arrivalBeforeDeparture:
+            return "Actual arrival must not be earlier than actual departure."
+        }
+    }
+}
+
+enum CrewAccessActualTimeResolver {
+    private static let operationalWindow: TimeInterval = 12 * 60 * 60
+
+    /// Resolves an ATD clock value against STD by evaluating the scheduled UTC date and its
+    /// adjacent dates. A valid HH:mm always has a candidate no farther than 12 hours away; the
+    /// exact 12-hour case is rejected because the preceding and following dates are equidistant.
+    static func departure(enteredHHMM: String, scheduledDepartureUTC: Date) throws -> Date {
+        try resolve(
+            enteredHHMM: enteredHHMM,
+            scheduledUTC: scheduledDepartureUTC,
+            ambiguousError: .ambiguousDeparture(enteredHHMM)
+        )
+    }
+
+    /// ATA uses the same adjacent-date and ±12-hour rule as ATD, anchored to STA.
+    static func arrival(enteredHHMM: String, scheduledArrivalUTC: Date) throws -> Date {
+        try resolve(
+            enteredHHMM: enteredHHMM,
+            scheduledUTC: scheduledArrivalUTC,
+            ambiguousError: .ambiguousArrival(enteredHHMM)
+        )
+    }
+
+    private static func resolve(
+        enteredHHMM: String,
+        scheduledUTC: Date,
+        ambiguousError: CrewAccessActualTimeResolutionError
+    ) throws -> Date {
+        let components = enteredHHMM.split(separator: ":", omittingEmptySubsequences: false)
+        guard components.count == 2,
+              components[0].count == 2,
+              components[1].count == 2,
+              let hour = Int(components[0]), (0..<24).contains(hour),
+              let minute = Int(components[1]), (0..<60).contains(minute) else {
+            throw CrewAccessActualTimeResolutionError.invalidTime(enteredHHMM)
+        }
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let scheduledDay = calendar.startOfDay(for: scheduledUTC)
+        let candidates = [-1, 0, 1].compactMap { dayOffset -> Date? in
+            guard let day = calendar.date(byAdding: .day, value: dayOffset, to: scheduledDay) else {
+                return nil
+            }
+            return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: day)
+        }
+        let ranked = candidates
+            .map { ($0, abs($0.timeIntervalSince(scheduledUTC))) }
+            .filter { $0.1 <= operationalWindow }
+            .sorted { $0.1 < $1.1 }
+        guard let nearest = ranked.first else {
+            throw CrewAccessActualTimeResolutionError.invalidTime(enteredHHMM)
+        }
+        if ranked.count > 1, ranked[1].1 == nearest.1 {
+            throw ambiguousError
+        }
+        return nearest.0
     }
 }
 
@@ -342,6 +432,9 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
     }
 
     func analyzeTrip(pdfData: Data, sourceFileName: String?) -> CrewAccessImportDraft {
+        // One logical timestamp for this TripDataHub import operation. Do not use the PDF Created
+        // timestamp here: that records when CrewAccess observed/published the values.
+        let importedAtUTCString = Self.isoUTCFormatter.string(from: Date())
         logger.info("[Import] analyzeTrip start file=\(sourceFileName ?? "unknown", privacy: .private) bytes=\(pdfData.count, privacy: .public)")
         var warnings: [ImportWarning] = []
         var errors: [ImportErrorItem] = []
@@ -607,6 +700,10 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
                 scheduledArrivalObservedAtUTC: arrivalIsScheduled ? pdfCreatedUTCString : nil,
                 actualDepartureObservedAtUTC: departureIsScheduled ? nil : pdfCreatedUTCString,
                 actualArrivalObservedAtUTC: arrivalIsScheduled ? nil : pdfCreatedUTCString,
+                tripImportedAtUTC: importedAtUTCString,
+                actualsImportedAtUTC: !departureIsScheduled && !arrivalIsScheduled
+                    ? importedAtUTCString
+                    : nil,
                 aircraftType: row.aircraft
             )
             tripLegs.append(leg)
@@ -637,7 +734,11 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
                 scheduledDepartureObservedAtUtc: departureIsScheduled ? pdfCreatedUTCString : nil,
                 scheduledArrivalObservedAtUtc: arrivalIsScheduled ? pdfCreatedUTCString : nil,
                 actualDepartureObservedAtUtc: departureIsScheduled ? nil : pdfCreatedUTCString,
-                actualArrivalObservedAtUtc: arrivalIsScheduled ? nil : pdfCreatedUTCString
+                actualArrivalObservedAtUtc: arrivalIsScheduled ? nil : pdfCreatedUTCString,
+                tripImportedAtUtc: importedAtUTCString,
+                actualsImportedAtUtc: !departureIsScheduled && !arrivalIsScheduled
+                    ? importedAtUTCString
+                    : nil
             ))
         }
 
@@ -670,7 +771,7 @@ final class CrewAccessPDFImportService: CrewAccessPDFImportServiceProtocol {
             source: PendingImportSource.crewAccessPDF.rawValue,
             sourceVersion: Self.parserVersion,
             mappingVersion: tzResolver.mappingVersion,
-            generatedAt: Self.isoUTCFormatter.string(from: Date()),
+            generatedAt: importedAtUTCString,
             pdfCreatedUtc: pdfCreatedUTCString,
             tripId: tripID,
             tripInformationDate: effectiveTripDateText,
