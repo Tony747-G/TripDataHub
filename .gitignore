@@ -20,3 +20,4 @@ xcuserdata/
 
 # Build artifacts
 DerivedData/
+.claude/worktrees/
