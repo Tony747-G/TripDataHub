@@ -202,7 +202,9 @@ If a required planned departure or presentation timezone cannot be resolved, no 
 
 ## INV-015: Derived Operational Presentation Has One Builder and Two Explicit Refresh Modes
 
-**Rule:** Live Activity, Dynamic Island, Home Screen Widget snapshot, notification scheduling, Timeline operational presentation, current-leg cache, and launch reconstruction derive from one operational-state builder output. Normal operation uses explicit `reconcile` semantics: update an Activity while the current leg remains the same, and end/create only when the current leg changes or disappears. A Trip Revision or Replacement alone uses explicit `destructiveRebuild` semantics: cancel old derived artifacts, end all old Activities, invalidate snapshots/caches, persist the revision, then rebuild.
+**Rule:** Live Activity, Dynamic Island, Home Screen Widget snapshot, notification scheduling, current-leg cache, and launch reconstruction derive from one operational-state builder output. Normal operation uses explicit `reconcile` semantics: update an Activity while the current leg remains the same, and end/create only when the current leg changes or disappears. A Trip Revision or Replacement alone uses explicit `destructiveRebuild` semantics: cancel old derived artifacts, end all old Activities, invalidate snapshots/caches, persist the revision, then rebuild.
+
+The Timeline Top Next Report Countdown is an explicit exception because it represents the next Trip's report instant rather than current-flight operational state. Its selector and visibility are governed by INV-020 and MUST NOT be fed back into notification, Widget, or Activity lifecycle decisions.
 
 **Why:** Independent derivation paths drift and leave obsolete operational information alive. Conversely, rebuilding every normal refresh consumes ActivityKit request budget and causes visible churn. Replacement and ordinary state progression have different lifecycle requirements and must remain distinct.
 
@@ -269,3 +271,15 @@ Current-leg selection gives `.departureTimePassed` legs priority through minute 
 **Forbidden:** Adding or changing a fixed custom background without declaring the matching foreground environment or explicit foreground at the same surface; placing surface color policy in `FlightCountdownExpandedLayoutView`; relying on `activitySystemActionForegroundColor` to color Live Activity content.
 
 **Enforced by:** adjacent foreground/background declarations on the Lock Screen / Dynamic Island expanded Live Activity surface and the active Home Screen Widget surface. T-51S asserts both sides of each source-level pair; Light and Dark rendering remains device acceptance.
+
+---
+
+## INV-020: Timeline Top Selects Only the Next Future Trip Report
+
+**Rule:** Timeline Top selects the single Trip window with the earliest `reportTimeUTC` strictly greater than `nowUTC`. At equality the entire Top countdown is absent. Selection is independent of the viewed/selected Trip and Timeline scroll position. Duration is the absolute UTC instant difference; LCL/UTC changes rendering timezone and zone label only.
+
+This Timeline-only visibility MUST NOT cancel, hide, or alter the current-flight departure countdown, notifications, Widget snapshot, or Live Activity. Those remain governed by INV-013 through INV-018.
+
+**Enforced by:** `TimelineNextReportCountdownBuilder`, the shared iPhone/iPad `TimelineNextReportCountdownView`, and `NextReportWindowBuilderTests` selection, equality, format, timezone, color, and responsibility-separation regressions.
+
+**See also:** INV-001, INV-002, INV-005, INV-015, and `docs/ADR/ADR-004-flight-operational-state-model.md`.

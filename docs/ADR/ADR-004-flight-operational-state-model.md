@@ -111,17 +111,15 @@ One builder produces a structured operational presentation containing at least:
 - planned route/date/time metadata needed by the layout;
 - Presentation Policy visibility.
 
-The following are consumers of that output and do not re-decide state:
+The following flight-operational surfaces are consumers of that output and do not re-decide state:
 
-- app Timeline on iPhone;
-- app Timeline on iPad;
 - Lock Screen Live Activity;
 - Dynamic Island;
 - Home Screen Widget snapshot;
 - operational notification scheduling;
 - app-launch reconstruction and current-leg cache.
 
-The old app Timeline `(-05d 15h 45m)` calculation and any independent surface-specific countdown meaning are retired. Equivalent iPhone and iPad surfaces remain subject to INV-005.
+Timeline Top is deliberately outside this flight-operational builder. It displays only the next Trip report instant whose `reportTimeUTC > nowUTC`, disappears at equality, and never participates in notification or Activity lifecycle. Its iPhone and iPad implementations share one Timeline-specific selector and view under INV-005 and INV-020.
 
 Presentation Policy remains separate. T-12h, T-6h, and other visibility windows determine where a valid state is shown; they do not enter the state evaluator.
 
@@ -164,7 +162,7 @@ Legacy scheduled-departure-passed data is re-evaluated against STD and STD+61. D
 - Planned arrival remains available for route display, but no longer drives state, selection, status, or lifecycle.
 - A passed leg deliberately owns the operational presentation through minute 60; a short turn may have little or no `Dep in` presentation for its next leg.
 - Operational expiration (`STD+61`) and visible timer clamping (`STD+60`) are separate contracts. A suspended Activity may remain temporarily, but its visible elapsed value stops at 60 minutes and the next reconciliation ends it.
-- App Timeline, Widget, and Live Activity must migrate together because a surface-specific fallback would recreate contradictory operational meaning.
+- Widget and Live Activity must migrate together because a surface-specific fallback would recreate contradictory flight-operational meaning. Timeline Top remains separately contracted as a Trip report countdown.
 - Device rendering acceptance remains necessary for OS-driven timer output; source-level tests protect syntax and semantic anchors but do not inspect SpringBoard pixels.
 - The original seven-state arrival/Actual-driven contract and its arrival-side T-xx assertions are retired by Product Owner decision, not lost coverage.
 
@@ -192,7 +190,7 @@ Rejected because a suspended or terminated app has no guaranteed execution oppor
 
 ### Let each surface adapt the old model independently
 
-Rejected because the existing app Timeline versus Widget/Live Activity split already demonstrated that independent operational meanings drift.
+Rejected for surfaces that claim the same flight-operational meaning. Timeline Top now represents a different domain fact—the next Trip report instant—and therefore has an explicit separate selector and visibility contract rather than adapting the flight state.
 
 ## Related
 

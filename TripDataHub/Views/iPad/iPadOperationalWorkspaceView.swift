@@ -20,7 +20,6 @@ struct IPadOperationalWorkspaceView: View {
     @AppStorage(ProfileStorageKeys.passportExpiryDate) private var passportExpiryDate = ""
     @AppStorage(ProfileStorageKeys.chinaVisaExpiryDate) private var chinaVisaExpiryDate = ""
     @AppStorage(OperationalSettings.crewBaseKey) private var crewDomicileRawValue = OperationalSettings.defaultCrewBase.rawValue
-    @AppStorage("timeline_clock_display") private var timelineClockDisplayRawValue = TimelineClockDisplay.lcl.rawValue
     @Environment(\.scenePhase) private var scenePhase
 
     private var selectedAppearanceMode: AppearanceMode {
@@ -124,11 +123,6 @@ struct IPadOperationalWorkspaceView: View {
             }
         }
         .onChange(of: viewModel.scheduleDataRevision) { _, _ in
-            Task {
-                await viewModel.refreshFlightCountdownPresentation(mode: .reconcile)
-            }
-        }
-        .onChange(of: timelineClockDisplayRawValue) { _, _ in
             Task {
                 await viewModel.refreshFlightCountdownPresentation(mode: .reconcile)
             }

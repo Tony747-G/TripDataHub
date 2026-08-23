@@ -131,7 +131,7 @@ struct TimelineTabView: View {
                 VStack(spacing: 0) {
                     timelineTopBar
                     importSummaryBanner
-                    operationalCountdownCard
+                    nextReportCountdownCard
                     timelineContent
                     Color.gray.opacity(0.10)
                         .frame(height: 10)
@@ -474,34 +474,19 @@ struct TimelineTabView: View {
     }
 
     @ViewBuilder
-    private var operationalCountdownCard: some View {
-        if let output = viewModel.operationalCountdownOutput {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text("OPERATIONAL COUNTDOWN")
-                        .appScaledFont(.caption, weight: .bold, scale: fontScale)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text(output.leg.flightNumber ?? output.leg.id)
-                        .appScaledFont(.caption, scale: fontScale)
-                        .foregroundStyle(.secondary)
-                }
-                Text("\(output.leg.departureAirportIATA) → \(output.leg.arrivalAirportIATA)")
-                    .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
-                    .foregroundStyle(dateHeaderTextColor)
-                    .lineLimit(1)
-                OperationalCountdownStatusView(presentation: output.presentation)
-                    .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
-                    .foregroundStyle(output.state == .departureTimePassed ? .orange : .green)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
-            .background(.thinMaterial)
-            .accessibilityIdentifier("timeline.operationalCountdownCard")
-        }
+    private var nextReportCountdownCard: some View {
+        TimelineNextReportCountdownView(
+            windows: TimelineNextReportCountdownBuilder.build(
+                schedules: currentTimelineSchedules,
+                domicileAirportCode: selectedCrewDomicile.reportAirportCode
+            ),
+            displayTimeZone: selectedClockDisplay == .utc
+                ? TimeZone(secondsFromGMT: 0)!
+                : selectedDomicileTimeZone,
+            zoneCode: selectedClockDisplay == .utc ? "UTC" : selectedCrewDomicile.displayName,
+            fontScale: fontScale,
+            normalCountdownColor: dateHeaderTextColor
+        )
     }
 
     private func timelineRow(leg: TripLeg, nextLegByID: [UUID: TripLeg]) -> some View {

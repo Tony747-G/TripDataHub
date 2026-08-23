@@ -194,26 +194,35 @@ final class Phase4LayoutTests: XCTestCase {
         )
     }
 
-    func test_T16_operationalSurfacesConsumeTheSharedDescriptorWithoutTimelineReevaluation() throws {
+    func test_T16_flightOperationalSurfacesStaySharedWhileTimelineUsesNextReportContract() throws {
         let repositoryRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let surfacePaths = [
+        let timelinePaths = [
             "TripDataHub/Views/TimelineTabView.swift",
-            "TripDataHub/Views/iPad/iPadTimelineSidebarView.swift",
-            "TripDataCountdownWidgetExtension/TripDataCountdownWidget.swift"
+            "TripDataHub/Views/iPad/iPadTimelineSidebarView.swift"
         ]
 
-        for path in surfacePaths {
+        for path in timelinePaths {
             let source = try String(
                 contentsOf: repositoryRoot.appendingPathComponent(path),
                 encoding: .utf8
             )
-            XCTAssertTrue(source.contains("OperationalCountdownStatusView"), path)
-            XCTAssertFalse(source.contains("NextReportWindowBuilder"), path)
+            XCTAssertTrue(source.contains("TimelineNextReportCountdownView"), path)
+            XCTAssertTrue(source.contains("TimelineNextReportCountdownBuilder"), path)
+            XCTAssertFalse(source.contains("OperationalCountdownStatusView"), path)
+            XCTAssertFalse(source.contains("operationalCountdownOutput"), path)
             XCTAssertFalse(source.contains("countdownText("), path)
             XCTAssertFalse(source.contains("(-05d"), path)
         }
+
+        let widgetPath = "TripDataCountdownWidgetExtension/TripDataCountdownWidget.swift"
+        let widgetSource = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(widgetPath),
+            encoding: .utf8
+        )
+        XCTAssertTrue(widgetSource.contains("OperationalCountdownStatusView"), widgetPath)
+        XCTAssertFalse(widgetSource.contains("TimelineNextReportCountdownBuilder"), widgetPath)
     }
 
     func test_T17_operationalSourcesExcludeRetiredArrivalSemanticsAndSTABoundaries() throws {

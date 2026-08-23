@@ -1,5 +1,47 @@
 import SwiftUI
 
+struct TimelineNextReportCountdownView: View {
+    let windows: [TimelineNextReportTrip]
+    let displayTimeZone: TimeZone
+    let zoneCode: String
+    let fontScale: CGFloat
+    let normalCountdownColor: Color
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            if let presentation = TimelineNextReportCountdownBuilder.presentation(
+                from: windows,
+                now: context.date,
+                displayTimeZone: displayTimeZone,
+                zoneCode: zoneCode
+            ) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(presentation.titleText)
+                        .appScaledFont(.caption, weight: .bold, scale: fontScale)
+                        .foregroundStyle(.secondary)
+                    Text(presentation.reportDateTimeText)
+                        .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
+                        .foregroundStyle(normalCountdownColor)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                    Text(presentation.remainingText)
+                        .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
+                        .foregroundStyle(
+                            presentation.urgency == .urgent ? Color.red : normalCountdownColor
+                        )
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .background(.thinMaterial)
+                .accessibilityIdentifier("timeline.nextReportCountdown")
+            }
+        }
+    }
+}
+
 /// Timeline row colouring contract (INV-012):
 ///
 /// - White (`originalScheduled`) — the schedule as first observed, still ahead.

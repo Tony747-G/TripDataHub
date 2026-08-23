@@ -304,7 +304,289 @@ final class NextReportWindowBuilderTests: XCTestCase {
         XCTAssertEqual(next.reportTime, iso("2026-07-15T05:43:00Z"))
     }
 
+    func test_timelineNextReport_pastTripsOnlyIsHidden() {
+        let now = iso("2026-08-23T20:44:00Z")
+        let past = makeWindow(pairing: "PAST", reportTime: now.addingTimeInterval(-1))
+
+        XCTAssertNil(TimelineNextReportCountdownBuilder.nextTrip(from: [past], now: now))
+    }
+
+    func test_timelineNextReport_futureTripDoesNotRequireDomicileReturn() throws {
+        let outboundOnly = makeSchedule(legs: [
+            makeLeg(
+                pairing: "OPEN-ENDED",
+                leg: 1,
+                dep: "ANC",
+                arr: "NRT",
+                depUTC: "2026-08-24T01:30:00Z",
+                arrUTC: "2026-08-24T08:00:00Z"
+            )
+        ])
+
+        let candidates = TimelineNextReportCountdownBuilder.build(
+            schedules: [outboundOnly],
+            domicileAirportCode: "ANC"
+        )
+
+        let candidate = try XCTUnwrap(candidates.first)
+        XCTAssertEqual(candidate.pairing, "OPEN-ENDED")
+        XCTAssertEqual(candidate.reportTime, iso("2026-08-24T00:00:00Z"))
+    }
+
+    func test_timelineNextReport_multipleFutureTripsSelectsNearestReportTime() throws {
+        let now = iso("2026-08-23T00:00:00Z")
+        let later = makeWindow(pairing: "LATER", reportTime: now.addingTimeInterval(48 * 60 * 60))
+        let nearest = makeWindow(pairing: "NEAREST", reportTime: now.addingTimeInterval(8 * 60 * 60))
+        let middle = makeWindow(pairing: "MIDDLE", reportTime: now.addingTimeInterval(24 * 60 * 60))
+
+        let selected = try XCTUnwrap(
+            TimelineNextReportCountdownBuilder.nextTrip(
+                from: [later, nearest, middle],
+                now: now
+            )
+        )
+
+        XCTAssertEqual(selected.pairing, "NEAREST")
+    }
+
+    func test_timelineNextReport_selectedPastTripDoesNotAffectFutureTripSelection() throws {
+        let now = iso("2026-08-23T00:00:00Z")
+        let selectedPastTrip = makeWindow(pairing: "SELECTED-PAST", reportTime: now.addingTimeInterval(-3_600))
+        let futureTrip = makeWindow(pairing: "FUTURE", reportTime: now.addingTimeInterval(3_600))
+
+        let selected = try XCTUnwrap(
+            TimelineNextReportCountdownBuilder.nextTrip(
+                from: [selectedPastTrip, futureTrip],
+                now: now
+            )
+        )
+
+        XCTAssertEqual(selected.pairing, "FUTURE")
+    }
+
+    func test_timelineNextReport_pastScrollContextCannotSelectPastTrip() throws {
+        let now = iso("2026-08-23T00:00:00Z")
+        let visiblePastTrip = makeWindow(pairing: "SCROLLED-PAST", reportTime: now.addingTimeInterval(-86_400))
+        let offscreenFutureTrip = makeWindow(pairing: "NEXT", reportTime: now.addingTimeInterval(7_200))
+
+        let selected = try XCTUnwrap(
+            TimelineNextReportCountdownBuilder.nextTrip(
+                from: [visiblePastTrip, offscreenFutureTrip],
+                now: now
+            )
+        )
+
+        XCTAssertEqual(selected.pairing, "NEXT")
+    }
+
+    func test_timelineNextReport_atReportTimeIsHidden() {
+        let reportTime = iso("2026-08-23T20:44:00Z")
+        let window = makeWindow(pairing: "A70193R", reportTime: reportTime)
+
+        XCTAssertNil(TimelineNextReportCountdownBuilder.nextTrip(from: [window], now: reportTime))
+        XCTAssertNil(
+            TimelineNextReportCountdownBuilder.presentation(
+                from: [window],
+                now: reportTime,
+                displayTimeZone: Self.anchorageTimeZone,
+                zoneCode: "ANC"
+            )
+        )
+    }
+
+    func test_timelineNextReport_24HourFormatBoundary() {
+        XCTAssertEqual(
+            TimelineNextReportCountdownBuilder.remainingText(24 * 60 * 60),
+            "1 days 0 hours, 00 minutes"
+        )
+        XCTAssertEqual(
+            TimelineNextReportCountdownBuilder.remainingText(24 * 60 * 60 - 1),
+            "23 hours, 59 minutes"
+        )
+    }
+
+    func test_timelineNextReport_12HourColorBoundary() throws {
+        let reportTime = iso("2026-08-23T20:44:00Z")
+        let window = makeWindow(pairing: "A70193R", reportTime: reportTime)
+
+        let atTwelveHours = try XCTUnwrap(
+            TimelineNextReportCountdownBuilder.presentation(
+                from: [window],
+                now: reportTime.addingTimeInterval(-12 * 60 * 60),
+                displayTimeZone: Self.anchorageTimeZone,
+                zoneCode: "ANC"
+            )
+        )
+        let belowTwelveHours = try XCTUnwrap(
+            TimelineNextReportCountdownBuilder.presentation(
+                from: [window],
+                now: reportTime.addingTimeInterval(-(12 * 60 * 60 - 1)),
+                displayTimeZone: Self.anchorageTimeZone,
+                zoneCode: "ANC"
+            )
+        )
+
+        XCTAssertEqual(atTwelveHours.urgency, .normal)
+        XCTAssertEqual(belowTwelveHours.urgency, .urgent)
+    }
+
+    func test_timelineNextReport_LCLAndUTCChangeOnlyRenderedInstantAndZone() throws {
+        let reportTime = iso("2026-08-23T20:44:00Z")
+        let now = reportTime.addingTimeInterval(-(8 * 60 * 60 + 12 * 60))
+        let window = makeWindow(pairing: "A70193R", reportTime: reportTime)
+
+        let local = try XCTUnwrap(
+            TimelineNextReportCountdownBuilder.presentation(
+                from: [window],
+                now: now,
+                displayTimeZone: Self.anchorageTimeZone,
+                zoneCode: "ANC"
+            )
+        )
+        let utc = try XCTUnwrap(
+            TimelineNextReportCountdownBuilder.presentation(
+                from: [window],
+                now: now,
+                displayTimeZone: TimeZone(secondsFromGMT: 0)!,
+                zoneCode: "UTC"
+            )
+        )
+
+        XCTAssertEqual(local.titleText, "NEXT REPORT Trip A70193R")
+        XCTAssertEqual(local.reportDateTimeText, "SUN, AUG 23 2026   12:44 ANC")
+        XCTAssertEqual(utc.reportDateTimeText, "SUN, AUG 23 2026   20:44 UTC")
+        XCTAssertEqual(local.remainingText, "Report in 8 hours, 12 minutes")
+        XCTAssertEqual(utc.remainingText, local.remainingText)
+    }
+
+    func test_timelineNextReport_exactThreeLineRenderedTextForLCLAndUTC() throws {
+        let reportTime = iso("2026-08-23T20:44:00Z")
+        let now = reportTime.addingTimeInterval(-(8 * 60 * 60 + 12 * 60))
+        let trip = makeWindow(pairing: "A70193R", reportTime: reportTime)
+
+        let local = try XCTUnwrap(
+            TimelineNextReportCountdownBuilder.presentation(
+                from: [trip],
+                now: now,
+                displayTimeZone: Self.anchorageTimeZone,
+                zoneCode: "ANC"
+            )
+        )
+        let utc = try XCTUnwrap(
+            TimelineNextReportCountdownBuilder.presentation(
+                from: [trip],
+                now: now,
+                displayTimeZone: TimeZone(secondsFromGMT: 0)!,
+                zoneCode: "UTC"
+            )
+        )
+
+        XCTAssertEqual(
+            [local.titleText, local.reportDateTimeText, local.remainingText].joined(separator: "\n"),
+            """
+            NEXT REPORT Trip A70193R
+            SUN, AUG 23 2026   12:44 ANC
+            Report in 8 hours, 12 minutes
+            """
+        )
+        XCTAssertEqual(
+            [utc.titleText, utc.reportDateTimeText, utc.remainingText].joined(separator: "\n"),
+            """
+            NEXT REPORT Trip A70193R
+            SUN, AUG 23 2026   20:44 UTC
+            Report in 8 hours, 12 minutes
+            """
+        )
+    }
+
+    func test_timelineNextReport_exactDaysHoursMinutesFormats() {
+        let cases: [(remaining: TimeInterval, expected: String)] = [
+            (3 * 86_400 + 7 * 3_600 + 14 * 60, "3 days 7 hours, 14 minutes"),
+            (1 * 86_400 + 2 * 3_600 + 3 * 60, "1 days 2 hours, 03 minutes"),
+            (23 * 3_600 + 59 * 60 + 59, "23 hours, 59 minutes"),
+            (8 * 3_600 + 12 * 60, "8 hours, 12 minutes"),
+            (8 * 60, "0 hours, 08 minutes")
+        ]
+
+        for testCase in cases {
+            XCTAssertEqual(
+                TimelineNextReportCountdownBuilder.remainingText(testCase.remaining),
+                testCase.expected,
+                "remaining=\(testCase.remaining)"
+            )
+        }
+    }
+
+    func test_timelineVisibilityAtReportDoesNotEndNextFlightOperationalCountdown() throws {
+        let reportTime = iso("2026-08-23T20:44:00Z")
+        let departure = reportTime.addingTimeInterval(90 * 60)
+        let timelineWindow = makeWindow(pairing: "A70193R", reportTime: reportTime)
+        let operationalLeg = FlightCountdownLeg(
+            id: "flight-leg",
+            flightNumber: "5X67",
+            isDeadhead: false,
+            departureAirportIATA: "ANC",
+            arrivalAirportIATA: "SDF",
+            plannedDepartureUTC: departure,
+            plannedArrivalUTC: departure.addingTimeInterval(6 * 60 * 60),
+            reportTimeUTC: reportTime,
+            departureTimeZoneID: "America/Anchorage",
+            arrivalTimeZoneID: "America/Kentucky/Louisville"
+        )
+
+        XCTAssertNil(
+            TimelineNextReportCountdownBuilder.presentation(
+                from: [timelineWindow],
+                now: reportTime,
+                displayTimeZone: Self.anchorageTimeZone,
+                zoneCode: "ANC"
+            )
+        )
+        let flightOutput = try XCTUnwrap(
+            FlightCountdownEngine.buildCountdownOutput(from: [operationalLeg], nowUTC: reportTime)
+        )
+        XCTAssertEqual(flightOutput.state, .preDeparture)
+        XCTAssertEqual(flightOutput.presentation.prefix, "Dep in")
+    }
+
+    func test_timelineViewsDoNotConsumeOperationalCountdownStateOrRefreshItForClockToggle() throws {
+        let projectRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let timelineSources = [
+            "TripDataHub/Views/TimelineTabView.swift",
+            "TripDataHub/Views/iPad/iPadTimelineSidebarView.swift"
+        ]
+        for relativePath in timelineSources {
+            let source = try String(
+                contentsOf: projectRoot.appendingPathComponent(relativePath),
+                encoding: .utf8
+            )
+            XCTAssertFalse(source.contains("operationalCountdownOutput"), relativePath)
+            XCTAssertFalse(source.contains("OperationalCountdownStatusView"), relativePath)
+        }
+
+        for relativePath in [
+            "TripDataHub/Views/RootTabView.swift",
+            "TripDataHub/Views/iPad/iPadOperationalWorkspaceView.swift"
+        ] {
+            let source = try String(
+                contentsOf: projectRoot.appendingPathComponent(relativePath),
+                encoding: .utf8
+            )
+            XCTAssertFalse(source.contains("onChange(of: timelineClockDisplayRawValue)"), relativePath)
+        }
+    }
+
     // MARK: - Helpers
+
+    private func makeWindow(pairing: String, reportTime: Date) -> TimelineNextReportTrip {
+        TimelineNextReportTrip(
+            key: "PP26-08|\(pairing)|\(Int(reportTime.timeIntervalSince1970))",
+            pairing: pairing,
+            reportTime: reportTime
+        )
+    }
 
     private func iso(_ value: String) -> Date {
         let formatter = ISO8601DateFormatter()

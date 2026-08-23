@@ -9,6 +9,154 @@ struct NextReportTripWindow {
     let tripEndDomicile: Date
 }
 
+enum TimelineNextReportUrgency: Equatable {
+    case normal
+    case urgent
+}
+
+struct TimelineNextReportTrip: Equatable {
+    let key: String
+    let pairing: String
+    let reportTime: Date
+}
+
+struct TimelineNextReportPresentation: Equatable {
+    let pairing: String
+    let reportTime: Date
+    let titleText: String
+    let reportDateTimeText: String
+    let remainingText: String
+    let urgency: TimelineNextReportUrgency
+}
+
+/// Timeline-only report countdown policy.
+///
+/// Notification and Live Activity continue to use their flight-operational selectors. Timeline
+/// intentionally considers only future trip report instants, so selection/scroll state and a
+/// currently active or historical flight can never make a past report countdown reappear.
+enum TimelineNextReportCountdownBuilder {
+    static let urgentThreshold: TimeInterval = 12 * 60 * 60
+    static let dayThreshold: TimeInterval = 24 * 60 * 60
+    private static let formatterLock = NSLock()
+    private static var reportDateTimeFormatters: [String: DateFormatter] = [:]
+
+    static func build(
+        schedules: [PayPeriodSchedule],
+        domicileAirportCode: String,
+        tzResolver: IATATimeZoneResolving = IATATimeZoneResolver.shared
+    ) -> [TimelineNextReportTrip] {
+        let domicileAirport = domicileAirportCode
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        let grouped = Dictionary(grouping: schedules.flatMap(\.legs)) {
+            "\($0.payPeriod)|\($0.pairing)"
+        }
+
+        return grouped.compactMap { groupKey, legs in
+            let firstDomicileDeparture = legs
+                .filter { $0.depAirport.uppercased() == domicileAirport }
+                .compactMap { leg -> (TripLeg, Date)? in
+                    guard let raw = leg.plannedDepartureUTC,
+                          let departure = LegConnectionTextBuilder.parseUTC(raw)
+                    else {
+                        return nil
+                    }
+                    return (leg, departure)
+                }
+                .min {
+                    if $0.1 != $1.1 { return $0.1 < $1.1 }
+                    return $0.0.leg < $1.0.leg
+                }
+
+            guard let (leg, departure) = firstDomicileDeparture else { return nil }
+            let leadMinutes = ReportLeadTimePolicy.minutes(
+                originAirport: leg.depAirport,
+                destinationAirport: leg.arrAirport,
+                tzResolver: tzResolver
+            )
+            let reportTime = departure.addingTimeInterval(TimeInterval(-leadMinutes * 60))
+            return TimelineNextReportTrip(
+                key: "\(groupKey)|\(Int(reportTime.timeIntervalSince1970))",
+                pairing: leg.pairing,
+                reportTime: reportTime
+            )
+        }
+    }
+
+    static func nextTrip(
+        from trips: [TimelineNextReportTrip],
+        now: Date
+    ) -> TimelineNextReportTrip? {
+        trips
+            .filter { $0.reportTime > now }
+            .min {
+                if $0.reportTime != $1.reportTime {
+                    return $0.reportTime < $1.reportTime
+                }
+                return $0.key < $1.key
+            }
+    }
+
+    static func presentation(
+        from windows: [TimelineNextReportTrip],
+        now: Date,
+        displayTimeZone: TimeZone,
+        zoneCode: String
+    ) -> TimelineNextReportPresentation? {
+        guard let trip = nextTrip(from: windows, now: now) else { return nil }
+        let remaining = trip.reportTime.timeIntervalSince(now)
+        guard remaining > 0 else { return nil }
+
+        return TimelineNextReportPresentation(
+            pairing: trip.pairing,
+            reportTime: trip.reportTime,
+            titleText: "NEXT REPORT Trip \(trip.pairing)",
+            reportDateTimeText: reportDateTimeText(
+                trip.reportTime,
+                timeZone: displayTimeZone,
+                zoneCode: zoneCode
+            ),
+            remainingText: "Report in \(remainingText(remaining))",
+            urgency: remaining >= urgentThreshold ? .normal : .urgent
+        )
+    }
+
+    static func remainingText(_ remaining: TimeInterval) -> String {
+        let wholeSeconds = max(0, Int(floor(remaining)))
+        let days = wholeSeconds / Int(dayThreshold)
+        let hours = (wholeSeconds % Int(dayThreshold)) / 3_600
+        let minutes = (wholeSeconds % 3_600) / 60
+        let minuteText = String(format: "%02d", minutes)
+
+        if remaining >= dayThreshold {
+            return "\(days) days \(hours) hours, \(minuteText) minutes"
+        }
+        return "\(wholeSeconds / 3_600) hours, \(minuteText) minutes"
+    }
+
+    private static func reportDateTimeText(
+        _ date: Date,
+        timeZone: TimeZone,
+        zoneCode: String
+    ) -> String {
+        formatterLock.lock()
+        defer { formatterLock.unlock() }
+        let formatter: DateFormatter
+        if let cached = reportDateTimeFormatters[timeZone.identifier] {
+            formatter = cached
+        } else {
+            let created = DateFormatter()
+            created.calendar = Calendar(identifier: .gregorian)
+            created.locale = Locale(identifier: "en_US_POSIX")
+            created.timeZone = timeZone
+            created.dateFormat = "EEE, MMM dd yyyy   HH:mm"
+            reportDateTimeFormatters[timeZone.identifier] = created
+            formatter = created
+        }
+        return "\(formatter.string(from: date).uppercased()) \(zoneCode.uppercased())"
+    }
+}
+
 enum NextReportWindowBuilder {
     static let anchorageFallbackOffsetSeconds = -9 * 3600
 

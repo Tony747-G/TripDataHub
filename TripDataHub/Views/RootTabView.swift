@@ -12,7 +12,6 @@ struct RootTabView: View {
     @AppStorage("appearance_mode") private var appearanceModeRawValue = AppearanceMode.system.rawValue
     @AppStorage("app_font_size_option") private var appFontSizeOptionRawValue = AppFontSizeOption.medium.rawValue
     @AppStorage("app_font_size_migrated_to_medium") private var didMigrateFontSizeToMedium = false
-    @AppStorage("timeline_clock_display") private var timelineClockDisplayRawValue = TimelineClockDisplay.lcl.rawValue
     @State private var isShowingImportPreviewFromExternalOpen = false
     @State private var primaryScreen: IPhonePrimaryScreen = .timeline
     @State private var hasLoadedCalendar = false
@@ -137,11 +136,6 @@ struct RootTabView: View {
                 await viewModel.refreshFlightCountdownPresentation(mode: .reconcile)
             }
             viewModel.handleSchedulesChangedForSharing()
-        }
-        .onChange(of: timelineClockDisplayRawValue) { _, _ in
-            Task {
-                await viewModel.refreshFlightCountdownPresentation(mode: .reconcile)
-            }
         }
         .onChange(of: viewModel.pendingImport?.id) { _, newValue in
             isShowingImportPreviewFromExternalOpen = ImportPreviewPresentationPolicy.externalPreviewIsPresented(

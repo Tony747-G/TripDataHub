@@ -93,7 +93,7 @@ struct IPadTimelineSidebarView: View {
         VStack(spacing: 0) {
             if focusedTripID == nil {
                 sidebarHeader
-                operationalCountdownStrip
+                nextReportCountdownStrip
                 Divider()
             }
             ScrollViewReader { proxy in
@@ -457,36 +457,22 @@ struct IPadTimelineSidebarView: View {
             .overlay(alignment: .bottom) { Divider() }
     }
 
-    // MARK: Operational Countdown Strip — same descriptor as iPhone/Widget/Live Activity
+    // MARK: Timeline-only next Trip report countdown
 
     @ViewBuilder
-    private var operationalCountdownStrip: some View {
-        if let output = viewModel.operationalCountdownOutput {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text("OPERATIONAL COUNTDOWN")
-                        .appScaledFont(.caption, weight: .bold, scale: timelineFontScale)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text(output.leg.flightNumber ?? output.leg.id)
-                        .appScaledFont(.caption, scale: timelineFontScale)
-                        .foregroundStyle(.secondary)
-                }
-                Text("\(output.leg.departureAirportIATA) → \(output.leg.arrivalAirportIATA)")
-                    .appScaledFont(.subheadline, weight: .bold, scale: timelineFontScale)
-                    .foregroundStyle(dateHeaderTextColor)
-                    .lineLimit(1)
-                OperationalCountdownStatusView(presentation: output.presentation)
-                    .appScaledFont(.subheadline, weight: .bold, scale: timelineFontScale)
-                    .foregroundStyle(output.state == .departureTimePassed ? .orange : .green)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
-            .background(.thinMaterial)
-        }
+    private var nextReportCountdownStrip: some View {
+        TimelineNextReportCountdownView(
+            windows: TimelineNextReportCountdownBuilder.build(
+                schedules: sidebarSchedules,
+                domicileAirportCode: selectedCrewDomicile.reportAirportCode
+            ),
+            displayTimeZone: selectedClockDisplay == .utc
+                ? TimeZone(secondsFromGMT: 0)!
+                : selectedDomicileTimeZone,
+            zoneCode: selectedClockDisplay == .utc ? "UTC" : selectedCrewDomicile.displayName,
+            fontScale: timelineFontScale,
+            normalCountdownColor: dateHeaderTextColor
+        )
     }
 
     // MARK: Trip summary card
