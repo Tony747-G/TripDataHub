@@ -1,5 +1,11 @@
 # TDH Reliability Build Week — Acceptance Checklist
 
+> **2026-08-28 product decision:** Flight Countdown Live Activities were removed. Sections C and
+> the Live Activity parts of D are historical evidence only and are no longer release gates or
+> re-verification instructions. Current acceptance is the absence of Lock Screen/Dynamic Island
+> Flight Countdown configuration and runtime request/update/end paths. Home Screen Widget checks
+> remain applicable.
+
 - Authoritative baseline: `build-week/operational-reliability` at `78a67b0`
 - Evidence layer is specified per item; production-path Simulator ActivityKit/SpringBoard evidence is valid where later PO approval says so.
 - 原則: **Incorrect operational information is worse than no information.**
@@ -23,7 +29,7 @@
 | A-3c | Alert の `Cancel` | Preview に戻る。import は実行されない。何も削除されない |
 | A-4 | Alert の `Replace and Import` | **1 回で完了**。Preview が再表示されない |
 | A-5 | Timeline | Revised（CGO 往復を含む）に更新されている |
-| A-6 | 旧 `DH 5X67` | Timeline にも Dynamic Island にも出てこない |
+| A-6 | 旧 `DH 5X67` | TimelineにもHome Screen Widgetのcurrent snapshotにも出てこない |
 | A-7 | iPad を開く | 同じ Revised Trip が同期されている（iCloud sync 維持） |
 
 **重複配送の確認（RC-4 の本体）**
@@ -46,51 +52,31 @@ Realtime state は `.preReport` / `.preDeparture` / `.departureTimePassed` / `.e
 | B-1 | **PASS** | first base-departure report前は `Report in …` |
 | B-2 | **PASS** | report以降STD前は `Dep in …`。later legではreportを推測しない |
 | B-3 | **PASS** | durationはabsolute UTC anchor由来でdisplay/device TZ非依存 |
-| B-4 | **PASS** | STD以降は `Departure time passed …`。elapsed minutesはfloor |
+| B-4 | **PASS** | `[STD, STD+61min)` はschedule-domain state `.departureTimePassed`。Actual departureを意味せず、visible elapsed contractは持たない |
 | B-5 | **PASS** | minute 60までeligible、STD+61でexpired。Delayed/arrival semanticなし |
 | B-6〜B-9 | **RETIRED** | arrival/Actual-driven realtime acceptanceはSTD-only PO contractで廃止。Actual/STAはhistory/display dataとしてのみ保持 |
-| B-10 | **PASS** | evaluator/expiration/staleはSTD+61、visible timerはSTD+60でclamp。suspended shellは次回app executionのreconcileでend。exact background dismissalは保証しない |
+| B-10 | **RETIRED BY FEATURE REMOVAL** | Flight Live Activityのstale、visible timer clamp、suspended shell、reconcile/end acceptanceは現行要件ではない。STD+61はB-5のdomain/selection boundaryとしてのみ維持 |
 | B-11〜B-13 | **PASS** | ANC / SGN / ICNでsame absolute anchors/state/semantic/duration |
 | B-14 | **PASS** | DHとoperating legは同じbuilder/descriptor engine |
 | B-15 | **PASS** | DHもtimezone-independent |
 
 ---
 
-## C. Live Activity / Dynamic Island / 起動時復元（RC-5 / Phase 3）
+## C. RETIRED — Live Activity / Dynamic Island / 起動時復元（historical）
 
 | # | Status | Authoritative acceptance |
 |---|---|---|
-| C-1 | **PASS** | same legの `Report in → Dep in → Departure time passed` はActivity IDを維持しupdateのみ |
-| C-2 | **PASS** | old leg expiry後のnext available reconcileでold end → next eligible legをexactly once request、count=1 |
-| C-3/C-4 | **BLOCKED** | authentic Original/Revised pairが必要 |
-| C-5 | **RETIRED** | arrival/Delayed relaunch contractはSTD-only modelに存在しない |
-| C-6 | **PASS** | retained-data Simulatorでcold launch 15/15 PASS |
-| C-7 | **PASS** | repeated launch/endでduplicate/resurrectionなし |
-| C-8 | **RETIRED** | arrival/completed selectionはSTD+61 expiryへ置換 |
+| C-1〜C-8 | **RETIRED BY FEATURE REMOVAL** | Activity identity、request/update/end、relaunch、resurrection acceptanceは現行release gateではない |
 
 ---
 
-## D. Layout / Live Activity 実描画（Phase 4 v2）
+## D. RETIRED Live Activity evidence / active Home Widget evidence
 
 **iPhone / iPhone Pro Max / iPad の 3 機種すべてで確認すること。**
 
-### D-0. 検証レイヤーの区別（先に読むこと）
+### D-0. Current verification boundary
 
-Evidence layerを混同しないこと。test-host renderingはActivityKit/SpringBoard pixelsを証明しない。一方、後発PO決定により、approved DEBUG runtime hookから real ActivityKit → WidgetKit extension → SpringBoard を通したSimulator evidenceはD-series acceptanceとして有効である。
-
-| レイヤー | 何を保証するか | 何を保証しないか |
-|---|---|---|
-| unit/static（T-14 / T-50S / T-51S） | layout/forbidden API/foreground contractの構造回帰 | SpringBoard pixels |
-| test-host snapshot | host process内layout | extension redaction/runtime |
-| production-path Simulator ActivityKit/SpringBoard | runtime Lock Screen/DI、timer boundary、appearance | そのrunで未観測のphysical-device固有挙動 |
-| physical device | device固有integration | 未観測OS/surface |
-
-**T-50S と D-7 の役割分担**
-
-- **T-50S = 構文の回帰防止。** 「誰かが redaction する API へ戻した」を CI で即座に赤にする。人間の目を必要としない
-- **D-7 = 描画結果の受け入れ。** 「その API が今の OS で実際に正しく描かれる」を人間が確認する。自動化できない
-
-**片方だけでは不十分。** T-50S が緑でも OS 側の挙動が変われば D-7 は落ちる。D-7 が過去に PASS でも構文が戻れば意味を失う。**どちらかの PASS をもう一方の代替として報告しないこと。**
+T-14/T-50SとActivityKit/SpringBoardのD-series acceptanceはすべてretired。T-51SはActive Home Screen Widgetのforeground/background ownershipだけを検証する。Home Widgetの実描画acceptanceはF-9に従う。
 
 ---
 
@@ -131,35 +117,15 @@ Authentic `Trip_12165.pdf` をproduction parser/canonical JSONへ通した値が
 
 ---
 
-### D-7. STD-only ActivityKit presentation — **PASS**
+### D-7〜D-8. Flight Live Activity acceptance — **RETIRED BY FEATURE REMOVAL**
 
-対象はLock ScreenとiPhone Dynamic Island expanded。iPadはLock ScreenのみでDynamic IslandはN/A。compact/minimalは対象外。Home Screen Widget実描画は **F-9 DEFERRED**。
-
-| # | Acceptance | Status |
-|---|---|---|
-| D-7a | `Report in …`、dash/redaction/blank/secondsなし | **PASS** |
-| D-7b | `Dep in …`、Lock Screen / DI expanded | **PASS** |
-| D-7c | `Departure time passed …`、minute 60 stressを含む | **PASS** |
-| D-7d | minute-only OS-driven rendering。polling/per-minute updateなし | **PASS** |
-| D-7e | countdown/count-upのminute boundaryでfreezeしない | **PASS** |
-| D-7f | 上記3つのSTD-only wordingすべて。retired arrival wordingなし | **PASS** |
-| D-7g | Light/Dark visibility。iPad Lock Screenも両appearance | **PASS** |
-
-```text
-timerClampUTC = STD + 60 minutes
-expirationUTC = STD + 61 minutes
-staleDate     = STD + 61 minutes
-```
-
-+59は59 minutes、+60以降のvisible timerは60 minutesでclamp。STD+61 exactlyのbackground wake/dismissalは保証しない。shellが残った場合も次回app executionで`.expired`をreconcileしendする。
-
-D-7はiOS/Xcode major update、minimum OS引き上げ、またはLive Activity timer/layout contract変更時に再実施する。
+Lock Screen、Dynamic Island、post-STD elapsed、stale、timer clamp、suspended shell、foreground reconcile、Activity endのacceptanceは削除済みfeatureのhistorical evidenceであり、再実施しない。Issues 2〜7と9はfeature removalにより解決済み。Active Home Screen Widget acceptanceはF-9を使用する。
 
 ---
 
 ## Priority 2 完了条件（reconciled）
 
-**Priority 2: PASS.** D-1〜D-7はproduction-path ActivityKit/SpringBoard runtimeおよびauthentic PDF由来Timeline evidenceで再acceptance済み。3幅のLock Screen、対応iPhoneのDI expanded、Light/Dark、minute boundary、60-minute clampを含む。iPad DIはN/A。Home Screen Widget pixelsはF-9へdefer。
+Historical D-series Flight Live Activity gates are **RETIRED BY FEATURE REMOVAL**. Timeline Connection card acceptance remains recorded in D-3〜D-6. Home Screen Widget pixels remain F-9 deferred.
 
 ---
 
@@ -192,9 +158,9 @@ D-7はiOS/Xcode major update、minimum OS引き上げ、またはLive Activity t
 
 - A-1〜A-7 / C-3/C-4: **BLOCKED** authentic Original/Revised pair待ち
 - A-8〜A-11: **PASS**
-- B-series current STD-only acceptance: **PASS**。B-6〜B-9 retired
-- C-1/C-2/C-6/C-7: **PASS**。C-5/C-8 retired
-- D-1〜D-7: **PASS**
+- B-series current schedule-domain acceptance: **PASS**。B-6〜B-10 retired
+- C-series Flight Live Activity: **RETIRED BY FEATURE REMOVAL**
+- D-series Flight Live Activity: **RETIRED BY FEATURE REMOVAL**。D-3〜D-6 Timeline evidenceのみ維持
 - E-1: **BLOCKED**
 - E-2/E-3: **PASS**
 - E-4: **RETIRED**

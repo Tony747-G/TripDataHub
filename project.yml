@@ -95,8 +95,8 @@ targets:
     sources:
       - path: TripDataCountdownWidgetExtension
       # Shared operational state and countdown payloads compiled into both the app and extension.
-      # Dual target membership, not copies: state, presentation policy, and Activity attributes
-      # must stay byte-identical on both sides of the App Group.
+      # Dual target membership, not copies: operational state, Home Widget presentation policy,
+      # and snapshot payload contracts must stay byte-identical on both sides of the App Group.
       - path: TripDataHub/Models/FlightOperationalState.swift
       - path: TripDataHub/Models/FlightCountdownSharedModels.swift
     settings:

@@ -50,6 +50,7 @@ private enum FlightCountdownFixture {
 }
 
 final class Phase4LayoutTests: XCTestCase {
+#if false // RETIRED: Flight Countdown Live Activity was removed by product decision.
     @MainActor
     func test_T14_expandedLiveActivityKeepsFourRowsAtAllTargetWidths() throws {
         XCTAssertEqual(FlightCountdownExpandedLayoutContract.rowCount, 4)
@@ -115,7 +116,28 @@ final class Phase4LayoutTests: XCTestCase {
 
         let plannedDeparture = Date(timeIntervalSince1970: 0).addingTimeInterval(8 * 60 * 60)
         XCTAssertEqual(
-            FlightCountdownActivityLifecyclePolicy.staleDate(plannedDepartureUTC: plannedDeparture),
+            FlightCountdownActivityLifecyclePolicy.staleDate(
+                state: .preDeparture,
+                plannedDepartureUTC: plannedDeparture,
+                reportTimeUTC: nil
+            ),
+            plannedDeparture
+        )
+        let reportTime = plannedDeparture.addingTimeInterval(-90 * 60)
+        XCTAssertEqual(
+            FlightCountdownActivityLifecyclePolicy.staleDate(
+                state: .preReport,
+                plannedDepartureUTC: plannedDeparture,
+                reportTimeUTC: reportTime
+            ),
+            reportTime
+        )
+        XCTAssertEqual(
+            FlightCountdownActivityLifecyclePolicy.staleDate(
+                state: .departureTimePassed,
+                plannedDepartureUTC: plannedDeparture,
+                reportTimeUTC: nil
+            ),
             plannedDeparture.addingTimeInterval(61 * 60)
         )
     }
@@ -193,6 +215,7 @@ final class Phase4LayoutTests: XCTestCase {
             )
         )
     }
+#endif
 
     func test_T16_flightOperationalSurfacesStaySharedWhileTimelineUsesNextReportContract() throws {
         let repositoryRoot = URL(fileURLWithPath: #filePath)
@@ -276,7 +299,7 @@ final class Phase4LayoutTests: XCTestCase {
 
     /// T-51S guards the source-level foreground/background ownership contract. It does not
     /// inspect rendered pixels; Light/Dark acceptance remains a device verification step.
-    func test_T51S_customBackgroundSurfacesDeclareMatchingForegroundEnvironment() throws {
+    func test_T51S_homeWidgetCustomBackgroundDeclaresMatchingForegroundEnvironment() throws {
         let repositoryRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -309,21 +332,92 @@ final class Phase4LayoutTests: XCTestCase {
         XCTAssertTrue(widgetActiveSource.contains(".environment(\\.colorScheme,.dark)"))
         XCTAssertTrue(widgetActiveSource.contains(".containerBackground(for:.widget)"))
         XCTAssertTrue(widgetActiveSource.contains("LinearGradient("))
-
-        let activityStart = try XCTUnwrap(
-            source.range(of: "struct FlightCountdownLiveActivityWidget")
-        ).lowerBound
-        let activityEnd = try XCTUnwrap(
-            source.range(
-                of: "@main",
-                range: activityStart..<source.endIndex
-            )
-        ).lowerBound
-        let activitySource = compactSyntax(String(source[activityStart..<activityEnd]))
-
-        XCTAssertTrue(activitySource.contains(".environment(\\.colorScheme,.dark)"))
-        XCTAssertTrue(activitySource.contains(".activityBackgroundTint(Color.black)"))
     }
+
+#if false // RETIRED: Flight Countdown Live Activity was removed by product decision.
+    func test_postTripCorrective_liveActivityUsesStateSpecificFreshnessAndStaleSafeShell() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let coordinatorSource = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(
+                "TripDataHub/Services/FlightCountdownCoordinator.swift"
+            ),
+            encoding: .utf8
+        )
+        let widgetSource = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(
+                "TripDataCountdownWidgetExtension/TripDataCountdownWidget.swift"
+            ),
+            encoding: .utf8
+        )
+        let compactCoordinator = compactSyntax(coordinatorSource)
+        let compactWidget = compactSyntax(widgetSource)
+
+        XCTAssertTrue(compactCoordinator.contains("switchstate"))
+        XCTAssertTrue(compactCoordinator.contains("case.preDeparture:"))
+        XCTAssertTrue(compactCoordinator.contains("returnplannedDepartureUTC"))
+        XCTAssertTrue(compactCoordinator.contains("case.departureTimePassed"))
+        XCTAssertTrue(
+            compactCoordinator.contains(
+                "plannedDepartureUTC.addingTimeInterval(FlightOperationalState.expirationInterval)"
+            )
+        )
+        XCTAssertTrue(compactWidget.contains("isStale:context.isStale"))
+        XCTAssertTrue(compactWidget.contains("ifisStale"))
+        XCTAssertTrue(compactWidget.contains("OpenTripDataHubforcurrentstatus"))
+        XCTAssertTrue(compactWidget.contains("elseifstate==.preDeparture"))
+        XCTAssertTrue(compactWidget.contains("format:.reference("))
+        XCTAssertTrue(compactWidget.contains("to:plannedDepartureUTC"))
+        XCTAssertTrue(compactWidget.contains("allowedFields:[.hour,.minute]"))
+    }
+
+    func test_postTripCorrective_dynamicIslandCompactAndMinimalAreNeutralIndicatorsOnly() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(
+                "TripDataCountdownWidgetExtension/TripDataCountdownWidget.swift"
+            ),
+            encoding: .utf8
+        )
+        let dynamicIslandStart = try XCTUnwrap(source.range(of: "DynamicIsland {"))
+        let dynamicIslandEnd = try XCTUnwrap(
+            source.range(
+                of: "\n        }\n    }\n}",
+                range: dynamicIslandStart.lowerBound..<source.endIndex
+            )
+        )
+        let dynamicIslandSource = String(source[dynamicIslandStart.lowerBound..<dynamicIslandEnd.upperBound])
+        let compactLeading = try sourceSlice(
+            dynamicIslandSource,
+            from: "compactLeading: {",
+            to: "compactTrailing: {"
+        )
+        let compactTrailing = try sourceSlice(
+            dynamicIslandSource,
+            from: "compactTrailing: {",
+            to: "minimal: {"
+        )
+        let minimal = try sourceSlice(
+            dynamicIslandSource,
+            from: "minimal: {",
+            to: "\n        }"
+        )
+
+        for region in [compactLeading, compactTrailing, minimal] {
+            XCTAssertFalse(region.contains("flightNumber"))
+            XCTAssertFalse(region.contains("LiveActivityOperationalStatusView"))
+            XCTAssertFalse(region.contains("formattedFlightNumber"))
+            XCTAssertFalse(region.contains("hours"))
+            XCTAssertFalse(region.contains("minutes"))
+        }
+        XCTAssertTrue(compactLeading.contains("Image(systemName: \"airplane\")"))
+        XCTAssertTrue(minimal.contains("Image(systemName: \"airplane\")"))
+        XCTAssertTrue(compactTrailing.contains("EmptyView()"))
+    }
+#endif
 
     func test_F9_homeWidgetUsesTwoStatusRowsOnlyForSystemSmall() throws {
         let repositoryRoot = URL(fileURLWithPath: #filePath)
@@ -340,7 +434,7 @@ final class Phase4LayoutTests: XCTestCase {
         ).lowerBound
         let statusEnd = try XCTUnwrap(
             source.range(
-                of: "private struct FlightCountdownLiveActivityView",
+                of: "struct TripDataCountdownWidget",
                 range: statusStart..<source.endIndex
             )
         ).lowerBound
@@ -362,8 +456,7 @@ final class Phase4LayoutTests: XCTestCase {
         let report = departure.addingTimeInterval(-90 * 60)
         let presentations: [(FlightOperationalState, Date?, String)] = [
             (.preReport, report, "Report in"),
-            (.preDeparture, report, "Dep in"),
-            (.departureTimePassed, report, "Departure time passed")
+            (.preDeparture, report, "Dep in")
         ]
 
         for (state, reportTimeUTC, expectedPrefix) in presentations {
@@ -384,6 +477,18 @@ final class Phase4LayoutTests: XCTestCase {
             with: "",
             options: .regularExpression
         )
+    }
+
+    private func sourceSlice(
+        _ source: String,
+        from startToken: String,
+        to endToken: String
+    ) throws -> String {
+        let start = try XCTUnwrap(source.range(of: startToken)).upperBound
+        let end = try XCTUnwrap(
+            source.range(of: endToken, range: start..<source.endIndex)
+        ).lowerBound
+        return String(source[start..<end])
     }
 
     @MainActor
@@ -447,6 +552,7 @@ final class Phase4LayoutTests: XCTestCase {
         }
     }
 
+#if false // RETIRED: Flight Countdown Live Activity was removed by product decision.
     private var expandedLiveActivityLayout: some View {
         FlightCountdownExpandedLayoutView(
             flightText: "Flight: D901",
@@ -465,6 +571,7 @@ final class Phase4LayoutTests: XCTestCase {
         .environment(\.colorScheme, .dark)
         .ignoresSafeArea()
     }
+#endif
 
 }
 
@@ -509,10 +616,10 @@ final class FlightOperationalStateTests: XCTestCase {
             (report.addingTimeInterval(-60), .preReport, "Report in", report),
             (report, .preDeparture, "Dep in", F.departure),
             (F.departure.addingTimeInterval(-60), .preDeparture, "Dep in", F.departure),
-            (F.departure, .departureTimePassed, "Departure time passed", F.departure),
-            (F.departure.addingTimeInterval(60), .departureTimePassed, "Departure time passed", F.departure),
-            (F.departure.addingTimeInterval(60 * 60), .departureTimePassed, "Departure time passed", F.departure),
-            (F.departure.addingTimeInterval(60 * 60 + 59), .departureTimePassed, "Departure time passed", F.departure),
+            (F.departure, .departureTimePassed, nil, nil),
+            (F.departure.addingTimeInterval(60), .departureTimePassed, nil, nil),
+            (F.departure.addingTimeInterval(60 * 60), .departureTimePassed, nil, nil),
+            (F.departure.addingTimeInterval(60 * 60 + 59), .departureTimePassed, nil, nil),
             (F.departure.addingTimeInterval(61 * 60), .expired, nil, nil)
         ]
 
@@ -529,13 +636,12 @@ final class FlightOperationalStateTests: XCTestCase {
         }
     }
 
-    func test_T21_evaluationOrderAndElapsedFloorAtSixtyMinuteBoundary() {
+    func test_T21_evaluationOrderAndExactSixtyOneMinuteBoundary() {
         let report = F.departure.addingTimeInterval(-90 * 60)
         XCTAssertEqual(F.state(now: report, report: report), .preDeparture)
         XCTAssertEqual(F.state(now: F.departure, report: report), .departureTimePassed)
         XCTAssertEqual(F.state(now: F.departure.addingTimeInterval(60 * 60 + 59), report: report), .departureTimePassed)
         XCTAssertEqual(F.state(now: F.departure.addingTimeInterval(61 * 60), report: report), .expired)
-        XCTAssertEqual(Int(F.departure.addingTimeInterval(60 * 60 + 59).timeIntervalSince(F.departure)) / 60, 60)
     }
 
     func test_legacyActualAndArrivalStatesDecodeFailClosedToExpired() throws {
@@ -555,12 +661,12 @@ final class FlightCountdownPresentationTests: XCTestCase {
             from: [F.leg()],
             nowUTC: now
         ))
+        let presentation = try XCTUnwrap(output.presentation)
 
         XCTAssertEqual(F.departure.timeIntervalSince(now), 2 * 60 * 60 + 11 * 60)
-        XCTAssertEqual(output.presentation.state, .preDeparture)
-        XCTAssertEqual(output.presentation.prefix, "Dep in")
-        XCTAssertEqual(output.presentation.anchorUTC, F.departure)
-        XCTAssertEqual(output.presentation.direction, .countingDown)
+        XCTAssertEqual(presentation.state, .preDeparture)
+        XCTAssertEqual(presentation.prefix, "Dep in")
+        XCTAssertEqual(presentation.anchorUTC, F.departure)
     }
 
     func test_T2_deviceTimezoneChangesDoNotAlterStateOrDuration() {
@@ -598,77 +704,51 @@ final class FlightCountdownPresentationTests: XCTestCase {
         )
     }
 
-    func test_T10_STDPassedProducesOnlyDepartureTimePassedUntilMinuteSixty() throws {
+    func test_T10_STDPassedKeepsDomainStateWithoutWidgetPresentationUntilExpiration() throws {
         let now = F.departure.addingTimeInterval(60 * 60)
         let output = try XCTUnwrap(FlightCountdownEngine.buildCountdownOutput(
             from: [F.leg()],
             nowUTC: now
         ))
         XCTAssertEqual(output.state, .departureTimePassed)
-        XCTAssertEqual(output.presentation.prefix, "Departure time passed")
-        XCTAssertEqual(output.presentation.anchorUTC, F.departure)
-        XCTAssertEqual(output.presentation.direction, .countingUp)
-        XCTAssertEqual(
-            output.presentation.timerClampUTC,
-            F.departure.addingTimeInterval(60 * 60)
-        )
-        XCTAssertEqual(
-            output.presentation.expirationUTC,
-            F.departure.addingTimeInterval(61 * 60)
-        )
-        XCTAssertNotEqual(
-            output.presentation.timerClampUTC,
-            output.presentation.expirationUTC
-        )
+        XCTAssertEqual(output.visibility, .hidden)
+        XCTAssertNil(output.presentation)
     }
 
-    func test_departureElapsedTimerClampsAtSixtyWhileEvaluatorExpiresAtSixtyOne() throws {
+    func test_departurePassedStateExpiresAtSixtyOne() {
         let report = F.departure.addingTimeInterval(-90 * 60)
-        let presentation = try XCTUnwrap(OperationalCountdownPresentation.make(
+        XCTAssertNil(OperationalCountdownPresentation.make(
             state: .departureTimePassed,
             plannedDepartureUTC: F.departure,
             reportTimeUTC: report
         ))
-        let timerClampUTC = try XCTUnwrap(presentation.timerClampUTC)
-        let expirationUTC = try XCTUnwrap(presentation.expirationUTC)
 
-        XCTAssertEqual(timerClampUTC, F.departure.addingTimeInterval(60 * 60))
-        XCTAssertEqual(expirationUTC, F.departure.addingTimeInterval(61 * 60))
-        XCTAssertEqual(
-            FlightCountdownLiveActivityTimerContract.countUpInterval(
-                startingAt: presentation.anchorUTC,
-                timerClampUTC: timerClampUTC
-            ),
-            F.departure..<F.departure.addingTimeInterval(60 * 60)
-        )
-
-        let checkpoints: [(TimeInterval, Int, FlightOperationalState)] = [
-            (59 * 60 + 59, 59, .departureTimePassed),
-            (60 * 60, 60, .departureTimePassed),
-            (60 * 60 + 59, 60, .departureTimePassed),
-            (61 * 60, 60, .expired)
+        let checkpoints: [(TimeInterval, FlightOperationalState)] = [
+            (59 * 60 + 59, .departureTimePassed),
+            (60 * 60, .departureTimePassed),
+            (60 * 60 + 59, .departureTimePassed),
+            (61 * 60, .expired)
         ]
-        for (elapsed, expectedVisibleMinute, expectedState) in checkpoints {
+        for (elapsed, expectedState) in checkpoints {
             let now = F.departure.addingTimeInterval(elapsed)
-            let visibleMinute = min(Int(now.timeIntervalSince(F.departure)) / 60, 60)
-            XCTAssertEqual(visibleMinute, expectedVisibleMinute)
             XCTAssertEqual(F.state(now: now, report: report), expectedState)
         }
     }
 
-    func test_timerClampAndExpirationRemainAbsoluteAcrossDeviceTimezones() throws {
+    func test_expirationBoundaryRemainsAbsoluteAcrossDeviceTimezones() throws {
         let original = NSTimeZone.default
         defer { NSTimeZone.default = original }
 
         for identifier in ["America/Anchorage", "Asia/Ho_Chi_Minh", "Asia/Seoul"] {
             NSTimeZone.default = try XCTUnwrap(TimeZone(identifier: identifier))
-            let presentation = try XCTUnwrap(OperationalCountdownPresentation.make(
-                state: .departureTimePassed,
-                plannedDepartureUTC: F.departure,
-                reportTimeUTC: nil
-            ))
-            XCTAssertEqual(presentation.timerClampUTC, F.departure.addingTimeInterval(60 * 60))
-            XCTAssertEqual(presentation.expirationUTC, F.departure.addingTimeInterval(61 * 60))
+            XCTAssertEqual(
+                F.state(now: F.departure.addingTimeInterval(60 * 60 + 59)),
+                .departureTimePassed
+            )
+            XCTAssertEqual(
+                F.state(now: F.departure.addingTimeInterval(61 * 60)),
+                .expired
+            )
         }
     }
 
@@ -727,6 +807,7 @@ final class FlightCountdownPresentationTests: XCTestCase {
     }
 }
 
+#if false // RETIRED: Activity request/update/end lifecycle tests for the removed feature.
 final class FlightCountdownCoordinatorLifecycleTests: XCTestCase {
     private typealias F = FlightCountdownFixture
 
@@ -764,6 +845,30 @@ final class FlightCountdownCoordinatorLifecycleTests: XCTestCase {
             updatedStates,
             [.preReport, .preDeparture, .departureTimePassed]
         )
+    }
+
+    func test_foregroundReconcileAtDeparturePlusTwentyTwoPublishesPassedState() async throws {
+        let activityClient = FlightCountdownActivitySpy(
+            activities: [FlightCountdownActivityRecord(id: "activity-L1", legID: "L1")]
+        )
+        let coordinator = FlightCountdownCoordinator(
+            activityClient: activityClient,
+            snapshotClient: FlightCountdownSnapshotSpy()
+        )
+        let now = F.departure.addingTimeInterval(22 * 60)
+        let output = try XCTUnwrap(
+            FlightCountdownEngine.buildCountdownOutput(from: [F.leg()], nowUTC: now)
+        )
+
+        await coordinator.refresh(output: output, mode: .reconcile, nowUTC: now)
+
+        XCTAssertEqual(output.state, .departureTimePassed)
+        let updatedStates = await activityClient.updatedStates()
+        XCTAssertEqual(updatedStates, [.departureTimePassed])
+        let counts = await activityClient.counts()
+        XCTAssertEqual(counts.update, 1)
+        XCTAssertEqual(counts.end, 0)
+        XCTAssertEqual(counts.request, 0)
     }
 
     func test_T52_reconcileWithSameLegUpdatesInPlaceWithoutRecreating() async throws {
@@ -1061,18 +1166,125 @@ private actor FlightCountdownPopulationGate {
         populationContinuation = nil
     }
 }
+#endif
 
 private actor FlightCountdownSnapshotSpy: FlightCountdownSnapshotClient {
     private var persisted: [FlightCountdownSnapshot?] = []
+    private var reloadCount = 0
 
     func persist(_ snapshot: FlightCountdownSnapshot?) async {
         persisted.append(snapshot)
     }
 
-    func reloadWidgets() async {}
+    func reloadWidgets() async {
+        reloadCount += 1
+    }
 
     func persistedLegIDs() -> [String?] {
         persisted.map { $0?.legID }
+    }
+
+    func counts() -> (persist: Int, reload: Int) {
+        (persisted.count, reloadCount)
+    }
+}
+
+final class FlightCountdownSnapshotCoordinatorTests: XCTestCase {
+    private typealias F = FlightCountdownFixture
+
+    func test_approachingDeparturePublishesHomeWidgetSnapshotWithoutActivityDependency() async throws {
+        let now = F.departure.addingTimeInterval(-9 * 60 * 60)
+        let output = try XCTUnwrap(FlightCountdownEngine.buildCountdownOutput(
+            from: [F.leg()],
+            nowUTC: now
+        ))
+        XCTAssertEqual(output.visibility, .widget)
+
+        let snapshotClient = FlightCountdownSnapshotSpy()
+        let coordinator = FlightCountdownCoordinator(snapshotClient: snapshotClient)
+        await coordinator.refresh(output: output, mode: .reconcile, nowUTC: now)
+
+        let persistedLegIDs = await snapshotClient.persistedLegIDs()
+        XCTAssertEqual(persistedLegIDs, [F.leg().id])
+        let counts = await snapshotClient.counts()
+        XCTAssertEqual(counts.persist, 1)
+        XCTAssertEqual(counts.reload, 1)
+    }
+
+    func test_destructiveRebuildClearsThenPublishesHomeWidgetSnapshot() async throws {
+        let now = F.departure.addingTimeInterval(-9 * 60 * 60)
+        let output = try XCTUnwrap(FlightCountdownEngine.buildCountdownOutput(
+            from: [F.leg()],
+            nowUTC: now
+        ))
+        let snapshotClient = FlightCountdownSnapshotSpy()
+        let coordinator = FlightCountdownCoordinator(snapshotClient: snapshotClient)
+
+        await coordinator.refresh(output: output, mode: .destructiveRebuild, nowUTC: now)
+
+        let ids = await snapshotClient.persistedLegIDs()
+        XCTAssertEqual(ids.count, 2)
+        XCTAssertNil(ids[0])
+        XCTAssertEqual(ids[1], F.leg().id)
+        let counts = await snapshotClient.counts()
+        XCTAssertEqual(counts.reload, 2)
+    }
+
+    @MainActor
+    func test_boundarySchedulingRetainsSharedReportSTDAndExpirationTransitions() throws {
+        let report = F.departure.addingTimeInterval(-90 * 60)
+        let leg = F.leg(report: report)
+        let preReportNow = report.addingTimeInterval(-60)
+        let output = try XCTUnwrap(FlightCountdownEngine.buildCountdownOutput(
+            from: [leg],
+            nowUTC: preReportNow
+        ))
+
+        XCTAssertEqual(
+            AppViewModel.nextFlightCountdownEvaluationBoundary(for: output, after: preReportNow),
+            report
+        )
+        XCTAssertEqual(
+            AppViewModel.nextFlightCountdownEvaluationBoundary(for: output, after: report),
+            F.departure
+        )
+        XCTAssertEqual(
+            AppViewModel.nextFlightCountdownEvaluationBoundary(for: output, after: F.departure),
+            F.departure.addingTimeInterval(61 * 60)
+        )
+    }
+
+    func test_productionHasNoFlightCountdownLiveActivityRuntimePath() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let relativePaths = [
+            "TripDataHub/Models/FlightCountdownSharedModels.swift",
+            "TripDataHub/Services/FlightCountdownCoordinator.swift",
+            "TripDataCountdownWidgetExtension/TripDataCountdownWidget.swift",
+            "TripDataHub/Info.plist",
+            "TripDataCountdownWidgetExtension/Info.plist"
+        ]
+        let forbiddenTokens = [
+            "import ActivityKit",
+            "Activity.request(",
+            "activity.update(",
+            "activity.end(",
+            "ActivityConfiguration(",
+            "DynamicIsland",
+            "FlightCountdownAttributes",
+            "NSSupportsLiveActivities"
+        ]
+
+        for relativePath in relativePaths {
+            let source = try String(
+                contentsOf: repositoryRoot.appendingPathComponent(relativePath),
+                encoding: .utf8
+            )
+            for token in forbiddenTokens {
+                XCTAssertFalse(source.contains(token), "\(relativePath) retained \(token)")
+            }
+        }
     }
 }
 
@@ -1257,7 +1469,7 @@ final class FlightCountdownConversionAndBuilderTests: XCTestCase {
 
         XCTAssertNil(output.leg.reportTimeUTC)
         XCTAssertEqual(output.state, .preDeparture)
-        XCTAssertEqual(output.presentation.prefix, "Dep in")
+        XCTAssertEqual(output.presentation?.prefix, "Dep in")
     }
 
     @MainActor
@@ -1359,6 +1571,7 @@ final class FlightCountdownConversionAndBuilderTests: XCTestCase {
 final class DebugFlightCountdownFixtureTests: XCTestCase {
     private let canonicalNowUTC = ISO8601DateFormatter().date(from: "2026-08-16T18:30:00Z")!
 
+#if false // RETIRED: scenario matrix existed only to exercise Live Activity/SpringBoard states.
     func test_debugRuntimeScenariosGenerateExpectedPlanningRelationshipsAndProductionStates() throws {
         let variants: [(
             FlightCountdownDebugScenario,
@@ -1371,7 +1584,11 @@ final class DebugFlightCountdownFixtureTests: XCTestCase {
             (.preDeparture, 30 * 60, .preDeparture, .liveActivity),
             (.departureTimePassed0, 0, .departureTimePassed, .liveActivity),
             (.departureTimePassed1, -60, .departureTimePassed, .liveActivity),
-            (.departureTimePassed60, -(60 * 60), .departureTimePassed, .liveActivity)
+            (.departureTimePassed60, -(60 * 60), .departureTimePassed, .liveActivity),
+            (.stalePreDeparture22, -(22 * 60), .preDeparture, .liveActivity),
+            (.expired61, -(61 * 60), .departureTimePassed, .liveActivity),
+            (.longFlightNumber, 30 * 60, .preDeparture, .liveActivity),
+            (.commercialDeadhead, 30 * 60, .preDeparture, .liveActivity)
         ]
 
         for (scenario, expectedDepartureOffset, expectedState, expectedVisibility) in variants {
@@ -1382,7 +1599,7 @@ final class DebugFlightCountdownFixtureTests: XCTestCase {
             let output = try XCTUnwrap(OperationalStateBuilder.build(
                 schedules: schedules,
                 domicileAirportCode: "ANC",
-                nowUTC: canonicalNowUTC
+                nowUTC: scenario.evaluationDate(relativeTo: canonicalNowUTC)
             ))
 
             XCTAssertEqual(output.leg.id, AppViewModel.debugFlightCountdownFirstLegID.uuidString)
@@ -1402,10 +1619,60 @@ final class DebugFlightCountdownFixtureTests: XCTestCase {
             XCTAssertEqual(output.state, expectedState)
             XCTAssertEqual(output.presentation.state, expectedState)
             XCTAssertEqual(output.visibility, expectedVisibility)
+            if scenario == .longFlightNumber {
+                XCTAssertEqual(output.leg.flightNumber, "LONGFLIGHT12345")
+            }
+            if scenario == .commercialDeadhead {
+                XCTAssertEqual(output.leg.flightNumber, "JL809")
+                XCTAssertTrue(output.leg.isDeadhead)
+            }
         }
     }
 
-    func test_debugRuntimeScenarioTypesAndSettingsUIAreGuardedByDEBUGCompilation() throws {
+    func test_debugStaleFixtureMovesOnlyAlreadyPastLifecycleBoundaryFifteenSecondsForward() throws {
+        for scenario in [
+            FlightCountdownDebugScenario.stalePreDeparture22,
+            .expired61
+        ] {
+            let schedules = AppViewModel.debugFlightCountdownInteractiveSchedules(
+                nowUTC: canonicalNowUTC,
+                scenario: scenario
+            )
+            let output = try XCTUnwrap(OperationalStateBuilder.build(
+                schedules: schedules,
+                domicileAirportCode: "ANC",
+                nowUTC: scenario.evaluationDate(relativeTo: canonicalNowUTC)
+            ))
+            let snapshot = FlightCountdownSnapshot(
+                updatedAtUTC: canonicalNowUTC,
+                state: output.state,
+                visibility: output.visibility,
+                legID: output.leg.id,
+                flightNumber: output.leg.flightNumber,
+                isDeadhead: output.leg.isDeadhead,
+                departureAirportIATA: output.leg.departureAirportIATA,
+                arrivalAirportIATA: output.leg.arrivalAirportIATA,
+                plannedDepartureUTC: output.leg.plannedDepartureUTC,
+                plannedArrivalUTC: output.leg.plannedArrivalUTC,
+                reportTimeUTC: output.leg.reportTimeUTC,
+                presentation: output.presentation,
+                departureTimeZoneID: output.leg.departureTimeZoneID,
+                arrivalTimeZoneID: output.leg.arrivalTimeZoneID,
+                departureDateText: "",
+                departureTimeText: "",
+                arrivalDateText: "",
+                arrivalTimeText: ""
+            )
+
+            XCTAssertEqual(
+                FlightCountdownActivityLifecyclePolicy.staleDate(for: snapshot),
+                canonicalNowUTC.addingTimeInterval(15)
+            )
+        }
+    }
+#endif
+
+    func test_homeWidgetRuntimeFixtureAndSettingsUIAreGuardedByDEBUGCompilation() throws {
         let repositoryRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -1416,8 +1683,9 @@ final class DebugFlightCountdownFixtureTests: XCTestCase {
 
         XCTAssertTrue(previewSource.hasPrefix("#if DEBUG\n"))
         XCTAssertTrue(previewSource.hasSuffix("#endif\n"))
-        assertToken("FlightCountdownDebugScenario", isInsideDebugBlockIn: settingsSource)
-        assertToken("Countdown State", isInsideDebugBlockIn: settingsSource)
+        XCTAssertFalse(settingsSource.contains("FlightCountdownDebugScenario"))
+        XCTAssertFalse(settingsSource.contains("Countdown State"))
+        assertToken("Start Home Widget Fixture", isInsideDebugBlockIn: settingsSource)
         assertToken("startDebugFlightCountdownFixture", isInsideDebugBlockIn: settingsSource)
     }
 
@@ -1426,7 +1694,7 @@ final class DebugFlightCountdownFixtureTests: XCTestCase {
 
         XCTAssertEqual(output.leg.id, AppViewModel.debugFlightCountdownFirstLegID.uuidString)
         XCTAssertEqual(output.state, .preReport)
-        XCTAssertEqual(output.visibility, .liveActivity)
+        XCTAssertEqual(output.visibility, .hidden)
         XCTAssertEqual(output.leg.reportTimeUTC, date("2026-08-16T22:10:00Z"))
         XCTAssertEqual(
             output.leg.reportTimeUTC?.timeIntervalSince(canonicalNowUTC),
@@ -1460,7 +1728,7 @@ final class DebugFlightCountdownFixtureTests: XCTestCase {
         let variants: [(String, FlightPresentationVisibility)] = [
             ("2026-08-16T10:40:00Z", .hidden),
             ("2026-08-16T16:40:00Z", .widget),
-            ("2026-08-16T18:40:00Z", .liveActivity)
+            ("2026-08-16T18:40:00Z", .hidden)
         ]
 
         for (nowString, expectedVisibility) in variants {
@@ -1511,7 +1779,6 @@ final class DebugFlightCountdownFixtureTests: XCTestCase {
         let friendUploadSpy = DebugFlightFixtureFriendUploadSpy()
         let deviceUploadSpy = DebugFlightFixtureDeviceUploadSpy()
         let notificationSpy = DebugFlightFixtureNotificationSpy()
-        let activitySpy = FlightCountdownActivitySpy(activities: [])
         let snapshotSpy = FlightCountdownSnapshotSpy()
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("tdh-debug-flight-fixture-\(UUID().uuidString)", isDirectory: true)
@@ -1524,7 +1791,6 @@ final class DebugFlightCountdownFixtureTests: XCTestCase {
             friendScheduleCloudKitService: friendUploadSpy,
             deviceScheduleCloudKitService: deviceUploadSpy,
             flightCountdownCoordinator: FlightCountdownCoordinator(
-                activityClient: activitySpy,
                 snapshotClient: snapshotSpy
             ),
             crewAccessImportsDirectory: directory,
@@ -1543,11 +1809,24 @@ final class DebugFlightCountdownFixtureTests: XCTestCase {
         XCTAssertEqual(viewModel.scheduleDataRevision, revisionBefore)
         let uploadCountsAfterStart = await friendUploadSpy.counts()
         let deviceUploadsAfterStart = await deviceUploadSpy.uploadCount()
-        let activityCountsAfterStart = await activitySpy.counts()
         XCTAssertEqual(uploadCountsAfterStart, .init(shared: 0, snapshot: 0))
         XCTAssertEqual(deviceUploadsAfterStart, 0)
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
-        XCTAssertEqual(activityCountsAfterStart.request, 1)
+        let persistedLegIDsAfterStart = await snapshotSpy.persistedLegIDs()
+        XCTAssertEqual(
+            persistedLegIDsAfterStart.last,
+            AppViewModel.debugFlightCountdownFirstLegID.uuidString
+        )
+
+        await viewModel.refreshFlightCountdownPresentation(
+            mode: .reconcile,
+            nowUTC: canonicalNowUTC.addingTimeInterval(10 * 60)
+        )
+        let persistedLegIDsAfterRefresh = await snapshotSpy.persistedLegIDs()
+        XCTAssertEqual(
+            persistedLegIDsAfterRefresh.last,
+            AppViewModel.debugFlightCountdownFirstLegID.uuidString
+        )
 
         await viewModel.stopDebugFlightCountdownFixture(nowUTC: canonicalNowUTC)
 

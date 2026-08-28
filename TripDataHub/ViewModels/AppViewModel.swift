@@ -4519,12 +4519,10 @@ final class AppViewModel: ObservableObject {
     }
 
     func startDebugFlightCountdownFixture(
-        scenario: FlightCountdownDebugScenario = .preReport,
         nowUTC: Date = Date()
     ) async {
         let fixtureSchedules = Self.debugFlightCountdownInteractiveSchedules(
-            nowUTC: nowUTC,
-            scenario: scenario
+            nowUTC: nowUTC
         )
         debugFlightCountdownFixtureSchedules = fixtureSchedules
         isDebugFlightCountdownFixtureActive = true
@@ -4566,7 +4564,7 @@ final class AppViewModel: ObservableObject {
     }
 
     func refreshFlightCountdownPresentation(
-        mode: LiveActivityRefreshMode,
+        mode: FlightCountdownRefreshMode,
         nowUTC: Date = Date()
     ) async {
         let output = nextFlightCountdownOutput(nowUTC: nowUTC)

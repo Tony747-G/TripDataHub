@@ -172,7 +172,7 @@ Timeline remains compact: Original Scheduled is the normal state, Revised Schedu
 
 ## INV-013: Real-Time Operational Countdown Uses STD, Report Time, and Now Only
 
-**Rule:** Real-time countdown state, current-leg selection, status descriptors, boundary scheduling, and Activity lifecycle decisions take only required `plannedDepartureUTC`, optional trip-level `reportTimeUTC`, and `nowUTC`. All duration math is an absolute `Date` difference. `plannedArrivalUTC` may be carried only as route display metadata. STA, ATD, ATA, `depUTC`, and `arrUTC` MUST NOT drive operational state or lifecycle.
+**Rule:** Real-time countdown state, current-leg selection, status descriptors, and boundary scheduling take only required `plannedDepartureUTC`, optional trip-level `reportTimeUTC`, and `nowUTC`. All duration math is an absolute `Date` difference. `plannedArrivalUTC` may be carried only as route display metadata. STA, ATD, ATA, `depUTC`, and `arrUTC` MUST NOT drive operational state or presentation lifecycle.
 
 If a required planned departure or presentation timezone cannot be resolved, no operational presentation is created for that leg. The leg is excluded from current-leg selection, the reason is recorded through `SyncDiagnosticsLog`, and selection continues. There is no `.unknown` operational state and no default timestamp is synthesized. Missing or invalid Actual data does not exclude a leg whose planned-departure inputs are valid.
 
@@ -188,13 +188,13 @@ If a required planned departure or presentation timezone cannot be resolved, no 
 
 ## INV-014: Time Passage Reports a Schedule Boundary, Not an Actual Event
 
-**Rule:** Time passage alone MUST NOT produce `Delayed`, `Departed`, `In flight`, `Arriving`, `Arrived`, or `Completed`. From STD through elapsed minute 60 the product may report only the schedule fact `.departureTimePassed` with the prefix `Departure time passed`. At STD+61 the leg becomes `.expired` and produces no new operational payload. If a local-only Activity shell survives suspension across that boundary, its system timer MUST remain clamped at 60 minutes until the next app execution reconciles and ends it.
+**Rule:** Time passage alone MUST NOT produce `Delayed`, `Departed`, `In flight`, `Arriving`, `Arrived`, or `Completed`. From STD inclusive through STD+61 exclusive, the schedule-domain state is `.departureTimePassed`: it means only that the scheduled departure boundary has passed. At STD+61 the leg becomes `.expired` for current-leg selection and snapshot reconstruction. This invariant defines no post-STD visible prefix, elapsed value, timer, or shell lifecycle.
 
-**Why:** A passed STD is known from the schedule; what the aircraft actually did is not. `Departure time passed` deliberately describes the former and makes no Actual claim. STA passage is not used for real-time operational presentation.
+**Why:** A passed STD is known from the schedule; what the aircraft actually did is not. STA passage is not used to infer a realtime operational fact.
 
 **Forbidden:** Treating `.departureTimePassed` as proof of departure; mapping STD or STA passage to an Actual event; using a future leg, connection, location, ATD, ATA, or elapsed schedule time to infer a real-time aircraft state; retaining `Delayed`, `Arriving in`, `Scheduled Arrival Time Passed`, or schedule-derived `Completed` copy on any operational surface.
 
-**Enforced by:** the four-state evaluator, shared semantic status descriptor, current-leg selector, and STD+61 lifecycle boundary. Tests: revised T-6, T-10 through T-12, T-17, T-20, and T-21.
+**Enforced by:** the four-state evaluator, current-leg selector, and STD+61 model boundary. Tests: revised T-6, T-10 through T-12, T-17, T-20, and T-21.
 
 **See also:** `docs/ADR/ADR-004-flight-operational-state-model.md`.
 
@@ -202,15 +202,15 @@ If a required planned departure or presentation timezone cannot be resolved, no 
 
 ## INV-015: Derived Operational Presentation Has One Builder and Two Explicit Refresh Modes
 
-**Rule:** Live Activity, Dynamic Island, Home Screen Widget snapshot, notification scheduling, current-leg cache, and launch reconstruction derive from one operational-state builder output. Normal operation uses explicit `reconcile` semantics: update an Activity while the current leg remains the same, and end/create only when the current leg changes or disappears. A Trip Revision or Replacement alone uses explicit `destructiveRebuild` semantics: cancel old derived artifacts, end all old Activities, invalidate snapshots/caches, persist the revision, then rebuild.
+**Rule:** Home Screen Widget snapshot and current-leg reconstruction derive from one operational-state builder output. Normal operation uses explicit `reconcile` semantics to publish the current snapshot. A Trip Revision or Replacement alone uses explicit `destructiveRebuild` semantics to clear the old Widget snapshot before publishing the revised generation. Report notification scheduling remains independently owned by `NextReportNotificationService` and its report-window builder.
 
-The Timeline Top Next Report Countdown is an explicit exception because it represents the next Trip's report instant rather than current-flight operational state. Its selector and visibility are governed by INV-020 and MUST NOT be fed back into notification, Widget, or Activity lifecycle decisions.
+The Timeline Top Next Report Countdown represents the next Trip's report instant rather than current-flight operational state. Its selector and visibility are governed by INV-020 and MUST NOT be fed back into notification or Home Screen Widget lifecycle decisions.
 
-**Why:** Independent derivation paths drift and leave obsolete operational information alive. Conversely, rebuilding every normal refresh consumes ActivityKit request budget and causes visible churn. Replacement and ordinary state progression have different lifecycle requirements and must remain distinct.
+**Why:** Independent Widget derivation paths drift and leave obsolete snapshot information alive. Replacement and ordinary state progression have different publication requirements and must remain distinct.
 
-**Forbidden:** Surface-specific state builders; notification and Activity state computed independently; coordinator-side guessing of refresh mode; unconditional Activity end/request during launch, scene activation, periodic refresh, or same-leg state transitions; patching an old Activity through a Trip Replacement.
+**Forbidden:** A second Home Screen Widget state builder; coordinator-side guessing of refresh mode; publishing a revised generation without first clearing the prior snapshot during Trip Replacement; coupling INV-020 selection back into Widget or notification state.
 
-**Enforced by:** the single operational-state builder and shared structured countdown presentation; caller-selected `LiveActivityRefreshMode`; a coordinator-owned, one-time initial Activity population barrier shared by every refresh entry point; best-effort boundary-driven report/STD/STD+61 evaluation with immediate next-execution cleanup; and the replacement-only, timeout-bounded destructive invalidation seam. Tests: T-4 through T-8, revised T-16, T-18, T-19, and T-22.
+**Enforced by:** the single operational-state builder and optional Home Screen Widget countdown presentation; caller-selected `FlightCountdownRefreshMode`; the snapshot-only `FlightCountdownCoordinator`; boundary-driven report/STD/STD+61 evaluation; and the replacement-only, timeout-bounded destructive invalidation seam. Tests: shared snapshot coordinator regressions, T-4 through T-7, revised T-16, and T-22.
 
 **See also:** INV-006, INV-007, INV-008, and `docs/ADR/ADR-004-flight-operational-state-model.md`.
 
@@ -220,9 +220,9 @@ The Timeline Top Next Report Countdown is an explicit exception because it repre
 
 **Rule:** T-12h, T-6h, and other surface visibility windows belong only to Presentation Policy. They determine whether and where a valid operational state is shown; they MUST NOT participate in `FlightOperationalState` evaluation.
 
-**Why:** A leg's operational meaning does not change because a Widget or Live Activity has entered its display window. Combining the two concepts caused STD-relative UI phases to masquerade as flight state.
+**Why:** A leg's operational meaning does not change because the Home Screen Widget has entered or left its display window. Combining the two concepts caused presentation phases to masquerade as flight state.
 
-**Forbidden:** A state case whose meaning is a Widget/Live Activity window; using a visibility lead/tail constant to decide `.departureTimePassed` or `.expired`; adding `.preTrip` to represent “not visible yet.”
+**Forbidden:** A state case whose meaning is a Widget window; using a visibility lead/tail constant to decide `.departureTimePassed` or `.expired`; adding `.preTrip` to represent “not visible yet.”
 
 **Enforced by:** separate `FlightOperationalState` and Presentation Policy types, with no presentation-window input in the operational-state evaluator signature. Test: T-23 is the dedicated enforcing regression; it requires the same valid operational state outside the T-12h presentation window and regardless of surface visibility.
 
@@ -232,7 +232,7 @@ The Timeline Top Next Report Countdown is an explicit exception because it repre
 
 ## INV-017: Actual Events Are History-Only for Real-Time Countdown
 
-**Rule:** ATD and ATA remain persisted, leg-scoped history under INV-012, but they MUST NOT affect real-time operational state, current-leg selection, status text, boundary scheduling, snapshot stale dates, or Activity update/end/request decisions. Two schedules differing only in ATD or ATA produce identical operational output.
+**Rule:** ATD and ATA remain persisted, leg-scoped history under INV-012, but they MUST NOT affect real-time operational state, current-leg selection, status text, boundary scheduling, or Home Screen Widget snapshots. Two schedules differing only in ATD or ATA produce identical operational output.
 
 **Why:** CrewAccess Actual data is commonly imported after trip completion and is not a contracted real-time source. Allowing it to affect live countdown would make normal operation depend on unavailable evidence while leaving surfaces vulnerable to revision-time changes.
 
@@ -246,17 +246,15 @@ The Timeline Top Next Report Countdown is an explicit exception because it repre
 
 ## INV-018: STD+61 Is the Exact Operational Expiration Boundary
 
-**Rule:** Operational state is evaluated in this exact order: `now >= STD+61min` → `.expired`; otherwise `now >= STD` → `.departureTimePassed`; otherwise a non-nil report time with `now < reportTime` → `.preReport`; otherwise → `.preDeparture`. Equality belongs to the later state. STD is elapsed minute 0, the entire interval from STD+60:00 through STD+60:59 displays elapsed minute 60, and STD+61:00 is non-presenting when reconciliation can run.
-
-Operational expiration and presentation clamping are distinct absolute instants: `expirationUTC = STD+61min`, while `timerClampUTC = STD+60min`. The OS-driven departure-elapsed timer uses `STD..<timerClampUTC`, so a retained shell displays at most 60 minutes. `staleDate = expirationUTC` is supplemental metadata, not an exact dismissal guarantee. A suspended or terminated local-only app need not wake at STD+61; the next available app execution MUST immediately reconcile and end the expired Activity.
+**Rule:** Operational state is evaluated in this exact order: `now >= STD+61min` → `.expired`; otherwise `now >= STD` → `.departureTimePassed`; otherwise a non-nil report time with `now < reportTime` → `.preReport`; otherwise → `.preDeparture`. Equality belongs to the later state. The closed-open interval `[STD, STD+61min)` belongs to `.departureTimePassed`; STD+61:00 belongs to `.expired`. These are absolute-Date domain boundaries, not a visible elapsed-time contract.
 
 Current-leg selection gives `.departureTimePassed` legs priority through minute 60, choosing the latest STD when multiple such legs exist. Only at STD+61 is that leg excluded and selection allowed to advance to the earliest valid future leg. Short turns may therefore have a shortened or absent next-leg `Dep in` interval; this is accepted product behavior.
 
-**Why:** The order preserves the exact +60/+61 contract and prevents a future leg from displacing the selected passed leg early. Separating the timer clamp from operational expiration prevents misleading 61/62/90-minute copy without pretending that local scheduling can guarantee execution at the terminal boundary.
+**Why:** The order preserves the exact STD+61 domain contract and prevents a future leg from displacing the selected passed leg early. It remains a model/selection boundary; no Flight Countdown Live Activity exists to expose it on Lock Screen or Dynamic Island.
 
-**Forbidden:** Using strict `>` at STD or STD+61; expiring at STD+60; reusing one Date/property for both `timerClampUTC` and `expirationUTC`; allowing visible elapsed time to advance beyond 60 minutes; treating `staleDate` as a dismissal guarantee; allowing a future leg to outrank a non-expired `.departureTimePassed` leg; using STA, STA+1h, ATD, or ATA as an operational boundary; polling every minute to drive state or Activity updates; adding BGTask/APNs/server-side ending solely to guarantee this boundary.
+**Forbidden:** Using strict `>` at STD or STD+61; expiring model state at STD+60; allowing a future leg to outrank a non-expired `.departureTimePassed` leg; using STA, STA+1h, ATD, or ATA as an operational boundary; reintroducing a local-only Flight Countdown Live Activity to present this boundary.
 
-**Enforced by:** the pure state evaluator, latest-STD passed-leg selector, best-effort report/STD/STD+61 boundary scheduler, separately bounded OS-driven timer rendering, and immediate next-execution lifecycle cleanup. Tests: revised T-6, T-10, T-12, T-18, T-20, T-21, and the timer-clamp boundary regression.
+**Enforced by:** the pure state evaluator, latest-STD passed-leg selector, and report/STD/STD+61 boundary scheduler used for shared snapshot reconstruction. Tests: revised T-6, T-10, T-12, T-20, and T-21.
 
 **See also:** INV-014, INV-017, and `docs/ADR/ADR-004-flight-operational-state-model.md`.
 
@@ -266,20 +264,38 @@ Current-leg selection gives `.departureTimePassed` legs priority through minute 
 
 **Rule:** A surface that overrides its background MUST declare its foreground at the same ownership boundary. `.primary` and `.secondary` resolve against the system appearance, not against a background or tint supplied by the view. Background and foreground declarations are a pair; changing only one is forbidden.
 
-**Why:** An implicit semantic foreground can become unreadable when the fixed background and system appearance disagree. On iOS 18.6 in Light appearance, the Lock Screen Live Activity flight and route text rendered dark on a black background; the same contract defect also existed in the active Home Screen Widget. iOS 26.5 happened to keep the Live Activity text visible, so one OS version could not expose the regression reliably.
+**Why:** An implicit semantic foreground can become unreadable when the fixed background and system appearance disagree. This contract remains relevant to the active Home Screen Widget.
 
-**Forbidden:** Adding or changing a fixed custom background without declaring the matching foreground environment or explicit foreground at the same surface; placing surface color policy in `FlightCountdownExpandedLayoutView`; relying on `activitySystemActionForegroundColor` to color Live Activity content.
+**Forbidden:** Adding or changing a fixed custom background without declaring the matching foreground environment or explicit foreground at the same surface.
 
-**Enforced by:** adjacent foreground/background declarations on the Lock Screen / Dynamic Island expanded Live Activity surface and the active Home Screen Widget surface. T-51S asserts both sides of each source-level pair; Light and Dark rendering remains device acceptance.
+**Enforced by:** adjacent foreground/background declarations on the active Home Screen Widget surface and active test `test_T51S_homeWidgetCustomBackgroundDeclaresMatchingForegroundEnvironment`. Light and Dark rendering remains Widget acceptance.
 
 ---
 
-## INV-020: Timeline Top Selects Only the Next Future Trip Report
+## INV-020: Timeline Top Suppresses the Next Report During an Active Trip
 
-**Rule:** Timeline Top selects the single Trip window with the earliest `reportTimeUTC` strictly greater than `nowUTC`. At equality the entire Top countdown is absent. Selection is independent of the viewed/selected Trip and Timeline scroll position. Duration is the absolute UTC instant difference; LCL/UTC changes rendering timezone and zone label only.
+**Rule:** Timeline Top may select the single Trip window with the earliest `reportTimeUTC` strictly greater than `nowUTC` only when no started Trip is still inside its active window. A Trip active window begins at report-time equality and ends at `releaseBoundary = final flight leg planned arrival + 30 minutes`; equality at the release boundary makes the next future Trip eligible. Operating and commercial-deadhead flight legs both count, including a final flight that ends away from domicile. A `GND` row does not count as a flight leg.
 
-This Timeline-only visibility MUST NOT cancel, hide, or alter the current-flight departure countdown, notifications, Widget snapshot, or Live Activity. Those remain governed by INV-013 through INV-018.
+The final flight is determined before parsing its arrival. If that leg has no valid planned arrival, no replacement time is inferred: the most recently started unresolved Trip conservatively suppresses the next report until a later Trip itself reaches report time and supersedes it. Any started Trip with a known release boundary still in the future also suppresses the card, including overlapping Trips.
 
-**Enforced by:** `TimelineNextReportCountdownBuilder`, the shared iPhone/iPad `TimelineNextReportCountdownView`, and `NextReportWindowBuilderTests` selection, equality, format, timezone, color, and responsibility-separation regressions.
+Before the current Trip's report time, its existing three-line countdown remains visible. At report-time equality the entire Top countdown is absent, and it remains absent through `releaseBoundary - 1 second`. Selection is independent of the viewed/selected Trip and Timeline scroll position. Duration is the absolute UTC instant difference; LCL/UTC changes rendering timezone and zone label only.
+
+This Timeline-only visibility MUST NOT cancel, hide, or alter report notifications or the Home Screen Widget snapshot. Those remain governed by their own builders and INV-013 through INV-018.
+
+**Enforced by:** `TimelineNextReportCountdownBuilder`, the shared iPhone/iPad `TimelineNextReportCountdownView`, and `NextReportWindowBuilderTests` covering report-time and release boundaries, commercial deadhead and foreign endings, overlap, multiple future Trips, missing final arrival, format, timezone, color, and responsibility separation.
 
 **See also:** INV-001, INV-002, INV-005, INV-015, and `docs/ADR/ADR-004-flight-operational-state-model.md`.
+
+---
+
+## INV-021: Flight Countdown Live Activities Are Absent
+
+**Rule:** TripDataHub MUST NOT request, update, or end a Flight Countdown Live Activity. The app exposes no Flight Countdown Lock Screen or Dynamic Island compact, minimal, or expanded configuration. Production sources and Info.plists contain no Flight Countdown ActivityKit runtime or Live Activity capability declaration.
+
+**Why:** The local-only ActivityKit architecture could not guarantee that departure status was no longer user-visible at Scheduled Departure Time +60 minutes. The product requirement was not weakened, and APNs/server/BGTask infrastructure was not added; the feature was removed instead. This is an architecture/product decision, not an iOS bug classification.
+
+**Forbidden:** Restoring `Activity.request`, `activity.update`, `activity.end`, Activity attributes/ContentState, `ActivityConfiguration`, Dynamic Island regions, `staleDate`, `context.isStale`, DateReference, timer-clamp, or lifecycle workarounds for Flight Countdown without a new Product Owner decision and a new architecture contract.
+
+**Enforced by:** the absence of an ActivityKit dependency in production Flight Countdown sources, removal of `NSSupportsLiveActivities`, a snapshot-only coordinator, and the production runtime-path regression guard.
+
+**See also:** `docs/ADR/ADR-004-flight-operational-state-model.md`.

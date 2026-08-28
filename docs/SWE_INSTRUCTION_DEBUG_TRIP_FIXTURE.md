@@ -1,5 +1,11 @@
 # SWE 実装指示 — DEBUG-only 検証 fixture と B-11〜B-13 Simulator harness
 
+> **2026-08-28 amendment:** Flight Countdown Live Activities and their interactive scenario matrix
+> were removed by product decision. The remaining interactive fixture exists only for the Home
+> Screen Widget at T-9h. Any Lock Screen, Dynamic Island, Activity lifecycle, stale payload, +60,
+> long-ID, or commercial-DH scenario below is historical and MUST NOT be restored. The canonical
+> synthetic schedule remains available for shared operational-state and timezone tests.
+
 - 目的: 実 flight の T-6h window を待たずに、**production の state / countdown / presentation path** を Simulator で検証する
 - 対象: Day 2 Priority 1（B-11 / B-12 / B-13 ＋ current leg selection ＋ non-persistence）
 - **production logic は一切変更しない。** 追加は DEBUG 限定の fixture と入口のみ

@@ -1,64 +1,6 @@
-import ActivityKit
+import Foundation
 import SwiftUI
 import WidgetKit
-
-private func formattedFlightNumber(
-    _ number: String?,
-    isDeadhead: Bool,
-    unknownFallback: String
-) -> String {
-    let trimmed = number?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    guard !trimmed.isEmpty else {
-        return isDeadhead ? "DH" : unknownFallback
-    }
-    let upper = trimmed.uppercased()
-    let normalized: String
-    if upper.hasPrefix("5X") {
-        normalized = upper
-    } else if let firstScalar = trimmed.unicodeScalars.first, CharacterSet.letters.contains(firstScalar) {
-        normalized = upper
-    } else {
-        normalized = "5X\(upper)"
-    }
-    return isDeadhead ? "DH \(normalized)" : normalized
-}
-
-private let liveActivityFormatterLock = NSLock()
-private var liveActivityDateFormatterCache: [String: DateFormatter] = [:]
-
-private func liveActivityLocalDateText(_ date: Date, tzID: String) -> String {
-    liveActivityFormatterLock.lock(); defer { liveActivityFormatterLock.unlock() }
-    let formatter: DateFormatter
-    if let existing = liveActivityDateFormatterCache[tzID] {
-        formatter = existing
-    } else {
-        let newFormatter = DateFormatter()
-        newFormatter.calendar = Calendar(identifier: .gregorian)
-        newFormatter.locale = Locale(identifier: "en_US_POSIX")
-        newFormatter.dateFormat = "MMM d (EEE)"
-        newFormatter.timeZone = TimeZone(identifier: tzID) ?? TimeZone(secondsFromGMT: 0)
-        liveActivityDateFormatterCache[tzID] = newFormatter
-        formatter = newFormatter
-    }
-    return formatter.string(from: date)
-}
-
-private struct LiveActivityOperationalStatusView: View {
-    let presentation: OperationalCountdownPresentation?
-    var showsPrefix = true
-    var prioritizesPrefix = false
-
-    @ViewBuilder
-    var body: some View {
-        if let presentation {
-            OperationalCountdownStatusView(
-                presentation: presentation,
-                showsPrefix: showsPrefix,
-                prioritizesPrefix: prioritizesPrefix
-            )
-        }
-    }
-}
 
 private struct FlightCountdownEntry: TimelineEntry {
     let date: Date
@@ -225,51 +167,6 @@ private struct HomeWidgetOperationalStatusView: View {
     }
 }
 
-private struct FlightCountdownLiveActivityView: View {
-    let state: FlightCountdownAttributes.ContentState
-    var verticalPadding: CGFloat = 6
-    var prioritizesStatusPrefix = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            FlightCountdownExpandedLayoutView(
-                flightText: "Flight: \(formattedFlightNumber(state.flightNumber, isDeadhead: state.isDeadhead, unknownFallback: "UNKNOWN"))",
-                departureDateText: liveActivityLocalDateText(
-                    state.plannedDepartureUTC,
-                    tzID: state.departureTimeZoneID
-                ),
-                departureAirportTimeText: "\(state.departureAirportIATA) \(state.departureTimeText)",
-                arrivalDateText: liveActivityLocalDateText(
-                    state.plannedArrivalUTC,
-                    tzID: state.arrivalTimeZoneID
-                ),
-                arrivalAirportTimeText: "\(state.arrivalAirportIATA) \(state.arrivalTimeText)"
-            ) {
-                LiveActivityOperationalStatusView(
-                    presentation: state.presentation,
-                    prioritizesPrefix: prioritizesStatusPrefix
-                )
-                    .foregroundStyle(statusColor)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.leading, 14)
-        .padding(.trailing, 10)
-        .padding(.vertical, verticalPadding)
-    }
-
-    private var statusColor: Color {
-        switch state.state {
-        case .departureTimePassed:
-            return .orange
-        case .preReport, .preDeparture:
-            return .green
-        case .expired:
-            return .secondary
-        }
-    }
-}
-
 struct TripDataCountdownWidget: Widget {
     let kind = "TripDataCountdownWidget"
 
@@ -283,54 +180,9 @@ struct TripDataCountdownWidget: Widget {
     }
 }
 
-struct FlightCountdownLiveActivityWidget: Widget {
-    var body: some WidgetConfiguration {
-        ActivityConfiguration(for: FlightCountdownAttributes.self) { context in
-            FlightCountdownLiveActivityView(state: context.state)
-                // This surface owns its background, therefore it must own its foreground.
-                // Semantic colors resolve against the system appearance, not this tint;
-                // changing either declaration requires reviewing the other.
-                .environment(\.colorScheme, .dark)
-                .activityBackgroundTint(Color.black)
-                .activitySystemActionForegroundColor(.white)
-        } dynamicIsland: { context in
-            DynamicIsland {
-                DynamicIslandExpandedRegion(.bottom) {
-                    FlightCountdownLiveActivityView(
-                        state: context.state,
-                        verticalPadding: 0,
-                        prioritizesStatusPrefix: true
-                    )
-                }
-                .contentMargins(.top, 0)
-            } compactLeading: {
-                Text("✈ \(formattedFlightNumber(context.state.flightNumber, isDeadhead: context.state.isDeadhead, unknownFallback: "Flight"))")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.9)
-            } compactTrailing: {
-                LiveActivityOperationalStatusView(
-                    presentation: context.state.presentation,
-                    showsPrefix: false
-                )
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.45)
-            } minimal: {
-                Text("✈ \(formattedFlightNumber(context.state.flightNumber, isDeadhead: context.state.isDeadhead, unknownFallback: "Flight"))")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.white)
-            }
-        }
-    }
-}
-
 @main
 struct TripDataCountdownWidgetBundle: WidgetBundle {
     var body: some Widget {
         TripDataCountdownWidget()
-        FlightCountdownLiveActivityWidget()
     }
 }

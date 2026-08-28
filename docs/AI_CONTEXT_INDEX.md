@@ -34,14 +34,14 @@ This is the routing layer for AI sessions working on TripDataHub. It tells you w
 - `docs/MANUAL_EVENTS_LAYER_ARCHITECTURE.md`
 - `docs/ADR/ADR-002-utc-source-of-truth.md`
 
-## If Touching Flight State / Countdown / Live Activity / Notification
+## If Touching Flight State / Countdown / Home Widget / Notification
 
 - `docs/INVARIANTS.md` — especially INV-013 through INV-018
 - `docs/ADR/ADR-004-flight-operational-state-model.md`
 - `docs/BUILD_WEEK_TDH_RELIABILITY_SWE_INSTRUCTION.md` — phased scope, T-1 through T-25, and acceptance requirements
 - `docs/SWE_INSTRUCTION_DEBUG_TRIP_FIXTURE.md` — DEBUG-only simulator harness, T-45 through T-49, and non-persistence requirements
-- `docs/SWE_INSTRUCTION_LIVE_ACTIVITY_LAYOUT_V2.md` — iOS 18 Live Activity layout/status rendering, T-14, T-50S, and production-path ActivityKit/SpringBoard D-7 acceptance
-- `docs/SWE_INSTRUCTION_IOS18_BASELINE_AND_T50.md` — iOS 18 project baseline, minimal generated-project diff, T-50S, and deferred Dynamic Island automation
+- `docs/SWE_INSTRUCTION_LIVE_ACTIVITY_LAYOUT_V2.md` — **retired** historical Live Activity instruction; do not restore it
+- `docs/SWE_INSTRUCTION_IOS18_BASELINE_AND_T50.md` — historical iOS 18 / Live Activity context; ADR-004 and INV-021 supersede its Activity requirements
 - `docs/SWE_INSTRUCTION_PRIORITY2_SIMULATOR_TRIAGE.md` — historical/superseded 2026-08-17 triage procedure; current status is in `DEVICE_VERIFICATION_CHECKLIST.md`
 - `docs/FOLLOW_UPS.md` — register of deliberately deferred items: F-1 duration format divergence; F-2 Widget format; F-3 DI nightly automation; F-4 CI signing/Simulator entitlements; F-5 Print Preview wording; F-6 retired in-flight-progress proposal pending a trustworthy realtime source; F-7 XcodeGen version drift; F-8 Info.plist/build-setting duplication; F-9 Home Screen Widget visual acceptance
 

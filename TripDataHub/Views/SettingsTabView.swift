@@ -16,9 +16,6 @@ struct SettingsTabView: View {
     @AppStorage(ProfileStorageKeys.passportExpiryDate) private var passportExpiryDate = ""
     @AppStorage(ProfileStorageKeys.chinaVisaExpiryDate) private var chinaVisaExpiryDate = ""
     @State private var showNotificationDeniedAlert = false
-#if DEBUG
-    @State private var debugFlightCountdownScenario: FlightCountdownDebugScenario = .preReport
-#endif
 
     private var appearanceModeBinding: Binding<AppearanceMode> {
         Binding(
@@ -69,28 +66,19 @@ struct SettingsTabView: View {
 
 #if DEBUG
             Section {
-                Picker("Countdown State", selection: $debugFlightCountdownScenario) {
-                    ForEach(FlightCountdownDebugScenario.allCases) { scenario in
-                        Text(scenario.title).tag(scenario)
-                    }
-                }
-                .disabled(viewModel.isDebugFlightCountdownFixtureActive)
-
                 Button {
                     Task {
                         if viewModel.isDebugFlightCountdownFixtureActive {
                             await viewModel.stopDebugFlightCountdownFixture()
                         } else {
-                            await viewModel.startDebugFlightCountdownFixture(
-                                scenario: debugFlightCountdownScenario
-                            )
+                            await viewModel.startDebugFlightCountdownFixture()
                         }
                     }
                 } label: {
                     Label(
                         viewModel.isDebugFlightCountdownFixtureActive
-                            ? "Stop Flight Countdown Fixture"
-                            : "Start Flight Countdown Fixture",
+                            ? "Stop Home Widget Fixture"
+                            : "Start Home Widget Fixture",
                         systemImage: viewModel.isDebugFlightCountdownFixtureActive
                             ? "stop.circle"
                             : "airplane.circle"

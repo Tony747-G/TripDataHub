@@ -57,8 +57,6 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
-	<key>NSSupportsLiveActivities</key>
-	<true/>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>TripDataHub uses your photo library only to choose and crop your Profile picture.</string>
 	<key>UIRequiresFullScreen</key>

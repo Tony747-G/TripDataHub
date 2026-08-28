@@ -13,7 +13,9 @@ Build Week 中に「意図的に今はやらない」と判断した項目の一
 
 ## F-1. duration 表記の 2 系統併存
 
-**状態**: `deferred`（2026-08-17 Tony 判断）
+**状態**: `RETIRED BY FEATURE REMOVAL`（2026-08-28 Product Owner判断）
+
+以下はLive Activityが存在した時点のhistorical rationaleであり、再評価対象ではない。
 
 現状:
 
@@ -36,13 +38,15 @@ Build Week 中に「意図的に今はやらない」と判断した項目の一
 
 ---
 
-## F-2. Widget の status 書式が Live Activity と未整合
+## F-2. Home Screen Widget の status 書式が Live Activity と未整合
 
-**状態**: `deferred`
+**状態**: `RETIRED BY FEATURE REMOVAL`
 
-Home Screen Widget と DI compact / minimal は `LegacyOperationalStatusView` で `H:MM:SS`（秒あり）を描画する。Live Activity（Lock Screen / DI expanded）は分精度。
+比較対象のLive Activityが削除されたため、この不整合は存在しない。以下はhistorical記録。
 
-**今やらない理由**: `FlightPresentationPolicy.visibility` により `.widget` と `.liveActivity` は**排他**であり、利用者が並べて見ることはない。Widget 側のレイアウト安全性は T-14 の 3 幅検証の対象外で、変更すると別の回帰確認が必要になる。
+Home Screen Widget は専用の `HomeWidgetOperationalStatusView` で status を描画する。Live Activity（Lock Screen / DI expanded）は stale-safe presentation を使用する。DI compact / minimal は post-trip corrective contract により neutral airplane indicator のみに縮退したため、この不整合の対象ではない。
+
+**今やらない理由**: `FlightPresentationPolicy.visibility` により `.widget` と `.liveActivity` は**排他**であり、利用者が並べて見ることはない。今回の corrective scope は Live Activity と Timeline に限定され、Widget 側のレイアウト安全性は T-14 の 3 幅検証の対象外である。
 
 **再評価条件**: Widget のレイアウトを別件で触るとき、または `FlightPresentationPolicy` の排他性が崩れるとき。
 
@@ -52,7 +56,9 @@ Home Screen Widget と DI compact / minimal は `LegacyOperationalStatusView` �
 
 ## F-3. Dynamic Island expanded の nightly XCUITest
 
-**状態**: `KEEP DEFERRED`（nightly automation は non-gating）
+**状態**: `RETIRED BY FEATURE REMOVAL`
+
+Dynamic Island Flight Countdownが削除されたためautomationを導入しない。以下はhistorical記録。
 
 isolated feasibility investigation により、Dynamic Island expanded は SpringBoard accessibility tree の semantic element `regular.view` を `press(forDuration: 1.2)` することで、座標・frame 計算・screen size dependency なしに展開できると実測した。expanded 上の OS-rendered duration も `StaticText` として取得でき、実時間の minute boundary update を iOS 18.6 / 26.5 で観測できた。iOS 26.5 では同一 probe が 3/3 run PASS し、private client identifier、Activity UUID、pointer 値には依存していない。
 

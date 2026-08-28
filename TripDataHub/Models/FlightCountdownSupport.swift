@@ -39,7 +39,7 @@ struct CountdownEngineOutput: Codable, Equatable, Hashable {
     let leg: FlightCountdownLeg
     let state: FlightOperationalState
     let visibility: FlightPresentationVisibility
-    let presentation: OperationalCountdownPresentation
+    let presentation: OperationalCountdownPresentation?
     let display: CountdownDisplayStrings
 }
 
@@ -96,14 +96,14 @@ enum FlightCountdownEngine {
         from legs: [FlightCountdownLeg],
         nowUTC: Date
     ) -> CountdownEngineOutput? {
-        guard let evaluated = selectRelevantLeg(from: legs, nowUTC: nowUTC),
-              let presentation = OperationalCountdownPresentation.make(
-                  state: evaluated.state,
-                  plannedDepartureUTC: evaluated.leg.plannedDepartureUTC,
-                  reportTimeUTC: evaluated.leg.reportTimeUTC
-              ) else {
+        guard let evaluated = selectRelevantLeg(from: legs, nowUTC: nowUTC) else {
             return nil
         }
+        let presentation = OperationalCountdownPresentation.make(
+            state: evaluated.state,
+            plannedDepartureUTC: evaluated.leg.plannedDepartureUTC,
+            reportTimeUTC: evaluated.leg.reportTimeUTC
+        )
         let display = displayStrings(for: evaluated.leg)
         let visibility = FlightPresentationPolicy.visibility(
             for: evaluated.state,

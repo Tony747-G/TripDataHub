@@ -394,6 +394,204 @@ final class NextReportWindowBuilderTests: XCTestCase {
         )
     }
 
+    func test_TREPORT1_currentTripVisibleOneSecondBeforeReport() throws {
+        let current = makeSchedule(legs: [
+            makeLeg(
+                pairing: "CURRENT", leg: 1, dep: "ANC", arr: "NRT",
+                depUTC: "2026-08-28T01:30:00Z", arrUTC: "2026-08-28T09:00:00Z"
+            )
+        ])
+        let trips = TimelineNextReportCountdownBuilder.build(
+            schedules: [current], domicileAirportCode: "ANC"
+        )
+        let reportTime = iso("2026-08-28T00:00:00Z")
+
+        XCTAssertEqual(
+            try XCTUnwrap(TimelineNextReportCountdownBuilder.nextTrip(
+                from: trips,
+                now: reportTime.addingTimeInterval(-1)
+            )).pairing,
+            "CURRENT"
+        )
+    }
+
+    func test_TREPORT2_and_TREPORT3_nextTripHiddenAtAndAfterCurrentReport() {
+        let trips = timelineReplacementFixture()
+        let currentReport = iso("2026-08-28T00:00:00Z")
+
+        XCTAssertNil(TimelineNextReportCountdownBuilder.nextTrip(from: trips, now: currentReport))
+        XCTAssertNil(
+            TimelineNextReportCountdownBuilder.nextTrip(
+                from: trips,
+                now: currentReport.addingTimeInterval(1)
+            )
+        )
+    }
+
+    func test_TREPORT4_and_TREPORT5_nextTripAppearsAtFinalFlightArrivalPlusThirtyMinutes() throws {
+        let trips = timelineReplacementFixture()
+        let releaseBoundary = iso("2026-08-28T09:30:00Z")
+
+        XCTAssertNil(
+            TimelineNextReportCountdownBuilder.nextTrip(
+                from: trips,
+                now: releaseBoundary.addingTimeInterval(-1)
+            )
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(TimelineNextReportCountdownBuilder.nextTrip(
+                from: trips,
+                now: releaseBoundary
+            )).pairing,
+            "NEXT"
+        )
+    }
+
+    func test_timelineNextReport_commercialDeadheadIsFinalFlightEvenWhenTripEndsAwayFromDomicile() {
+        let current = makeSchedule(legs: [
+            makeLeg(
+                pairing: "FOREIGN-END", leg: 1, dep: "ANC", arr: "PVG",
+                depUTC: "2026-08-28T01:30:00Z", arrUTC: "2026-08-28T08:00:00Z"
+            ),
+            makeLeg(
+                pairing: "FOREIGN-END", leg: 2, dep: "PVG", arr: "NRT",
+                depUTC: "2026-08-29T01:00:00Z", arrUTC: "2026-08-29T05:00:00Z",
+                flight: "JL809", status: "CML"
+            )
+        ])
+        let next = makeSchedule(legs: [
+            makeLeg(
+                pairing: "NEXT", leg: 1, dep: "ANC", arr: "SDF",
+                depUTC: "2026-08-30T01:30:00Z", arrUTC: "2026-08-30T08:00:00Z"
+            )
+        ])
+        let trips = TimelineNextReportCountdownBuilder.build(
+            schedules: [current, next], domicileAirportCode: "ANC"
+        )
+
+        XCTAssertNil(
+            TimelineNextReportCountdownBuilder.nextTrip(
+                from: trips,
+                now: iso("2026-08-29T05:29:59Z")
+            ),
+            "The final commercial-DH arrival, not an earlier operating arrival or domicile return, owns release"
+        )
+    }
+
+    func test_timelineNextReport_groundRowAfterFinalFlightDoesNotExtendRelease() throws {
+        let current = makeSchedule(legs: [
+            makeLeg(
+                pairing: "GND-END", leg: 1, dep: "ANC", arr: "SZX",
+                depUTC: "2026-08-28T01:30:00Z", arrUTC: "2026-08-28T09:00:00Z"
+            ),
+            makeLeg(
+                pairing: "GND-END", leg: 2, dep: "SZX", arr: "HKG",
+                depUTC: "2026-08-28T10:00:00Z", arrUTC: "2026-08-28T12:00:00Z",
+                flight: "GND", status: "GND"
+            )
+        ])
+        let next = makeSchedule(legs: [
+            makeLeg(
+                pairing: "NEXT", leg: 1, dep: "ANC", arr: "SDF",
+                depUTC: "2026-08-29T01:30:00Z", arrUTC: "2026-08-29T08:00:00Z"
+            )
+        ])
+        let trips = TimelineNextReportCountdownBuilder.build(
+            schedules: [current, next], domicileAirportCode: "ANC"
+        )
+
+        XCTAssertEqual(
+            try XCTUnwrap(TimelineNextReportCountdownBuilder.nextTrip(
+                from: trips,
+                now: iso("2026-08-28T09:30:00Z")
+            )).pairing,
+            "NEXT"
+        )
+    }
+
+    func test_timelineNextReport_overlappingActiveTripSuppressesLaterFutureTrip() {
+        let first = makeSchedule(legs: [
+            makeLeg(
+                pairing: "OVERLAP-1", leg: 1, dep: "ANC", arr: "NRT",
+                depUTC: "2026-08-28T01:30:00Z", arrUTC: "2026-08-30T09:00:00Z"
+            )
+        ])
+        let second = makeSchedule(legs: [
+            makeLeg(
+                pairing: "OVERLAP-2", leg: 1, dep: "ANC", arr: "PVG",
+                depUTC: "2026-08-29T01:30:00Z", arrUTC: "2026-08-29T09:00:00Z"
+            )
+        ])
+        let future = makeSchedule(legs: [
+            makeLeg(
+                pairing: "FUTURE", leg: 1, dep: "ANC", arr: "SDF",
+                depUTC: "2026-08-31T01:30:00Z", arrUTC: "2026-08-31T09:00:00Z"
+            )
+        ])
+        let trips = TimelineNextReportCountdownBuilder.build(
+            schedules: [first, second, future], domicileAirportCode: "ANC"
+        )
+
+        XCTAssertNil(
+            TimelineNextReportCountdownBuilder.nextTrip(
+                from: trips,
+                now: iso("2026-08-29T10:00:00Z")
+            )
+        )
+    }
+
+    func test_timelineNextReport_missingFinalFlightArrivalSuppressesWithoutInference() {
+        let unresolved = makeSchedule(legs: [
+            makeLeg(
+                pairing: "UNRESOLVED", leg: 1, dep: "ANC", arr: "NRT",
+                depUTC: "2026-08-28T01:30:00Z", arrUTC: nil
+            )
+        ])
+        let future = makeSchedule(legs: [
+            makeLeg(
+                pairing: "FUTURE", leg: 1, dep: "ANC", arr: "SDF",
+                depUTC: "2026-08-30T01:30:00Z", arrUTC: "2026-08-30T09:00:00Z"
+            )
+        ])
+        let trips = TimelineNextReportCountdownBuilder.build(
+            schedules: [unresolved, future], domicileAirportCode: "ANC"
+        )
+
+        XCTAssertNil(
+            TimelineNextReportCountdownBuilder.nextTrip(
+                from: trips,
+                now: iso("2026-08-29T00:00:00Z")
+            )
+        )
+    }
+
+    func test_timelineNextReport_actualOnlyFinalArrivalDoesNotBecomeReleaseBoundary() {
+        var actualOnlyFinalLeg = makeLeg(
+            pairing: "ACTUAL-ONLY", leg: 1, dep: "ANC", arr: "NRT",
+            depUTC: "2026-08-28T01:30:00Z", arrUTC: "2026-08-28T09:00:00Z"
+        )
+        actualOnlyFinalLeg.staUTC = nil
+        actualOnlyFinalLeg.originalSTAUTC = nil
+        actualOnlyFinalLeg.ataUTC = actualOnlyFinalLeg.arrUTC
+        let current = makeSchedule(legs: [actualOnlyFinalLeg])
+        let future = makeSchedule(legs: [
+            makeLeg(
+                pairing: "FUTURE", leg: 1, dep: "ANC", arr: "SDF",
+                depUTC: "2026-08-30T01:30:00Z", arrUTC: "2026-08-30T09:00:00Z"
+            )
+        ])
+        let trips = TimelineNextReportCountdownBuilder.build(
+            schedules: [current, future], domicileAirportCode: "ANC"
+        )
+
+        XCTAssertNil(
+            TimelineNextReportCountdownBuilder.nextTrip(
+                from: trips,
+                now: iso("2026-08-29T00:00:00Z")
+            )
+        )
+    }
+
     func test_timelineNextReport_24HourFormatBoundary() {
         XCTAssertEqual(
             TimelineNextReportCountdownBuilder.remainingText(24 * 60 * 60),
@@ -546,7 +744,7 @@ final class NextReportWindowBuilderTests: XCTestCase {
             FlightCountdownEngine.buildCountdownOutput(from: [operationalLeg], nowUTC: reportTime)
         )
         XCTAssertEqual(flightOutput.state, .preDeparture)
-        XCTAssertEqual(flightOutput.presentation.prefix, "Dep in")
+        XCTAssertEqual(flightOutput.presentation?.prefix, "Dep in")
     }
 
     func test_timelineViewsDoNotConsumeOperationalCountdownStateOrRefreshItForClockToggle() throws {
@@ -584,7 +782,8 @@ final class NextReportWindowBuilderTests: XCTestCase {
         TimelineNextReportTrip(
             key: "PP26-08|\(pairing)|\(Int(reportTime.timeIntervalSince1970))",
             pairing: pairing,
-            reportTime: reportTime
+            reportTime: reportTime,
+            releaseBoundary: reportTime.addingTimeInterval(1)
         )
     }
 
@@ -601,21 +800,43 @@ final class NextReportWindowBuilderTests: XCTestCase {
         dep: String,
         arr: String,
         depUTC: String,
-        arrUTC: String
+        arrUTC: String?,
+        flight: String? = nil,
+        status: String = "-"
     ) -> TripLeg {
         TripLeg(
             payPeriod: payPeriod,
             pairing: pairing,
             leg: leg,
-            flight: "XX\(100 + leg)",
+            flight: flight ?? "XX\(100 + leg)",
             depAirport: dep,
             depLocal: String(depUTC.prefix(10)) + " 00:00",
             arrAirport: arr,
-            arrLocal: String(arrUTC.prefix(10)) + " 00:00",
+            arrLocal: arrUTC.map { String($0.prefix(10)) + " 00:00" } ?? "",
             depUTC: depUTC,
             arrUTC: arrUTC,
-            status: "-",
-            block: "6:00"
+            status: status,
+            block: "6:00",
+            stdUTC: depUTC,
+            staUTC: arrUTC
+        )
+    }
+
+    private func timelineReplacementFixture() -> [TimelineNextReportTrip] {
+        let current = makeSchedule(legs: [
+            makeLeg(
+                pairing: "CURRENT", leg: 1, dep: "ANC", arr: "NRT",
+                depUTC: "2026-08-28T01:30:00Z", arrUTC: "2026-08-28T09:00:00Z"
+            )
+        ])
+        let next = makeSchedule(legs: [
+            makeLeg(
+                pairing: "NEXT", leg: 1, dep: "ANC", arr: "SDF",
+                depUTC: "2026-08-29T01:30:00Z", arrUTC: "2026-08-29T08:00:00Z"
+            )
+        ])
+        return TimelineNextReportCountdownBuilder.build(
+            schedules: [current, next], domicileAirportCode: "ANC"
         )
     }
 

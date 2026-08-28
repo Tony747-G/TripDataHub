@@ -558,7 +558,6 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
             replacementDerivedStateInvalidator: nil,
             notificationService: notifications,
             flightCountdownCoordinator: FlightCountdownCoordinator(
-                activityClient: ReimportActivitySpy(activities: []),
                 snapshotClient: ReimportSnapshotNoop()
             )
         )
@@ -579,32 +578,6 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
         let oldNotificationIDs = await notifications.oldNotificationIDs()
         XCTAssertEqual(invalidationCount, 1)
         XCTAssertEqual(oldNotificationIDs, [])
-    }
-
-    func test_T8_replacementEndsOldLiveActivityRegardlessOfLegIdentity() async throws {
-        let activityClient = ReimportActivitySpy(
-            activities: [FlightCountdownActivityRecord(id: "old-activity", legID: "old-leg")]
-        )
-        let harness = try makeHarness(
-            replacementDerivedStateInvalidator: nil,
-            flightCountdownCoordinator: FlightCountdownCoordinator(
-                activityClient: activityClient,
-                snapshotClient: ReimportSnapshotNoop()
-            )
-        )
-        let vm = harness.device.viewModel
-        await harness.confirm(payload: originalTrip())
-
-        vm.pendingImport = Self.pendingImport(for: revisedTrip())
-        let expectedIDs = Set(vm.pendingImportReplacementCandidates.map(\.id))
-        let confirmed = await vm.confirmPendingImport(expectedReplacementIDs: expectedIDs)
-        await harness.settle()
-
-        XCTAssertTrue(confirmed)
-        let containsOldActivity = await activityClient.contains(activityID: "old-activity")
-        let endCount = await activityClient.endCount()
-        XCTAssertFalse(containsOldActivity)
-        XCTAssertEqual(endCount, 1)
     }
 
     func test_T30_pendingImportNilClosesPreviewWhileNotificationRescheduleIsStillSuspended() async throws {
@@ -1742,35 +1715,6 @@ private actor SuspendedRescheduleNotificationService: NextReportNotificationServ
         suspendedRescheduleContinuation?.resume()
         suspendedRescheduleContinuation = nil
     }
-}
-
-private actor ReimportActivitySpy: FlightCountdownActivityClient {
-    private var records: [FlightCountdownActivityRecord]
-    private var ended = 0
-
-    init(activities: [FlightCountdownActivityRecord]) {
-        records = activities
-    }
-
-    func waitForInitialActivityPopulation() async {}
-    func activitiesEnabled() async -> Bool { true }
-    func activities() async -> [FlightCountdownActivityRecord] { records }
-    func update(activityID: String, snapshot: FlightCountdownSnapshot) async {}
-
-    func request(snapshot: FlightCountdownSnapshot) async throws {
-        records.append(FlightCountdownActivityRecord(id: UUID().uuidString, legID: snapshot.legID))
-    }
-
-    func end(activityID: String) async {
-        ended += 1
-        records.removeAll { $0.id == activityID }
-    }
-
-    func contains(activityID: String) -> Bool {
-        records.contains { $0.id == activityID }
-    }
-
-    func endCount() -> Int { ended }
 }
 
 private actor ReimportSnapshotNoop: FlightCountdownSnapshotClient {

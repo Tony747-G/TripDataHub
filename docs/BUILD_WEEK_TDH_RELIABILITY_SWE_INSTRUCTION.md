@@ -1,5 +1,10 @@
 # TDH Build Week — UI/UX Reliability Fix / SWE Instruction
 
+> **Historical instruction:** 2026-08-28のProduct Owner decisionによりFlight Countdown Live
+> Activitiesは削除された。本書中のActivityKit、Lock Screen、Dynamic Island、Activity
+> request/update/end、staleDate、timer-clamp要件はすべてretiredであり実装してはならない。
+> 現行契約はADR-004、INV-020、INV-021を参照する。
+
 - Status: Historical implementation handoff; current authoritative contract is §0.1 and implementation/acceptance is recorded in the current checklist
 - PM: Product Manager (TripDataHub)
 - Assignee: SWE (implementation authority)

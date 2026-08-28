@@ -1,206 +1,160 @@
-# ADR-004: Separate Flight Operational Countdown from Actual Flight History
+# ADR-004: Schedule-based Flight Operational State and Live Activity Removal
 
-**Status:** Accepted — revised by Product Owner
-**Original date:** 2026-08-15
-**Revised date:** 2026-08-19
-**Implementation status:** Four-state contract implemented; local-only Activity lifecycle limitation and bounded elapsed presentation approved.
+**Status:** Accepted; amended 2026-08-28 by Product Owner decision
+**Scope:** Flight operational domain, Home Screen Widget snapshot, report notifications, Timeline separation
 
 ## Context
 
-The original ADR-004 defined a seven-state real-time operational model using planned departure and arrival, observed ATD and ATA, and report time. That model expected `Arriving in`, scheduled-arrival-passed, and Actual-completed states to be available during operation.
+TripDataHub derives flight countdown information from CrewAccess scheduled data. Actual departure
+and arrival values are historical data and are not a reliable realtime source. All operational
+calculations therefore use absolute scheduled `Date` instants.
 
-Product experience established that CrewAccess Actual data is commonly imported only after a trip finishes. TripDataHub therefore has no trustworthy real-time ATD or ATA source. Keeping the former model would force the product either to leave arrival states unavailable in normal operation or to infer `Departed`, `In flight`, `Arrived`, or `Completed` from schedule passage.
+The former Flight Countdown Live Activity displayed this data on the Lock Screen and Dynamic
+Island. Its local-only ActivityKit owner could run only when the app received an execution
+opportunity. It could not guarantee the required user-visible lifetime:
 
-The product principle remains:
+```text
+Scheduled Departure Time + 60 minutes
+-> departure status is no longer visible
+```
 
-> Incorrect operational information is worse than no information.
-
-STD passage is a known schedule fact. It is safe to say that departure time has passed. It is not safe to say that the aircraft departed, is airborne, arrived, or completed its leg.
-
-Actual ATD and ATA remain valuable historical data under INV-012. This ADR changes only the real-time operational countdown and its presentation.
+`staleDate`, `context.isStale`, system date/timer formatting, timer clamping, foreground
+reconciliation, and local boundary tasks do not constitute a guaranteed Activity update or end.
+The product requirement was not weakened, and APNs/server/BGTask infrastructure was not added.
 
 ## Decision
 
-### 1. Use a four-state STD-centred model
+### 1. Keep the four-state schedule model
 
-The model has three visible states and one non-presenting terminal state:
+`FlightOperationalState` remains:
 
-| State | Meaning |
-| --- | --- |
-| `.preReport` | The first domicile-departure leg is before its known report time |
-| `.preDeparture` | STD is in the future and no pre-report condition applies |
-| `.departureTimePassed` | STD has passed, but STD+61 minutes has not been reached |
-| `.expired` | STD+61 minutes has been reached; this leg produces no operational countdown |
+```text
+preReport
+preDeparture
+departureTimePassed
+expired
+```
 
-The old `.inFlight`, `.scheduledArrivalPassed`, `.completed`, and STA-based `.stale` real-time states are retired. They MUST NOT remain as aliases or surface-specific presentation states.
+Evaluation order is exact:
 
-There is no `.unknown` state. A leg missing a required planning input is excluded with a reason-coded diagnostic. It does not receive a default instant or user-facing operational error state.
+```text
+now >= STD + 61 minutes -> expired
+now >= STD              -> departureTimePassed
+now < reportTime        -> preReport
+otherwise               -> preDeparture
+```
 
-### 2. Restrict operational inputs to STD, report time, and now
+Equality belongs to the later state. The interval through STD+60:59 remains
+`departureTimePassed`; STD+61:00 is `expired`.
 
-The evaluator accepts only:
+### 2. Keep schedule-only inputs and absolute time
 
-- required `plannedDepartureUTC` (STD);
+Operational state and current-leg selection are derived from:
+
+- required `plannedDepartureUTC`;
 - optional trip-level `reportTimeUTC`;
-- `nowUTC`.
+- injected or current `nowUTC`.
 
-`plannedArrivalUTC` may remain in the shared payload solely to render route date and time. STA is not a state boundary, countdown target, selection input, or Activity lifecycle boundary.
+`plannedArrivalUTC` may be carried as route display metadata. STA, ATD, ATA, `depUTC`, and
+`arrUTC` do not determine realtime state. Timezone changes affect formatting, not the underlying
+instant or duration.
 
-`atdUTC`, `ataUTC`, `depUTC`, and `arrUTC` MUST NOT enter the operational evaluator, current-leg selector, boundary scheduler, operational status descriptor, or Activity lifecycle decision. Invalid or missing Actual data does not make an otherwise valid planned-departure countdown ineligible.
+Report time applies only to the first valid domicile departure in a Trip. Later legs do not
+re-enter `.preReport`.
 
-Duration and elapsed calculations are absolute UTC `Date` differences. Device timezone, `Calendar.current`, and wall-clock `DateComponents` are not duration inputs.
+The Home Screen Widget countdown presentation is a separate optional projection. It exists only
+for `.preReport` and `.preDeparture`; `.departureTimePassed` remains a domain/selection state and
+has no visible post-STD countdown presentation contract.
 
-### 3. Make the exact evaluation order a contract
+### 3. Keep deterministic current-leg selection
 
-Let `STD` be `plannedDepartureUTC` and let `expiry` be exactly `STD + 61 minutes`. The evaluator applies these rules from top to bottom and returns the first match:
+A non-expired `.departureTimePassed` leg owns selection through STD+60:59. At STD+61 it becomes
+ineligible and the earliest valid future leg may take over. Operating and deadhead flights use the
+same state rules. Missing required planned inputs fail closed and are diagnosed; no timestamp is
+invented.
 
-1. `nowUTC >= expiry` → `.expired`
-2. `nowUTC >= STD` → `.departureTimePassed`
-3. `reportTimeUTC != nil && nowUTC < reportTimeUTC` → `.preReport`
-4. otherwise, while before STD → `.preDeparture`
+### 4. Keep the Home Screen Widget as a separate WidgetKit feature
 
-Equality belongs to the later state:
+The Widget Extension target remains because it owns the Home Screen Widget. The app publishes its
+snapshot through `FlightCountdownCoordinator`, which now has only a snapshot client and no
+ActivityKit dependency.
 
-| Instant | Result |
-| --- | --- |
-| `now == reportTimeUTC` | `.preDeparture` |
-| `now == STD` | `.departureTimePassed`, elapsed minute 0 |
-| `STD+60:00 ... STD+60:59` | `.departureTimePassed`, elapsed minute 60 |
-| `now == STD+61:00` | `.expired` |
+Home Screen Widget visibility remains T-12h through T-6h. Outside that interval it is explicitly
+`.hidden`. Launch, active-scene, schedule-revision, and boundary refresh paths remain because they
+also maintain this Widget snapshot. Replacement uses clear-then-publish semantics for the snapshot.
 
-Elapsed whole minutes are `floor((nowUTC - plannedDepartureUTC) / 60)`. A negative elapsed value inside `.departureTimePassed` is an evaluator defect and is not clamped.
+The shared operational state, engine, snapshot, timezone formatting, and pre-STD Home Widget
+countdown presentation remain domain/Widget code. A snapshot may therefore carry the selected
+`.departureTimePassed` domain state with no presentation. Live Activity attributes, ContentState,
+expanded layout, post-STD elapsed presentation, stale metadata, and Activity clients were removed.
 
-### 4. Apply report time to one leg only
+### 5. Remove Flight Countdown Live Activities completely
 
-Only the trip's first domicile-departure leg may receive a non-nil `reportTimeUTC` and become `.preReport`. Every subsequent leg receives nil report time and is `.preDeparture` while before STD. If the first domicile departure or its report time cannot be resolved, `.preReport` is not inferred; the valid leg uses `.preDeparture`.
-
-The report lead-time product rule remains:
-
-- Lower 48 origin and Lower 48 destination: STD minus 1 hour;
-- Alaska, Hawaii, an unclassified airport, or any other combination: STD minus 1 hour 30 minutes.
-
-The lead-time function remains single-source across report-window and Timeline duty-start consumers.
-
-### 5. Use one semantic status contract
-
-Every operational surface consumes the same structured status descriptor:
-
-| State | Descriptor | Prefix / semantic meaning | Anchor |
-| --- | --- | --- | --- |
-| `.preReport` | report countdown | `Report in` | `reportTimeUTC` |
-| `.preDeparture` | departure countdown | `Dep in` | `plannedDepartureUTC` |
-| `.departureTimePassed` | departure elapsed | `Departure time passed` | `plannedDepartureUTC` |
-| `.expired` | none | no operational presentation | none |
-
-The descriptor, anchor UTC instant, state, leg identity, operational expiration instant, and any presentation-only timer clamp instant are common. Layout, font, and compactness may differ by surface; operational meaning may not.
-
-Live Activity and Widget countdown or elapsed values use OS-driven dynamic time rendering. For departure elapsed, `SystemFormatStyle.Timer` localization such as `14 minutes` is accepted. The exact `XX min` spelling is not a product requirement. The prefix and semantic meaning are the common contract. The count-up range is bounded by the presentation-only `timerClampUTC = STD + 60 minutes`, so a retained Activity shell never advances beyond 60 minutes. `expirationUTC = STD + 61 minutes` remains a distinct evaluator and lifecycle boundary. Manual per-minute `Activity.update()`, a Swift timer, or polling solely to format the duration is forbidden.
-
-The old `Arriving in`, `Scheduled Arrival Time Passed`, arrival reference line, and all STA-based operational copy are retired.
-
-### 6. Derive every operational surface from one builder
-
-One builder produces a structured operational presentation containing at least:
-
-- trip and leg identity;
-- the four-state result;
-- semantic status descriptor;
-- anchor UTC instant;
-- optional `expirationUTC = STD + 61 minutes` operational expiration;
-- optional `timerClampUTC = STD + 60 minutes` departure-elapsed presentation clamp;
-- planned route/date/time metadata needed by the layout;
-- Presentation Policy visibility.
-
-The following flight-operational surfaces are consumers of that output and do not re-decide state:
+TripDataHub provides no Flight Countdown:
 
 - Lock Screen Live Activity;
-- Dynamic Island;
-- Home Screen Widget snapshot;
-- operational notification scheduling;
-- app-launch reconstruction and current-leg cache.
+- Dynamic Island compact presentation;
+- Dynamic Island minimal presentation;
+- Dynamic Island expanded presentation.
 
-Timeline Top is deliberately outside this flight-operational builder. It displays only the next Trip report instant whose `reportTimeUTC > nowUTC`, disappears at equality, and never participates in notification or Activity lifecycle. Its iPhone and iPad implementations share one Timeline-specific selector and view under INV-005 and INV-020.
+There is no production Flight Countdown path that calls `Activity.request`, `activity.update`, or
+`activity.end`. The app and Widget extension no longer declare `NSSupportsLiveActivities` for this
+feature, and production sources do not import ActivityKit.
 
-Presentation Policy remains separate. T-12h, T-6h, and other visibility windows determine where a valid state is shown; they do not enter the state evaluator.
+This is a product/architecture decision, not a claim that iOS contains a bug. Reintroducing Flight
+Countdown Live Activities requires a new Product Owner decision and an architecture that can prove
+the STD+60 user-visible expiration requirement. Merely restoring local lifecycle workarounds is
+forbidden.
 
-### 7. Select the current leg deterministically
+### 6. Keep Timeline and notifications independent
 
-Selection uses evaluated schedule states only:
+48h and 24h Report Notifications and standard local notifications remain owned by
+`NextReportNotificationService` and their existing scheduling preferences.
 
-1. If one or more legs are `.departureTimePassed`, select the leg with the latest STD.
-2. Otherwise select the `.preReport` or `.preDeparture` leg with the earliest STD.
-3. Exclude `.expired` and input-insufficient legs.
+Timeline Top remains governed by INV-020:
 
-A selected `.departureTimePassed` leg remains current through elapsed minute 60. At STD+61 it becomes `.expired`, is removed, and selection advances to the next valid leg. This priority is deliberate even when it shortens or eliminates the next leg's pre-departure countdown during a short turn.
+```text
+now < reportTime
+-> current Trip report visible
 
-### 8. Reconcile at report, STD, and STD+61 boundaries
+reportTime <= now < final scheduled flight arrival + 30 minutes
+-> NEXT REPORT hidden
 
-Boundary-driven reevaluation uses report time, STD, STD+61, and Presentation Policy visibility boundaries. STA and STA+1h are removed. Minute polling is not introduced. In the local-only architecture, this scheduler is best-effort while the process is suspended or terminated; it is not an exact background wake guarantee.
+now >= final scheduled flight arrival + 30 minutes
+-> next future Trip report eligible
+```
 
-Normal `reconcile` updates the same Activity through `.preReport`, `.preDeparture`, and `.departureTimePassed`. Whenever execution reaches reconciliation at or after STD+61, it immediately ends the expired Activity and removes the snapshot unless a newly selected leg justifies an update or replacement Activity. A current-leg identity change ends the old Activity and may request one new Activity. If the app is suspended or terminated at the boundary, the Activity shell may remain until the next available app execution; exact dismissal at STD+61 is not guaranteed without a server-side Activity end.
-
-`destructiveRebuild` remains exclusive to successful Trip Revision or Replacement and retains its existing teardown and rebuild contract.
-
-The Activity stale boundary for an active operational countdown is `plannedDepartureUTC + 61 minutes`, not planned arrival plus one hour. `staleDate` is metadata and MUST NOT be described as a dismissal guarantee. While a shell remains, the system timer is bounded by `timerClampUTC = plannedDepartureUTC + 60 minutes` and remains visibly clamped at 60 minutes.
-
-### 9. Keep Actual data on the history side of the boundary
-
-CrewAccess parsing, canonical JSON, CloudKit/import persistence, `TripLeg` Actual fields, Leg History, and historical Timeline rendering retain ATD and ATA. `TripLeg.depUTC` and `arrUTC` may continue to answer the historical/display question defined by INV-012.
-
-Two legs that differ only in ATD or ATA MUST produce identical real-time operational state, status descriptor, selection result, and Activity lifecycle decision.
-
-### 10. Fail closed while migrating persisted derived state
-
-Old encoded Actual/arrival-driven states must not survive as operational claims after upgrade. Legacy `.inFlight`, `.scheduledArrivalPassed`, `.completed`, and STA-based `.stale` values decode or migrate to a non-presenting result and are rebuilt from current planned schedule data.
-
-Legacy scheduled-departure-passed data is re-evaluated against STD and STD+61. Decode failure never preserves old arrival copy. Launch reconciliation ends obsolete Activities and removes obsolete snapshots before publishing the new builder result.
+Commercial deadhead flights count, `GND` rows do not, foreign-ending Trips are valid, and a missing
+final scheduled arrival suppresses conservatively without inventing a release time.
 
 ## Consequences
 
-- The product no longer presents an unsupported real-time arrival or Actual state.
-- `Departure time passed` communicates a schedule fact, not a claim that the aircraft departed.
-- Planned arrival remains available for route display, but no longer drives state, selection, status, or lifecycle.
-- A passed leg deliberately owns the operational presentation through minute 60; a short turn may have little or no `Dep in` presentation for its next leg.
-- Operational expiration (`STD+61`) and visible timer clamping (`STD+60`) are separate contracts. A suspended Activity may remain temporarily, but its visible elapsed value stops at 60 minutes and the next reconciliation ends it.
-- Widget and Live Activity must migrate together because a surface-specific fallback would recreate contradictory flight-operational meaning. Timeline Top remains separately contracted as a Trip report countdown.
-- Device rendering acceptance remains necessary for OS-driven timer output; source-level tests protect syntax and semantic anchors but do not inspect SpringBoard pixels.
-- The original seven-state arrival/Actual-driven contract and its arrival-side T-xx assertions are retired by Product Owner decision, not lost coverage.
+- Issues 2, 3, 4, 5, 6, 7, and 9 are resolved by feature removal.
+- Issue 1 remains resolved by the Timeline corrective implementation.
+- Issue 8 remains deferred with root cause open; import, persistence, sync, cache, render identity,
+  and scroll/focus paths are outside this decision.
+- Existing Live Activities installed by an older build are not managed by the new production code;
+  the new build contains no request/update/end runtime path for this feature.
+- The Widget Extension target, App Group entitlement, snapshot file, and WidgetCenter reload remain
+  because the Home Screen Widget still uses them.
 
-## Alternatives Rejected
+## Rejected Alternatives
 
-### Keep ATD/ATA states for the rare live import
+### Weaken the expiration requirement
 
-Rejected because the product has no reliable real-time Actual delivery contract. A state that normally cannot be produced is not a dependable operational model.
+Rejected. The feature was removed instead.
 
-### Infer departure or arrival from schedule passage
+### Add APNs, server, or BGTask infrastructure in this round
 
-Rejected because schedule passage proves only that a scheduled instant passed.
+Rejected by product scope.
 
-### Keep the old arrival states but hide their copy
+### Retry staleDate, context.isStale, DateReference, timer clamp, or local lifecycle scheduling
 
-Rejected because selection, lifecycle, persisted snapshots, and surface builders would still contain unsupported operational meaning.
-
-### Format elapsed minutes with manual updates
-
-Rejected because background Activity updates are not reliable enough to make a formatting preference an operational dependency. OS-driven localized timer output is accepted instead.
-
-### Guarantee exact local-only Activity dismissal at STD+61
-
-Rejected because a suspended or terminated app has no guaranteed execution opportunity at the boundary. `staleDate` does not end an Activity. APNs/server-side Activity ending, BGTask boundary guarantees, and per-minute updates are outside this contract; the next app execution reconciles and ends the expired Activity.
-
-### Let each surface adapt the old model independently
-
-Rejected for surfaces that claim the same flight-operational meaning. Timeline Top now represents a different domain fact—the next Trip report instant—and therefore has an explicit separate selector and visibility contract rather than adapting the flight state.
+Rejected because these mechanisms do not prove the required user-visible expiration.
 
 ## Related
 
-- `docs/INVARIANTS.md` — INV-001, INV-002, INV-005, INV-012 through INV-019.
-- `docs/BUILD_WEEK_TDH_RELIABILITY_SWE_INSTRUCTION.md` — authoritative revised T-1 through T-24 definitions.
-- `docs/ADR/ADR-002-utc-source-of-truth.md`.
-- `docs/ADR/ADR-003-crewaccess-file-cloudkit-sync.md`.
-
-## Reconsider When
-
-- The product gains a trustworthy, explicitly contracted real-time Actual or aircraft-state source.
-- A future product decision changes the 60-minute departure-passed ownership window.
-- ActivityKit exposes a new system-driven formatting primitive that can meet a stricter cross-locale copy contract without app-driven polling.
+- `docs/INVARIANTS.md` — INV-013 through INV-021
+- `docs/SWE_INSTRUCTION_LIVE_ACTIVITY_LAYOUT_V2.md` — retired historical instruction
+- `docs/DEVICE_VERIFICATION_CHECKLIST.md` — retired Live Activity acceptance evidence
+- `docs/FOLLOW_UPS.md` — retired Live Activity follow-ups

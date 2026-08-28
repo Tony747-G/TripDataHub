@@ -18,6 +18,7 @@ struct TimelineNextReportTrip: Equatable {
     let key: String
     let pairing: String
     let reportTime: Date
+    let releaseBoundary: Date?
 }
 
 struct TimelineNextReportPresentation: Equatable {
@@ -31,12 +32,13 @@ struct TimelineNextReportPresentation: Equatable {
 
 /// Timeline-only report countdown policy.
 ///
-/// Notification and Live Activity continue to use their flight-operational selectors. Timeline
-/// intentionally considers only future trip report instants, so selection/scroll state and a
-/// currently active or historical flight can never make a past report countdown reappear.
+/// Notifications and the Home Screen Widget continue to use their independent selectors. Timeline
+/// suppresses future report instants while a started Trip remains active. Selection/scroll state
+/// never participates; release is derived only from the final scheduled flight arrival.
 enum TimelineNextReportCountdownBuilder {
     static let urgentThreshold: TimeInterval = 12 * 60 * 60
     static let dayThreshold: TimeInterval = 24 * 60 * 60
+    static let postArrivalReleaseInterval: TimeInterval = 30 * 60
     private static let formatterLock = NSLock()
     private static var reportDateTimeFormatters: [String: DateFormatter] = [:]
 
@@ -75,10 +77,19 @@ enum TimelineNextReportCountdownBuilder {
                 tzResolver: tzResolver
             )
             let reportTime = departure.addingTimeInterval(TimeInterval(-leadMinutes * 60))
+            // Determine the final flight before parsing its arrival. Falling back to an earlier
+            // arrival when the final flight is incomplete would fabricate a release boundary.
+            let finalFlight = legs
+                .filter(isFlightLeg)
+                .max(by: isEarlierTripLeg)
+            let releaseBoundary = finalFlight
+                .flatMap { LegConnectionTextBuilder.parseUTC($0.staUTC ?? $0.originalSTAUTC) }
+                .map { $0.addingTimeInterval(postArrivalReleaseInterval) }
             return TimelineNextReportTrip(
                 key: "\(groupKey)|\(Int(reportTime.timeIntervalSince1970))",
                 pairing: leg.pairing,
-                reportTime: reportTime
+                reportTime: reportTime,
+                releaseBoundary: releaseBoundary
             )
         }
     }
@@ -87,14 +98,25 @@ enum TimelineNextReportCountdownBuilder {
         from trips: [TimelineNextReportTrip],
         now: Date
     ) -> TimelineNextReportTrip? {
-        trips
+        let startedTrips = trips.filter { $0.reportTime <= now }
+
+        if startedTrips.contains(where: { trip in
+            guard let releaseBoundary = trip.releaseBoundary else { return false }
+            return now < releaseBoundary
+        }) {
+            return nil
+        }
+
+        // A missing final arrival on the most recently started Trip has no safe inferred release.
+        // Once a later Trip itself starts, that later Trip becomes the conservative authority.
+        if let mostRecentlyStarted = startedTrips.max(by: tripReportOrder),
+           mostRecentlyStarted.releaseBoundary == nil {
+            return nil
+        }
+
+        return trips
             .filter { $0.reportTime > now }
-            .min {
-                if $0.reportTime != $1.reportTime {
-                    return $0.reportTime < $1.reportTime
-                }
-                return $0.key < $1.key
-            }
+            .min(by: tripReportOrder)
     }
 
     static func presentation(
@@ -154,6 +176,33 @@ enum TimelineNextReportCountdownBuilder {
             formatter = created
         }
         return "\(formatter.string(from: date).uppercased()) \(zoneCode.uppercased())"
+    }
+
+    private static func isFlightLeg(_ leg: TripLeg) -> Bool {
+        leg.flight.trimmingCharacters(in: .whitespacesAndNewlines)
+            .caseInsensitiveCompare("GND") != .orderedSame
+            && leg.status.trimmingCharacters(in: .whitespacesAndNewlines)
+                .caseInsensitiveCompare("GND") != .orderedSame
+    }
+
+    private static func isEarlierTripLeg(_ lhs: TripLeg, _ rhs: TripLeg) -> Bool {
+        if lhs.leg != rhs.leg { return lhs.leg < rhs.leg }
+        let lhsDeparture = LegConnectionTextBuilder.parseUTC(lhs.plannedDepartureUTC)
+        let rhsDeparture = LegConnectionTextBuilder.parseUTC(rhs.plannedDepartureUTC)
+        if lhsDeparture != rhsDeparture {
+            return (lhsDeparture ?? .distantPast) < (rhsDeparture ?? .distantPast)
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private static func tripReportOrder(
+        _ lhs: TimelineNextReportTrip,
+        _ rhs: TimelineNextReportTrip
+    ) -> Bool {
+        if lhs.reportTime != rhs.reportTime {
+            return lhs.reportTime < rhs.reportTime
+        }
+        return lhs.key < rhs.key
     }
 }
 

@@ -1,53 +1,6 @@
 #if DEBUG
 import Foundation
 
-enum FlightCountdownDebugScenario: String, CaseIterable, Identifiable {
-    case preReport
-    case homeWidgetPreReport
-    case preDeparture
-    case departureTimePassed0
-    case departureTimePassed1
-    case departureTimePassed60
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .preReport:
-            "Report in"
-        case .homeWidgetPreReport:
-            "Home Widget: Report in"
-        case .preDeparture:
-            "Dep in"
-        case .departureTimePassed0:
-            "Departure time passed 0 min"
-        case .departureTimePassed1:
-            "Departure time passed 1 min"
-        case .departureTimePassed60:
-            "Departure time passed 60 min"
-        }
-    }
-
-    /// Sets only the fixture's planned departure relative to the injected `nowUTC`.
-    /// The production builder still derives report time, state, presentation, and Activity payload.
-    var departureOffsetFromNow: TimeInterval {
-        switch self {
-        case .preReport:
-            5 * 60 * 60
-        case .homeWidgetPreReport:
-            9 * 60 * 60
-        case .preDeparture:
-            30 * 60
-        case .departureTimePassed0:
-            0
-        case .departureTimePassed1:
-            -60
-        case .departureTimePassed60:
-            -(60 * 60)
-        }
-    }
-}
-
 extension AppViewModel {
     static let debugFlightCountdownFixtureID = "DEBUG-ANC-ICN-ANC"
     static let debugFlightCountdownFirstLegID = UUID(uuidString: "D3B60001-0000-4000-8000-000000000001")!
@@ -63,10 +16,10 @@ extension AppViewModel {
     }
 
     static func debugFlightCountdownInteractiveSchedules(
-        nowUTC: Date,
-        scenario: FlightCountdownDebugScenario = .preReport
+        nowUTC: Date
     ) -> [PayPeriodSchedule] {
-        let firstDepartureUTC = nowUTC.addingTimeInterval(scenario.departureOffsetFromNow)
+        // Home Screen Widget validation only. T-9h is inside its T-12h...T-6h window.
+        let firstDepartureUTC = nowUTC.addingTimeInterval(9 * 60 * 60)
         let firstArrivalUTC = firstDepartureUTC.addingTimeInterval((8 * 60 + 20) * 60)
         let secondDepartureUTC = nowUTC.addingTimeInterval((2 * 24 + 9) * 60 * 60)
         let secondArrivalUTC = secondDepartureUTC.addingTimeInterval(9 * 60 * 60)
@@ -82,7 +35,9 @@ extension AppViewModel {
         firstDepartureUTC: Date,
         firstArrivalUTC: Date,
         secondDepartureUTC: Date,
-        secondArrivalUTC: Date
+        secondArrivalUTC: Date,
+        firstFlight: String = "D901",
+        firstStatus: String = "-"
     ) -> [PayPeriodSchedule] {
         let payPeriod = "DEBUG-PP"
         let pairing = debugFlightCountdownFixtureID
@@ -96,14 +51,14 @@ extension AppViewModel {
                 payPeriod: payPeriod,
                 pairing: pairing,
                 leg: 1,
-                flight: "D901",
+                flight: firstFlight,
                 depAirport: "ANC",
                 depLocal: debugFixtureLocalString(firstDepartureUTC),
                 arrAirport: "ICN",
                 arrLocal: debugFixtureLocalString(firstArrivalUTC),
                 depUTC: firstDeparture,
                 arrUTC: firstArrival,
-                status: "-",
+                status: firstStatus,
                 block: "8:20",
                 stdUTC: firstDeparture,
                 staUTC: firstArrival

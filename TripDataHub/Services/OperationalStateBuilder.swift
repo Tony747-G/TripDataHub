@@ -1,6 +1,6 @@
 import Foundation
 
-/// Single app-side entry point for deriving the current flight state and its presentation payload.
+/// Single app-side entry point for deriving current flight state and optional Home Widget presentation.
 enum OperationalStateBuilder {
     static func build(
         schedules: [PayPeriodSchedule],
