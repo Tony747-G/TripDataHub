@@ -629,6 +629,10 @@ final class CrewAccessLegHistoryTests: XCTestCase {
             existingPayloads: [scheduled]
         )
         let item = try XCTUnwrap(merged.items.first)
+        XCTAssertEqual(item.atdUtc, "2026-08-05T12:20:00Z")
+        XCTAssertEqual(item.ataUtc, "2026-08-05T17:10:00Z")
+        XCTAssertEqual(item.actualDepartureObservedAtUtc, "2026-08-06T08:17:00Z")
+        XCTAssertEqual(item.actualArrivalObservedAtUtc, "2026-08-06T08:17:00Z")
         XCTAssertEqual(item.tripImportedAtUtc, "2026-08-05T08:00:00Z")
         XCTAssertEqual(item.actualsImportedAtUtc, "2026-08-06T08:17:00Z")
 
@@ -637,6 +641,148 @@ final class CrewAccessLegHistoryTests: XCTestCase {
         )
         XCTAssertEqual(leg.tripImportedAtUTC, "2026-08-05T08:00:00Z")
         XCTAssertEqual(leg.actualsImportedAtUTC, "2026-08-06T08:17:00Z")
+    }
+
+    /// A partial later observation must not be rejected against an ATA carried from an older PDF.
+    /// The incoming PDF moved STA later and observed a later ATD, but had not observed ATA yet.
+    func test_mergeIncomingATDOnlyDropsIncompatibleHistoricalATAWithoutFalseReject() throws {
+        let scheduled = makePayload(
+            created: "2026-08-05T08:00:00Z",
+            departure: "2026-08-05T12:00:00Z",
+            arrival: "2026-08-05T17:00:00Z"
+        )
+        let completed = makePayload(
+            created: "2026-08-05T18:00:00Z",
+            departure: "2026-08-05T12:20:00Z",
+            arrival: "2026-08-05T17:10:00Z"
+        )
+        let historical = try AppViewModel.mergeCrewAccessLegHistory(
+            incoming: completed,
+            existingPayloads: [scheduled]
+        )
+        let incomingATDOnly = makePayload(
+            created: "2026-08-05T23:00:00Z",
+            departure: "2026-08-05T18:30:00Z",
+            arrival: "2026-08-06T01:00:00Z"
+        )
+
+        let merged = try AppViewModel.mergeCrewAccessLegHistory(
+            incoming: incomingATDOnly,
+            existingPayloads: [historical]
+        )
+        let item = try XCTUnwrap(merged.items.first)
+
+        XCTAssertEqual(item.atdUtc, "2026-08-05T18:30:00Z")
+        XCTAssertNil(item.ataUtc, "an older incompatible ATA is not part of the incoming observation")
+        XCTAssertEqual(item.actualDepartureObservedAtUtc, "2026-08-05T23:00:00Z")
+        XCTAssertNil(item.actualArrivalObservedAtUtc)
+        XCTAssertNil(item.actualsImportedAtUtc)
+    }
+
+    /// Chronology alone cannot preserve a historical ATA. At 23:00 the incoming generation could
+    /// see a 20:10 arrival, so classifying the arrival as Scheduled supersedes the old Actual.
+    func test_mergeIncomingATDOnlyRetiresHistoricalATAObservableByNewerGeneration() throws {
+        let scheduled = makePayload(
+            created: "2026-08-05T08:00:00Z",
+            departure: "2026-08-05T12:00:00Z",
+            arrival: "2026-08-05T21:00:00Z"
+        )
+        let completed = makePayload(
+            created: "2026-08-05T22:00:00Z",
+            departure: "2026-08-05T12:20:00Z",
+            arrival: "2026-08-05T20:10:00Z"
+        )
+        let historical = try AppViewModel.mergeCrewAccessLegHistory(
+            incoming: completed,
+            existingPayloads: [scheduled]
+        )
+        let incomingATDOnly = makePayload(
+            created: "2026-08-05T23:00:00Z",
+            departure: "2026-08-05T18:30:00Z",
+            arrival: "2026-08-06T01:00:00Z"
+        )
+
+        let merged = try AppViewModel.mergeCrewAccessLegHistory(
+            incoming: incomingATDOnly,
+            existingPayloads: [historical]
+        )
+        let item = try XCTUnwrap(merged.items.first)
+
+        XCTAssertEqual(item.atdUtc, "2026-08-05T18:30:00Z")
+        XCTAssertNil(item.ataUtc)
+        XCTAssertEqual(item.actualDepartureObservedAtUtc, "2026-08-05T23:00:00Z")
+        XCTAssertNil(item.actualArrivalObservedAtUtc)
+        XCTAssertNil(item.actualsImportedAtUtc)
+    }
+
+    /// An out-of-order generation observed at 19:00 could not yet have classified the historical
+    /// 20:10 arrival. Keeping that later-observed ATA does not contradict the incoming PDF.
+    func test_mergeIncomingATDOnlyPreservesHistoricalATAItCouldNotYetObserve() throws {
+        let scheduled = makePayload(
+            created: "2026-08-05T08:00:00Z",
+            departure: "2026-08-05T12:00:00Z",
+            arrival: "2026-08-05T21:00:00Z"
+        )
+        let completed = makePayload(
+            created: "2026-08-05T22:00:00Z",
+            departure: "2026-08-05T12:20:00Z",
+            arrival: "2026-08-05T20:10:00Z"
+        )
+        let historical = try AppViewModel.mergeCrewAccessLegHistory(
+            incoming: completed,
+            existingPayloads: [scheduled]
+        )
+        let incomingATDOnly = makePayload(
+            created: "2026-08-05T19:00:00Z",
+            departure: "2026-08-05T18:30:00Z",
+            arrival: "2026-08-06T01:00:00Z"
+        )
+
+        let merged = try AppViewModel.mergeCrewAccessLegHistory(
+            incoming: incomingATDOnly,
+            existingPayloads: [historical]
+        )
+        let item = try XCTUnwrap(merged.items.first)
+
+        XCTAssertEqual(item.atdUtc, "2026-08-05T18:30:00Z")
+        XCTAssertEqual(item.ataUtc, "2026-08-05T20:10:00Z")
+        XCTAssertEqual(item.actualDepartureObservedAtUtc, "2026-08-05T19:00:00Z")
+        XCTAssertEqual(item.actualArrivalObservedAtUtc, "2026-08-05T22:00:00Z")
+        XCTAssertEqual(item.actualsImportedAtUtc, "2026-08-05T22:00:00Z")
+    }
+
+    func test_mergeScheduleOnlyRevisionPreservesCompleteHistoricalActuals() throws {
+        let scheduled = makePayload(
+            created: "2026-08-05T08:00:00Z",
+            departure: "2026-08-05T12:00:00Z",
+            arrival: "2026-08-05T17:00:00Z"
+        )
+        let completed = makePayload(
+            created: "2026-08-05T18:00:00Z",
+            departure: "2026-08-05T12:20:00Z",
+            arrival: "2026-08-05T17:10:00Z"
+        )
+        let historical = try AppViewModel.mergeCrewAccessLegHistory(
+            incoming: completed,
+            existingPayloads: [scheduled]
+        )
+        let scheduleRevision = makePayload(
+            created: "2026-08-04T09:00:00Z",
+            departure: "2026-08-05T12:30:00Z",
+            arrival: "2026-08-05T17:30:00Z"
+        )
+
+        let merged = try AppViewModel.mergeCrewAccessLegHistory(
+            incoming: scheduleRevision,
+            existingPayloads: [historical]
+        )
+        let item = try XCTUnwrap(merged.items.first)
+
+        XCTAssertEqual(item.atdUtc, "2026-08-05T12:20:00Z")
+        XCTAssertEqual(item.ataUtc, "2026-08-05T17:10:00Z")
+        XCTAssertEqual(item.actualDepartureObservedAtUtc, "2026-08-05T18:00:00Z")
+        XCTAssertEqual(item.actualArrivalObservedAtUtc, "2026-08-05T18:00:00Z")
+        XCTAssertEqual(item.actualsImportedAtUtc, "2026-08-05T18:00:00Z")
     }
 
     func test_mergeSurfacesExactTwelveHourATDAmbiguity() {
@@ -697,6 +843,31 @@ final class CrewAccessLegHistoryTests: XCTestCase {
         )) { error in
             XCTAssertEqual(error as? CrewAccessActualTimeResolutionError, .arrivalBeforeDeparture)
         }
+    }
+
+    func test_mergePreservesResolvedActualChronologyAcrossUTCMidnight() throws {
+        let scheduled = makePayload(
+            created: "2026-08-05T08:00:00Z",
+            departure: "2026-08-05T23:30:00Z",
+            arrival: "2026-08-06T00:10:00Z"
+        )
+        let actual = makePayload(
+            created: "2026-08-06T01:00:00Z",
+            departure: "2026-08-05T23:45:00Z",
+            arrival: "2026-08-06T00:15:00Z"
+        )
+
+        let merged = try AppViewModel.mergeCrewAccessLegHistory(
+            incoming: actual,
+            existingPayloads: [scheduled]
+        )
+        let item = try XCTUnwrap(merged.items.first)
+
+        XCTAssertEqual(item.atdUtc, "2026-08-05T23:45:00Z")
+        XCTAssertEqual(item.ataUtc, "2026-08-06T00:15:00Z")
+        XCTAssertEqual(item.actualDepartureObservedAtUtc, "2026-08-06T01:00:00Z")
+        XCTAssertEqual(item.actualArrivalObservedAtUtc, "2026-08-06T01:00:00Z")
+        XCTAssertEqual(item.actualsImportedAtUtc, "2026-08-06T01:00:00Z")
     }
 
     private func utcDate(_ value: String) -> Date {

@@ -26,16 +26,22 @@ struct FriendScheduleCloudKitLink: Sendable {
     }
 }
 
-/// Connections plus, per normalized GEMS ID, whether that friend's refresh actually succeeded.
-/// Failures return the cached connection so nothing is lost, which is precisely why the outcome
-/// has to be reported separately — otherwise the UI cannot distinguish stale data from fresh.
+/// Connections plus separate discovery and per-friend refresh outcomes. Failures return cached
+/// connections so nothing is lost; the separate signals keep degraded discovery and stale friend
+/// data distinguishable from a fully successful refresh.
 struct FriendConnectionRefreshResult: Sendable {
     let connections: [FriendConnection]
     let outcomes: [String: FriendScheduleSyncOutcome]
+    let discoverySucceeded: Bool
 
-    init(connections: [FriendConnection], outcomes: [String: FriendScheduleSyncOutcome] = [:]) {
+    init(
+        connections: [FriendConnection],
+        outcomes: [String: FriendScheduleSyncOutcome] = [:],
+        discoverySucceeded: Bool = true
+    ) {
         self.connections = connections
         self.outcomes = outcomes
+        self.discoverySucceeded = discoverySucceeded
     }
 }
 
@@ -402,9 +408,24 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         let normalizedGEMSID = GEMSIDNormalizer.normalize(gemsID)
         let database = databaseProvider()
 
-        async let firstSide = friendLinkRecords(field: Field.gemsA, gemsID: normalizedGEMSID, database: database)
-        async let secondSide = friendLinkRecords(field: Field.gemsB, gemsID: normalizedGEMSID, database: database)
-        let linkRecords = try await firstSide + secondSide
+        let linkRecords: [CKRecord]
+        let discoveryFailure: Error?
+        do {
+            async let firstSide = friendLinkRecords(field: Field.gemsA, gemsID: normalizedGEMSID, database: database)
+            async let secondSide = friendLinkRecords(field: Field.gemsB, gemsID: normalizedGEMSID, database: database)
+            linkRecords = try await firstSide + secondSide
+            discoveryFailure = nil
+        } catch {
+            // The schedule and snapshot have deterministic record IDs and can still be removed.
+            // Friend-link approvals cannot be truthfully reported as removed without discovery, so
+            // perform only the safe cleanup and then rethrow the discovery error as a partial failure.
+            let details = String(reflecting: error)
+            logger.error(
+                "[TDHFriendLink] Friend-link discovery failed; approvals were not updated. Deleting directly addressable shared schedule data before reporting partial cleanup: \(details, privacy: .public)"
+            )
+            linkRecords = []
+            discoveryFailure = error
+        }
         var seenRecordNames: Set<String> = []
 
         for record in linkRecords where seenRecordNames.insert(record.recordID.recordName).inserted {
@@ -432,30 +453,35 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
         }
 
         try await deleteSharedScheduleData(gemsID: normalizedGEMSID)
+        if let discoveryFailure {
+            throw discoveryFailure
+        }
     }
 
     func refreshConnections(myGEMSID: String, connections: [FriendConnection], friendResetAt: Date? = nil) async throws -> FriendConnectionRefreshResult {
         let my = GEMSIDNormalizer.normalize(myGEMSID)
         let database = databaseProvider()
 
-        // Discovering links needs a CKQuery on gemsA/gemsB, which fails outright if those fields
-        // have no Queryable index in the target CloudKit environment — a very easy thing to have
-        // in Development but not Production. Letting that throw would abort the whole refresh and
-        // leave every friend showing cached (stale) data. Degrade instead: known friends are
-        // still refreshed below by record ID, which needs no index. Only the discovery of links
-        // this device has never seen is lost.
+        // Link discovery is optional to refreshing already-known friends. If its CKQuery fails for
+        // schema, network, authentication, rate-limit, or service reasons, known friends still use
+        // deterministic record-ID fetches below. Report the degraded discovery separately so the
+        // caller does not mistake a partial refresh for normal discovery success.
         let discoveredConnections: [FriendConnection]
+        let discoverySucceeded: Bool
         do {
             discoveredConnections = try await cloudConnections(
                 myGEMSID: my,
                 friendResetAt: friendResetAt,
                 database: database
             )
+            discoverySucceeded = true
         } catch {
+            let details = String(reflecting: error)
             logger.error(
-                "[TDHFriendLink] friend link query failed; refreshing known friends by record ID only: \(error.localizedDescription, privacy: .public)"
+                "[TDHFriendLink] Friend-link discovery failed; refreshing known friends by record ID only: \(details, privacy: .public)"
             )
             discoveredConnections = []
+            discoverySucceeded = false
         }
 
         let mergedConnections = mergeConnections(connections + discoveredConnections)
@@ -497,7 +523,11 @@ final class FriendScheduleCloudKitService: FriendScheduleCloudKitServicing, @unc
             }
         }
 
-        return FriendConnectionRefreshResult(connections: refreshed, outcomes: outcomes)
+        return FriendConnectionRefreshResult(
+            connections: refreshed,
+            outcomes: outcomes,
+            discoverySucceeded: discoverySucceeded
+        )
     }
 
     private func cloudConnections(

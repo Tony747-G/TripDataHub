@@ -676,6 +676,72 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertNil(snapshotRecord)
     }
 
+    func test_deleteFriendSharingData_missingQueryableIndexStillDeletesDirectlyAddressableData() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+        await database.insertFriendLink(
+            gemsA: "0111111",
+            gemsB: "0222222",
+            approvedA: true,
+            approvedB: true,
+            status: "accepted",
+            linkedAt: Date(timeIntervalSince1970: 2)
+        )
+        try await service.uploadSchedule(
+            gemsID: "111111",
+            cloudKitRecordName: "_internal_cloudkit_record",
+            schedules: [makeSchedule(legs: [])]
+        )
+        try await service.uploadScheduleSnapshot(
+            gemsID: "111111",
+            ownerDisplayName: "Test Pilot",
+            crewAccessTrips: []
+        )
+        await database.failQueries()
+
+        do {
+            try await service.deleteFriendSharingData(gemsID: "111111")
+            XCTFail("undiscovered friend-link approvals must be reported as partial cleanup")
+        } catch let error as CKError {
+            XCTAssertEqual(error.code, .serverRejectedRequest)
+        }
+
+        let scheduleRecord = await database.recordSnapshot(named: "tdh_schedule_0111111")
+        let snapshotRecord = await database.recordSnapshot(named: "tdh_snapshot_0111111")
+        XCTAssertNil(scheduleRecord)
+        XCTAssertNil(snapshotRecord)
+        let undiscoverableLink = await database.recordSnapshot(named: "tdh_friend_0111111_0222222")
+        XCTAssertEqual((undiscoverableLink?["approvedA"] as? NSNumber)?.boolValue, true)
+    }
+
+    func test_deleteFriendSharingData_unrelatedQueryFailureStillDeletesDirectlyAddressableDataThenThrows() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+        try await service.uploadSchedule(
+            gemsID: "111111",
+            cloudKitRecordName: "_internal_cloudkit_record",
+            schedules: [makeSchedule(legs: [])]
+        )
+        try await service.uploadScheduleSnapshot(
+            gemsID: "111111",
+            ownerDisplayName: "Test Pilot",
+            crewAccessTrips: []
+        )
+        await database.failQueries(with: .networkFailure, description: "Network unavailable")
+
+        do {
+            try await service.deleteFriendSharingData(gemsID: "111111")
+            XCTFail("an unrelated query failure must be propagated")
+        } catch let error as CKError {
+            XCTAssertEqual(error.code, .networkFailure)
+        }
+
+        let scheduleRecord = await database.recordSnapshot(named: "tdh_schedule_0111111")
+        let snapshotRecord = await database.recordSnapshot(named: "tdh_snapshot_0111111")
+        XCTAssertNil(scheduleRecord)
+        XCTAssertNil(snapshotRecord)
+    }
+
     func test_requestFriend_afterAccountDeleteRestoresWhenOtherApprovalRemains() async throws {
         let database = FriendCloudKitFakeDatabase()
         let service = FriendScheduleCloudKitService(databaseProvider: { database })
@@ -865,10 +931,11 @@ final class FriendScheduleMatchingTests: XCTestCase {
         await database.failQueries()
         let service = FriendScheduleCloudKitService(databaseProvider: { database })
 
-        let refreshed = try await service.refreshConnections(
+        let result = try await service.refreshConnections(
             myGEMSID: "111111",
             connections: [FriendConnection(employeeID: "0222222", status: .pending)]
-        ).connections
+        )
+        let refreshed = result.connections
 
         XCTAssertEqual(refreshed.count, 1)
         XCTAssertEqual(
@@ -876,6 +943,30 @@ final class FriendScheduleMatchingTests: XCTestCase {
             .accepted,
             "a known friend must still refresh by record ID when the discovery query fails"
         )
+        XCTAssertFalse(result.discoverySucceeded)
+    }
+
+    func test_refreshConnections_networkDiscoveryFailureStillRefreshesKnownFriendByRecordID() async throws {
+        let database = FriendCloudKitFakeDatabase()
+        await database.insertFriendLink(
+            gemsA: "0111111",
+            gemsB: "0222222",
+            approvedA: true,
+            approvedB: true,
+            status: "accepted",
+            linkedAt: Date(timeIntervalSince1970: 1000)
+        )
+        await database.failQueries(with: .networkFailure, description: "Network unavailable")
+        let service = FriendScheduleCloudKitService(databaseProvider: { database })
+
+        let result = try await service.refreshConnections(
+            myGEMSID: "111111",
+            connections: [FriendConnection(employeeID: "0222222", status: .pending)]
+        )
+
+        XCTAssertEqual(result.connections.first?.status, .accepted)
+        XCTAssertEqual(result.outcomes["0222222"], .succeeded)
+        XCTAssertFalse(result.discoverySucceeded)
     }
 
     func test_refreshConnections_preservesOnlyFailedFriendAndKeepsOtherResults() async throws {
@@ -950,6 +1041,7 @@ final class FriendScheduleMatchingTests: XCTestCase {
         XCTAssertEqual(result.connections.first?.status, .accepted)
         XCTAssertEqual(result.connections.first?.linkedAt, Date(timeIntervalSince1970: 2))
         XCTAssertEqual(result.outcomes["0222222"], .failed(.fetchError))
+        XCTAssertTrue(result.discoverySucceeded)
     }
 
     func test_refreshConnections_preservesCachedScheduleWhenAcceptedFriendHasNoScheduleRecord() async throws {
@@ -1451,15 +1543,17 @@ final class FriendScheduleMatchingTests: XCTestCase {
         _ = try await service.requestFriend(myGEMSID: "111111", friendGEMSID: "222222")
         _ = try await service.requestFriend(myGEMSID: "222222", friendGEMSID: "111111")
 
-        let refreshed = try await service.refreshConnections(
+        let result = try await service.refreshConnections(
             myGEMSID: "111111",
             connections: []
-        ).connections
+        )
+        let refreshed = result.connections
 
         XCTAssertEqual(refreshed.count, 1)
         XCTAssertEqual(refreshed.first?.employeeID, "0222222")
         XCTAssertEqual(refreshed.first?.status, .accepted)
         XCTAssertNotNil(refreshed.first?.linkedAt)
+        XCTAssertTrue(result.discoverySucceeded)
     }
 
     func test_refreshConnections_keepsAcceptedStatusFromPersistedCloudStatus() async throws {
@@ -1748,6 +1842,7 @@ private actor FriendCloudKitFakeDatabase: FriendScheduleCloudKitDatabase {
     private var denyCanonicalFriendLinkUpdates: Bool
     private var saveCallCount = 0
     private var queryFailureCode: CKError.Code?
+    private var queryFailureDescription = ""
 
     init(
         conflictFirstFriendLinkSaveWithOtherApproval: Bool = false,
@@ -1801,15 +1896,27 @@ private actor FriendCloudKitFakeDatabase: FriendScheduleCloudKitDatabase {
         return recordID
     }
 
-    /// Simulates a CloudKit environment where gemsA/gemsB have no Queryable index — the usual
-    /// Development-vs-Production schema gap.
-    func failQueries(with code: CKError.Code = .invalidArguments) {
+    /// Simulates discovery-query failures while keeping useful server detail outside
+    /// `localizedDescription`, as CloudKit errors commonly do.
+    func failQueries(
+        with code: CKError.Code = .serverRejectedRequest,
+        description: String = "Field 'gemsA' is not marked queryable"
+    ) {
         queryFailureCode = code
+        queryFailureDescription = description
     }
 
     func records(matching query: CKQuery) async throws -> [CKRecord] {
         if let queryFailureCode {
-            throw CKError(queryFailureCode)
+            let error = NSError(
+                domain: CKErrorDomain,
+                code: queryFailureCode.rawValue,
+                userInfo: [
+                    NSLocalizedDescriptionKey: "CloudKit query failed",
+                    NSDebugDescriptionErrorKey: queryFailureDescription
+                ]
+            )
+            throw CKError(_nsError: error)
         }
         return records.values.filter { record in
             guard record.recordType == query.recordType else { return false }

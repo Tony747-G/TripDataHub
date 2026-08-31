@@ -1546,7 +1546,9 @@ final class AppViewModel: ObservableObject {
                 enableScheduleSharingForFriends()
             }
             updateScheduleSharingAfterFriendListChange()
-            friendCloudKitSyncMessage = "Friend schedules updated."
+            friendCloudKitSyncMessage = refreshResult.discoverySucceeded
+                ? "Friend schedules updated."
+                : "Known friend schedules updated; friend discovery failed."
             for friend in newlyAccepted {
                 await notifyFriendLinked(friend)
             }
@@ -6100,6 +6102,7 @@ final class AppViewModel: ObservableObject {
         let existing = latestCrewAccessPayload(in: sameBidPeriod)
             ?? latestCrewAccessPayload(in: crossBidPeriod)
         guard let existing else { return incoming }
+        let incomingPDFCreatedUTC = incoming.pdfCreatedUtc.flatMap(LegConnectionTextBuilder.parseUTC)
 
         var unmatchedExisting = Set(existing.items.indices)
         let mergedItems = try incoming.items.map { item in
@@ -6110,7 +6113,12 @@ final class AppViewModel: ObservableObject {
             )
             guard let matchedIndex else { return item }
             unmatchedExisting.remove(matchedIndex)
-            return try mergeCrewAccessLegHistory(incoming: item, existing: existing.items[matchedIndex], existingSchemaVersion: existing.schemaVersion)
+            return try mergeCrewAccessLegHistory(
+                incoming: item,
+                existing: existing.items[matchedIndex],
+                existingSchemaVersion: existing.schemaVersion,
+                incomingPDFCreatedUTC: incomingPDFCreatedUTC
+            )
         }
 
         return CrewAccessTripJSON(
@@ -6211,12 +6219,15 @@ final class AppViewModel: ObservableObject {
     private nonisolated static func mergeCrewAccessLegHistory(
         incoming: CrewAccessTripItemJSON,
         existing: CrewAccessTripItemJSON,
-        existingSchemaVersion: Int
+        existingSchemaVersion: Int,
+        incomingPDFCreatedUTC: Date?
     ) throws -> CrewAccessTripItemJSON {
         let legacyScheduledDeparture = existingSchemaVersion < 2 ? (existing.stdUtc ?? existing.startUtc) : existing.stdUtc
         let legacyScheduledArrival = existingSchemaVersion < 2 ? (existing.staUtc ?? existing.endUtc) : existing.staUtc
         let scheduledDeparture = incoming.stdUtc ?? legacyScheduledDeparture
         let scheduledArrival = incoming.staUtc ?? legacyScheduledArrival
+        let incomingHasActualDeparture = incoming.atdUtc != nil
+        let incomingHasActualArrival = incoming.ataUtc != nil
         var actualDeparture = incoming.atdUtc ?? existing.atdUtc
         var actualArrival = incoming.ataUtc ?? existing.ataUtc
 
@@ -6244,16 +6255,49 @@ final class AppViewModel: ObservableObject {
             actualArrival = utcISO8601(resolvedArrival)
         }
 
-        if let actualDeparture,
-           let actualArrival,
-           let departure = LegConnectionTextBuilder.parseUTC(actualDeparture),
-           let arrival = LegConnectionTextBuilder.parseUTC(actualArrival),
-           arrival < departure {
-            throw CrewAccessActualTimeResolutionError.arrivalBeforeDeparture
+        if incomingHasActualDeparture,
+           !incomingHasActualArrival,
+           let incomingPDFCreatedUTC,
+           let historicalArrivalText = existing.ataUtc,
+           let historicalArrivalUTC = LegConnectionTextBuilder.parseUTC(historicalArrivalText),
+           incomingPDFCreatedUTC >= historicalArrivalUTC {
+            // INV-012 would classify this endpoint as Actual if it still represented the incoming
+            // PDF's observation. A Scheduled arrival at the same or later Created instant therefore
+            // supersedes the historical ATA; chronology alone cannot keep a completed-flight state.
+            actualArrival = nil
+        }
+
+        let mergedActualsAreReversed: Bool = {
+            guard let actualDeparture,
+                  let actualArrival,
+                  let departure = LegConnectionTextBuilder.parseUTC(actualDeparture),
+                  let arrival = LegConnectionTextBuilder.parseUTC(actualArrival) else {
+                return false
+            }
+            return arrival < departure
+        }()
+
+        if incomingHasActualDeparture && incomingHasActualArrival {
+            // Both endpoints came from one incoming PDF generation, so chronology is a coherent
+            // observation and must still fail closed when invalid.
+            if mergedActualsAreReversed {
+                throw CrewAccessActualTimeResolutionError.arrivalBeforeDeparture
+            }
+        } else if mergedActualsAreReversed {
+            // INV-012 classifies endpoints independently. A partial incoming observation may carry
+            // the other endpoint from history only while the two remain chronologically compatible.
+            // If they conflict, keep the newer observed endpoint and retire the older counterpart;
+            // never reject the new PDF by validating a synthetic cross-generation pair.
+            if incomingHasActualDeparture {
+                actualArrival = nil
+            } else if incomingHasActualArrival {
+                actualDeparture = nil
+            }
         }
 
         let incomingIsScheduleOnly = incoming.atdUtc == nil && incoming.ataUtc == nil
         let incomingHasCompleteActuals = incoming.atdUtc != nil && incoming.ataUtc != nil
+        let mergedHasCompleteActuals = actualDeparture != nil && actualArrival != nil
 
         return CrewAccessTripItemJSON(
             sequence: incoming.sequence,
@@ -6284,18 +6328,20 @@ final class AppViewModel: ObservableObject {
             scheduledArrivalObservedAtUtc: incoming.staUtc != nil
                 ? incoming.scheduledArrivalObservedAtUtc
                 : existing.scheduledArrivalObservedAtUtc,
-            actualDepartureObservedAtUtc: incoming.atdUtc != nil
+            actualDepartureObservedAtUtc: incomingHasActualDeparture
                 ? incoming.actualDepartureObservedAtUtc
-                : existing.actualDepartureObservedAtUtc,
-            actualArrivalObservedAtUtc: incoming.ataUtc != nil
+                : (actualDeparture == nil ? nil : existing.actualDepartureObservedAtUtc),
+            actualArrivalObservedAtUtc: incomingHasActualArrival
                 ? incoming.actualArrivalObservedAtUtc
-                : existing.actualArrivalObservedAtUtc,
+                : (actualArrival == nil ? nil : existing.actualArrivalObservedAtUtc),
             tripImportedAtUtc: incomingIsScheduleOnly
                 ? incoming.tripImportedAtUtc
                 : (existing.tripImportedAtUtc ?? incoming.tripImportedAtUtc),
-            actualsImportedAtUtc: incomingHasCompleteActuals
-                ? incoming.actualsImportedAtUtc
-                : existing.actualsImportedAtUtc
+            actualsImportedAtUtc: mergedHasCompleteActuals
+                ? (incomingHasCompleteActuals
+                    ? incoming.actualsImportedAtUtc
+                    : existing.actualsImportedAtUtc)
+                : nil
         )
     }
 

@@ -82,13 +82,13 @@ The local JSON file in `Documents/CrewAccessImports/{date}_{tripId}.json` is the
 
 ## INV-007: CloudKit Sync Is Local-Wins on Conflict
 
-When fetching a remote `TDHDeviceScheduleSnapshot`, if any local `crewAccessSchedules.updatedAt` is newer than the snapshot's `updatedAt`, the remote is rejected. This prevents a stale remote from rolling back a successful local import that has not yet uploaded.
+The legacy `TDHDeviceScheduleSnapshot` may replace local CrewAccess schedules only when the canonical import-file rebuild produced an empty `crewAccessSchedules`. A non-empty Timeline rebuilt from local import files always wins; snapshot and local-file timestamps are deliberately not compared because they describe different events.
 
 The same local-wins rule applies to the *file* layer, where "local wins" is expressed as a transaction rather than a timestamp comparison — a file has no schedule `updatedAt` to compare. From the local JSON commit in `confirmPendingImport` until that generation is uploaded to CloudKit, an **Import transaction** is open. While it is open, foreground and startup CrewAccess sync do not fetch records, apply tombstones or reconcile; the request is coalesced and replayed exactly once after the transaction closes. Without this, a sync landing mid-import applies the pre-import record set to a post-import local directory and reconcile rebuilds a Timeline without the trip that was just confirmed.
 
 Upload order inside the transaction is source JSON first, schedule snapshot second, so every intermediate state another device can observe is one it can fully rebuild from files (INV-006). A snapshot is never uploaded when the rebuilt `crewAccessSchedules` is empty.
 
-**Enforced by:** `AppViewModel.fetchDeviceScheduleIfNeeded` "Gate 3 (local-wins)"; `AppViewModel.beginCrewAccessImportTransaction` / `endCrewAccessImportTransaction` with the guards at the top of `syncCrewAccessDeviceData` and `fetchCrewAccessImportFilesIfNeeded`. Tests: `CrewAccessInProgressTripReimportTests`.
+**Enforced by:** the non-empty `crewAccessSchedules` precondition in `AppViewModel.fetchLegacyDeviceScheduleFallbackIfNeeded`; `AppViewModel.beginCrewAccessImportTransaction` / `endCrewAccessImportTransaction` with the guards at the top of `syncCrewAccessDeviceData` and `fetchCrewAccessImportFilesIfNeeded`. Tests: `AppViewModelDeviceSyncTests`, `CrewAccessInProgressTripReimportTests`.
 
 ---
 

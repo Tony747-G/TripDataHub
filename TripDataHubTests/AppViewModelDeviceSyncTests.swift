@@ -289,6 +289,48 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         XCTAssertEqual(uploadedFileNames, [fileName])
     }
 
+    func test_syncCrewAccessDeviceData_fetchesCanonicalFilesBeforeReconcile() async throws {
+        try removeCrewAccessImportDirectory()
+        defer { try? removeCrewAccessImportDirectory() }
+
+        let payload = makeCrewAccessJSON(
+            tripId: "ORDER01",
+            tripInformationDate: "01Jun2026",
+            startUtc: "2026-06-01T08:00:00Z",
+            endUtc: "2026-06-01T10:00:00Z"
+        )
+        let importCloudKitService = StatefulCrewAccessImportCloudKitService(records: [
+            CrewAccessImportCloudKitRecord(
+                fileName: "2026-06-01_ORDER01.json",
+                jsonData: try JSONEncoder().encode(payload),
+                tripInformationDate: payload.tripInformationDate,
+                firstDepartureUTC: payload.items.first?.startUtc,
+                updatedAt: Date(),
+                deletedAt: nil
+            )
+        ])
+        let deviceService = FakeDeviceScheduleCloudKitService()
+        let vm = makeViewModel(
+            deviceService: deviceService,
+            importCloudKitService: importCloudKitService
+        )
+        setVerifiedIdentity(on: vm)
+
+        await vm.syncCrewAccessDeviceData(reason: "fetch-before-reconcile regression")
+
+        XCTAssertEqual(
+            Set(vm.crewAccessSchedules.flatMap { $0.legs.map(\.pairing) }),
+            ["ORDER01"],
+            "reconcile must consume the file fetched during this sync"
+        )
+        let legacySnapshotFetches = await deviceService.fetchCallCount
+        XCTAssertEqual(
+            legacySnapshotFetches,
+            0,
+            "a successful file rebuild must not fall through to the legacy snapshot"
+        )
+    }
+
     func test_fetchCrewAccessImports_legacyDeletionIntentTombstonesLiveRemoteOnFirstSync() async throws {
         try removeCrewAccessImportDirectory()
         defer { try? removeCrewAccessImportDirectory() }
