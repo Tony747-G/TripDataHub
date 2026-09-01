@@ -1,6 +1,6 @@
-# ADR-004: Schedule-based Flight Operational State and Live Activity Removal
+# ADR-004: Schedule-based Home Widget State and Live Activity Removal
 
-**Status:** Accepted; amended 2026-08-28 by Product Owner decision
+**Status:** Accepted; amended 2026-08-31 by Product Owner decision
 **Scope:** Flight operational domain, Home Screen Widget snapshot, report notifications, Timeline separation
 
 ## Context
@@ -24,69 +24,92 @@ The product requirement was not weakened, and APNs/server/BGTask infrastructure 
 
 ## Decision
 
-### 1. Keep the four-state schedule model
+### 1. Use one always-operational Widget state model
 
-`FlightOperationalState` remains:
-
-```text
-preReport
-preDeparture
-departureTimePassed
-expired
-```
-
-Evaluation order is exact:
+The Home Screen Widget uses one shared `HomeWidgetDomain` with three explicit projection states:
 
 ```text
-now >= STD + 61 minutes -> expired
-now >= STD              -> departureTimePassed
-now < reportTime        -> preReport
-otherwise               -> preDeparture
+nextTripReport
+activeTripNextFlight
+activeTripFinalLeg
 ```
 
-Equality belongs to the later state. The interval through STD+60:59 remains
-`departureTimePassed`; STD+61:00 is `expired`.
+Before report time it selects the earliest future Trip report. At report-time equality the Trip is
+active and it selects the first scheduled flight whose `STD > now`. At each STD equality that leg
+is no longer “next”, so selection advances immediately. The former T-12h through T-6h Home Widget
+window and STD+61 current-leg presentation are retired from this Widget path.
 
-### 2. Keep schedule-only inputs and absolute time
+Small and Medium receive the same `HomeWidgetPresentation`; SwiftUI views do not select a
+Trip or leg.
 
-Operational state and current-leg selection are derived from:
+### 2. Use scheduled absolute instants and explicit airport timezones
 
-- required `plannedDepartureUTC`;
-- optional trip-level `reportTimeUTC`;
+The Widget schedule projection derives from:
+
+- Trip report time for the first valid domicile departure;
+- each flight's planned STD and STA;
+- the final flight's planned STA plus 30 minutes;
 - injected or current `nowUTC`.
 
-`plannedArrivalUTC` may be carried as route display metadata. STA, ATD, ATA, `depUTC`, and
-`arrUTC` do not determine realtime state. Timezone changes affect formatting, not the underlying
-instant or duration.
+ATD, ATA, display-effective `depUTC` / `arrUTC`, device timezone, and formatted clock text do not
+determine Widget state. Departure LCL uses the departure-airport timezone, arrival LCL uses the
+arrival-airport timezone, and UTC formats the same absolute `Date`.
 
-Report time applies only to the first valid domicile departure in a Trip. Later legs do not
-re-enter `.preReport`.
+Missing planned endpoints or timezones fail closed for that projected leg and are diagnosed. Trip
+completion is separate from renderability: after at least one leg projects, release uses the last
+source flight in canonical sequence whose planned arrival parses, even if that source leg cannot
+project because its airport timezone is unresolved. If later source flights have no parseable
+arrival, release falls back in source order to the last parseable source arrival, then to the last
+valid projected arrival only when necessary. Trips with no projected legs are excluded, and
+nil-release input Trips are ineligible rather than active forever. No release time is invented.
 
-The Home Screen Widget countdown presentation is a separate optional projection. It exists only
-for `.preReport` and `.preDeparture`; `.departureTimePassed` remains a domain/selection state and
-has no visible post-STD countdown presentation contract.
+### 3. Keep the final Trip active through final STA+30
 
-### 3. Keep deterministic current-leg selection
+At the final leg's STD there is no following flight. Until final planned arrival plus 30 minutes,
+the Widget retains the final leg with neutral `TRIP IN PROGRESS` copy. It does not create a fake
+next leg, resurrect report time, or show the following Trip prematurely.
 
-A non-expired `.departureTimePassed` leg owns selection through STD+60:59. At STD+61 it becomes
-ineligible and the earliest valid future leg may take over. Operating and deadhead flights use the
-same state rules. Missing required planned inputs fail closed and are diagnosed; no timestamp is
-invented.
+The exact family presentation is:
 
-### 4. Keep the Home Screen Widget as a separate WidgetKit feature
+- Small: final flight number, the compact DEP/airplane/ARR route-time grid carrying departure and
+  arrival `(L)`/`(Z)`, and `TRIP IN PROGRESS`.
+- Medium: flight number, the DEP/airplane/ARR route-time grid carrying both departure and
+  arrival `(L)`/`(Z)`, plus optional destination layover/weather enrichment.
 
-The Widget Extension target remains because it owns the Home Screen Widget. The app publishes its
-snapshot through `FlightCountdownCoordinator`, which now has only a snapshot client and no
-ActivityKit dependency.
+Large was withdrawn as a product decision; only Small and Medium are supported families.
 
-Home Screen Widget visibility remains T-12h through T-6h. Outside that interval it is explicitly
-`.hidden`. Launch, active-scene, schedule-revision, and boundary refresh paths remain because they
-also maintain this Widget snapshot. Replacement uses clear-then-publish semantics for the snapshot.
+At release-boundary equality, the next future Trip report becomes eligible.
 
-The shared operational state, engine, snapshot, timezone formatting, and pre-STD Home Widget
-countdown presentation remain domain/Widget code. A snapshot may therefore carry the selected
-`.departureTimePassed` domain state with no presentation. Live Activity attributes, ContentState,
-expanded layout, post-STD elapsed presentation, stale metadata, and Activity clients were removed.
+### 4. Publish one schedule projection and enrich weather in the Widget provider
+
+The app publishes a compact multi-Trip `HomeWidgetScheduleSnapshot` through the existing App Group
+file and `FlightCountdownCoordinator`. Reconcile publishes normally; Trip Replacement performs
+clear-then-publish. The Widget provider evaluates the shared domain and emits at most 12 entries
+within a rolling 48-hour horizon, beginning with the current state and then the immediate report,
+STD, and final STA+30 boundaries in that window. The 30-minute reload policy rematerializes later
+boundaries before they become current. WidgetKit owns actual redraw timing, but reevaluation at or
+after a boundary deterministically produces the later state.
+
+Weather is optional, Medium-only enrichment performed by the Widget TimelineProvider, never a view
+body or the host app. Each `getTimeline` invocation enriches only the current/first entry, for a
+hard maximum of one WeatherKit enrichment; later complete operational entries carry nil weather
+until a periodic reload makes them current. It queries WeatherKit hourly data around scheduled
+arrival and selects the hour nearest that arrival. Arrivals outside WeatherKit's 10-day hourly
+horizon, request failures, or empty forecasts yield no weather without removing flight data.
+Successful values are cached briefly in memory and reduced to destination, forecast hour, SF
+Symbol name, and Celsius temperature.
+
+Arrival coordinates are a checked-in projection for every airport already supported by
+`IATATimeZoneResolver`, generated from the pinned public-domain OurAirports dataset commit
+`9e51f13487de777bdc473a37d271981a2d0b30ca`; PBI uses that dataset's KPBI coordinates. No current
+location or per-refresh geocoding is used.
+
+Only the Widget extension carries `com.apple.developer.weatherkit`. Weather presentation requires
+`WeatherService.attribution`: the provider downloads Apple's combined light- and dark-appearance
+Weather marks and stores them with Apple's legal-page URL in the timeline entry so the Widget can
+match the active system appearance. The Medium Widget renders the matching mark as
+a `Link`; if attribution is unavailable, weather itself is suppressed. The operational state is
+still rendered.
 
 ### 5. Remove Flight Countdown Live Activities completely
 
@@ -129,6 +152,10 @@ final scheduled arrival suppresses conservatively without inventing a release ti
 
 ## Consequences
 
+- The Home Screen Widget now remains useful before report, throughout a Trip, and through final
+  STA+30; all three supported families share exact boundary behavior.
+- WeatherKit provisioning for the Widget extension must be enabled for the production App ID and
+  confirmed in the distribution profile before release signing/archive validation.
 - Issues 2, 3, 4, 5, 6, 7, and 9 are resolved by feature removal.
 - Issue 1 remains resolved by the Timeline corrective implementation.
 - Issue 8 remains deferred with root cause open; import, persistence, sync, cache, render identity,
@@ -136,7 +163,7 @@ final scheduled arrival suppresses conservatively without inventing a release ti
 - Existing Live Activities installed by an older build are not managed by the new production code;
   the new build contains no request/update/end runtime path for this feature.
 - The Widget Extension target, App Group entitlement, snapshot file, and WidgetCenter reload remain
-  because the Home Screen Widget still uses them.
+  because the redesigned Home Screen Widget uses them.
 
 ## Rejected Alternatives
 

@@ -94,9 +94,9 @@ targets:
     platform: iOS
     sources:
       - path: TripDataCountdownWidgetExtension
-      # Shared operational state and countdown payloads compiled into both the app and extension.
-      # Dual target membership, not copies: operational state, Home Widget presentation policy,
-      # and snapshot payload contracts must stay byte-identical on both sides of the App Group.
+      # Shared Widget domain and payloads compiled into both the app and extension. Dual target
+      # membership, not copies: selection, formatting, timeline boundaries, and snapshot payload
+      # contracts must stay byte-identical on both sides of the App Group.
       - path: TripDataHub/Models/FlightOperationalState.swift
       - path: TripDataHub/Models/FlightCountdownSharedModels.swift
     settings:
@@ -110,6 +110,10 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: 54WZM2U9MK
         SKIP_INSTALL: YES
+    # WeatherKit is requested only by this extension. Its entitlement is maintained in the
+    # checked-in entitlements file and mirrored in the checked-in project TargetAttributes.
+    # XcodeGen 2.46.0 cannot safely serialize nested SystemCapabilities, so do not duplicate the
+    # malformed target attribute here; see the repository's F-7 reproducibility constraint.
     # No dependency on TripDataHub — see the note on the Share Action target.
 
   TripDataHubTests:

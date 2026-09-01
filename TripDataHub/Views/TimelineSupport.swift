@@ -330,8 +330,11 @@ enum TimelineLayoverSupport {
 
     /// Returns true when the gap between arrival and next departure is ≥ 3 h (same pairing).
     static func shouldShow(arrDate: Date?, nextDepDate: Date?, samePairing: Bool) -> Bool {
-        guard samePairing, let arr = arrDate, let dep = nextDepDate else { return false }
-        return Int(dep.timeIntervalSince(arr) / 60) >= 180
+        ScheduledLayoverPolicy.isLayover(
+            arrivalUTC: arrDate,
+            nextDepartureUTC: nextDepDate,
+            sameTrip: samePairing
+        )
     }
 
     /// Rest begins at duty end (arrival + 30m) and ends at the next duty start.

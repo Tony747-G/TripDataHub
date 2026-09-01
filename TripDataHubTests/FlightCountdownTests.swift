@@ -49,6 +49,173 @@ private enum FlightCountdownFixture {
     }
 }
 
+private enum HomeWidgetTestFixture {
+    static let report = date("2026-08-30T22:00:00Z")
+    static let firstDeparture = date("2026-08-30T23:00:00Z")
+    static let firstArrival = date("2026-08-31T01:00:00Z")
+    static let secondDeparture = date("2026-08-31T04:00:00Z")
+    static let secondArrival = date("2026-08-31T08:00:00Z")
+    static let finalDeparture = date("2026-08-31T12:00:00Z")
+    static let finalArrival = date("2026-08-31T20:00:00Z")
+    static let release = date("2026-08-31T20:30:00Z")
+    static let nextReport = date("2026-08-31T21:00:00Z")
+    static let nextDeparture = date("2026-08-31T22:30:00Z")
+    static let nextArrival = date("2026-09-01T02:00:00Z")
+    static let nextRelease = date("2026-09-01T02:30:00Z")
+
+    static let sdfCoordinate = HomeWidgetAirportCoordinate(
+        latitude: 38.1706,
+        longitude: -85.735076
+    )
+    static let nrtCoordinate = HomeWidgetAirportCoordinate(
+        latitude: 35.76858,
+        longitude: 140.388714
+    )
+    static let ancCoordinate = HomeWidgetAirportCoordinate(
+        latitude: 61.1744,
+        longitude: -149.996
+    )
+
+    static let firstLeg = leg(
+        id: "first",
+        flightNumber: "5X123",
+        departureAirport: "ANC",
+        arrivalAirport: "SDF",
+        departure: firstDeparture,
+        arrival: firstArrival,
+        departureTimeZoneID: "America/Anchorage",
+        arrivalTimeZoneID: "America/Kentucky/Louisville",
+        arrivalCoordinate: sdfCoordinate,
+        layoverAfterMinutes: 180
+    )
+    static let secondLeg = leg(
+        id: "second",
+        flightNumber: "5X456",
+        departureAirport: "SDF",
+        arrivalAirport: "NRT",
+        departure: secondDeparture,
+        arrival: secondArrival,
+        departureTimeZoneID: "America/Kentucky/Louisville",
+        arrivalTimeZoneID: "Asia/Tokyo",
+        arrivalCoordinate: nrtCoordinate,
+        layoverAfterMinutes: 240
+    )
+    static let finalLeg = leg(
+        id: "final",
+        flightNumber: "5X789",
+        departureAirport: "NRT",
+        arrivalAirport: "ANC",
+        departure: finalDeparture,
+        arrival: finalArrival,
+        departureTimeZoneID: "Asia/Tokyo",
+        arrivalTimeZoneID: "America/Anchorage",
+        arrivalCoordinate: ancCoordinate
+    )
+    static let currentTrip = HomeWidgetTrip(
+        id: "PP26-08|A70639",
+        tripID: "A70639",
+        reportTimeUTC: report,
+        reportTimeZoneID: "America/Anchorage",
+        releaseBoundaryUTC: release,
+        legs: [firstLeg, secondLeg, finalLeg]
+    )
+    static let nextTrip = HomeWidgetTrip(
+        id: "PP26-08|A70640",
+        tripID: "A70640",
+        reportTimeUTC: nextReport,
+        reportTimeZoneID: "America/Anchorage",
+        releaseBoundaryUTC: nextRelease,
+        legs: [
+            leg(
+                id: "next",
+                flightNumber: "5X900",
+                departureAirport: "ANC",
+                arrivalAirport: "SDF",
+                departure: nextDeparture,
+                arrival: nextArrival,
+                departureTimeZoneID: "America/Anchorage",
+                arrivalTimeZoneID: "America/Kentucky/Louisville",
+                arrivalCoordinate: sdfCoordinate
+            )
+        ]
+    )
+    static let snapshot = HomeWidgetScheduleSnapshot(
+        updatedAtUTC: report.addingTimeInterval(-60),
+        trips: [nextTrip, currentTrip]
+    )
+
+    static func date(_ value: String) -> Date {
+        ISO8601DateFormatter().date(from: value)!
+    }
+
+    static func leg(
+        id: String,
+        flightNumber: String,
+        departureAirport: String,
+        arrivalAirport: String,
+        departure: Date,
+        arrival: Date,
+        departureTimeZoneID: String,
+        arrivalTimeZoneID: String,
+        arrivalCoordinate: HomeWidgetAirportCoordinate? = nil,
+        layoverAfterMinutes: Int? = nil
+    ) -> HomeWidgetLeg {
+        HomeWidgetLeg(
+            id: id,
+            flightNumber: flightNumber,
+            departureAirportIATA: departureAirport,
+            arrivalAirportIATA: arrivalAirport,
+            plannedDepartureUTC: departure,
+            plannedArrivalUTC: arrival,
+            departureTimeZoneID: departureTimeZoneID,
+            arrivalTimeZoneID: arrivalTimeZoneID,
+            arrivalCoordinate: arrivalCoordinate,
+            layoverAfterMinutes: layoverAfterMinutes
+        )
+    }
+}
+
+private actor HomeWidgetWeatherEnrichmentCounter {
+    private var count = 0
+
+    func recordAndReturn(_ value: String?) -> String? {
+        count += 1
+        return value
+    }
+
+    func value() -> Int { count }
+}
+
+private final class ANCOnlyIATATimeZoneResolver: IATATimeZoneResolving, @unchecked Sendable {
+    let mappingVersion = "anc-only"
+
+    func resolve(_ iata: String) -> String? {
+        iata.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "ANC"
+            ? "America/Anchorage"
+            : nil
+    }
+    func airportName(_ iata: String) -> String? { nil }
+    func cityName(_ iata: String) -> String? { nil }
+    func setOverride(iata: String, tzID: String?) {}
+    func currentOverrides() -> [String: String] { [:] }
+}
+
+private final class ANCSDFIATATimeZoneResolver: IATATimeZoneResolving, @unchecked Sendable {
+    let mappingVersion = "anc-sdf-only"
+
+    func resolve(_ iata: String) -> String? {
+        switch iata.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
+        case "ANC": "America/Anchorage"
+        case "SDF": "America/Kentucky/Louisville"
+        default: nil
+        }
+    }
+    func airportName(_ iata: String) -> String? { nil }
+    func cityName(_ iata: String) -> String? { nil }
+    func setOverride(iata: String, tzID: String?) {}
+    func currentOverrides() -> [String: String] { [:] }
+}
+
 final class Phase4LayoutTests: XCTestCase {
 #if false // RETIRED: Flight Countdown Live Activity was removed by product decision.
     @MainActor
@@ -244,7 +411,8 @@ final class Phase4LayoutTests: XCTestCase {
             contentsOf: repositoryRoot.appendingPathComponent(widgetPath),
             encoding: .utf8
         )
-        XCTAssertTrue(widgetSource.contains("OperationalCountdownStatusView"), widgetPath)
+        XCTAssertTrue(widgetSource.contains("HomeWidgetDomain.timeline"), widgetPath)
+        XCTAssertTrue(widgetSource.contains("HomeWidgetEntryView"), widgetPath)
         XCTAssertFalse(widgetSource.contains("TimelineNextReportCountdownBuilder"), widgetPath)
     }
 
@@ -283,23 +451,15 @@ final class Phase4LayoutTests: XCTestCase {
             contentsOf: repositoryRoot.appendingPathComponent("TripDataHub/ViewModels/AppViewModel.swift"),
             encoding: .utf8
         )
-        let boundaryStart = try XCTUnwrap(
-            appViewModelSource.range(of: "static func nextFlightCountdownEvaluationBoundary")
-        ).lowerBound
-        let boundaryEnd = try XCTUnwrap(
-            appViewModelSource.range(
-                of: "private func scheduleFlightCountdownBoundary",
-                range: boundaryStart..<appViewModelSource.endIndex
-            )
-        ).lowerBound
-        let boundarySource = String(appViewModelSource[boundaryStart..<boundaryEnd])
-        XCTAssertFalse(boundarySource.contains("plannedArrivalUTC"))
-        XCTAssertFalse(boundarySource.contains("STA"))
+        XCTAssertTrue(appViewModelSource.contains("homeWidgetScheduleSnapshot"))
+        XCTAssertTrue(appViewModelSource.contains("refreshHomeWidget"))
+        XCTAssertFalse(appViewModelSource.contains("flightCountdownBoundaryTask"))
+        XCTAssertFalse(appViewModelSource.contains("nextFlightCountdownEvaluationBoundary"))
     }
 
-    /// T-51S guards the source-level foreground/background ownership contract. It does not
-    /// inspect rendered pixels; Light/Dark acceptance remains a device verification step.
-    func test_T51S_homeWidgetCustomBackgroundDeclaresMatchingForegroundEnvironment() throws {
+    /// T-51S guards the source-level theme-aware foreground/background ownership contract. It
+    /// does not inspect rendered pixels; Light/Dark acceptance remains a device verification step.
+    func test_T51S_homeWidgetCustomBackgroundUsesSystemAppearancePalette() throws {
         let repositoryRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -311,27 +471,23 @@ final class Phase4LayoutTests: XCTestCase {
         )
 
         let widgetViewStart = try XCTUnwrap(
-            source.range(of: "private struct FlightCountdownWidgetEntryView")
+            source.range(of: "private struct HomeWidgetEntryView")
         ).lowerBound
-        let widgetActiveStart = try XCTUnwrap(
+        let widgetViewEnd = try XCTUnwrap(
             source.range(
-                of: "if let snapshot = entry.snapshot",
+                of: "private struct HomeWidgetSmallView",
                 range: widgetViewStart..<source.endIndex
             )
         ).lowerBound
-        let widgetInactiveStart = try XCTUnwrap(
-            source.range(
-                of: "} else {",
-                range: widgetActiveStart..<source.endIndex
-            )
-        ).lowerBound
-        let widgetActiveSource = compactSyntax(
-            String(source[widgetActiveStart..<widgetInactiveStart])
+        let widgetViewSource = compactSyntax(
+            String(source[widgetViewStart..<widgetViewEnd])
         )
 
-        XCTAssertTrue(widgetActiveSource.contains(".environment(\\.colorScheme,.dark)"))
-        XCTAssertTrue(widgetActiveSource.contains(".containerBackground(for:.widget)"))
-        XCTAssertTrue(widgetActiveSource.contains("LinearGradient("))
+        XCTAssertTrue(widgetViewSource.contains("@Environment(\\.colorScheme)privatevarcolorScheme"))
+        XCTAssertTrue(widgetViewSource.contains("HomeWidgetPalette(colorScheme:colorScheme)"))
+        XCTAssertFalse(widgetViewSource.contains(".environment(\\.colorScheme,.dark)"))
+        XCTAssertTrue(widgetViewSource.contains(".containerBackground(for:.widget)"))
+        XCTAssertTrue(widgetViewSource.contains("LinearGradient("))
     }
 
 #if false // RETIRED: Flight Countdown Live Activity was removed by product decision.
@@ -419,56 +575,16 @@ final class Phase4LayoutTests: XCTestCase {
     }
 #endif
 
-    func test_F9_homeWidgetUsesTwoStatusRowsOnlyForSystemSmall() throws {
-        let repositoryRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let source = try String(
-            contentsOf: repositoryRoot.appendingPathComponent(
-                "TripDataCountdownWidgetExtension/TripDataCountdownWidget.swift"
-            ),
-            encoding: .utf8
-        )
-        let statusStart = try XCTUnwrap(
-            source.range(of: "private struct HomeWidgetOperationalStatusView")
-        ).lowerBound
-        let statusEnd = try XCTUnwrap(
-            source.range(
-                of: "struct TripDataCountdownWidget",
-                range: statusStart..<source.endIndex
-            )
-        ).lowerBound
-        let statusSource = compactSyntax(String(source[statusStart..<statusEnd]))
+    func test_F9_homeWidgetFamilyInformationContract() {
+        XCTAssertFalse(HomeWidgetFamily.small.showsArrivalTime)
+        XCTAssertFalse(HomeWidgetFamily.small.showsUTCTime)
+        XCTAssertFalse(HomeWidgetFamily.small.showsDestinationWeather)
+        XCTAssertFalse(HomeWidgetFamily.small.showsLayover)
 
-        XCTAssertTrue(statusSource.contains("@Environment(\\.widgetFamily)"))
-        XCTAssertTrue(statusSource.contains("ifwidgetFamily==.systemSmall"))
-        XCTAssertTrue(statusSource.contains("VStack(alignment:.leading,spacing:1)"))
-        XCTAssertTrue(statusSource.contains("Text(presentation.prefix)"))
-        XCTAssertTrue(
-            statusSource.contains(
-                "OperationalCountdownStatusView(presentation:presentation,showsPrefix:false)"
-            )
-        )
-        XCTAssertTrue(statusSource.contains(".font(.caption.weight(.semibold))"))
-        XCTAssertFalse(statusSource.contains(".truncationMode("))
-
-        let departure = FlightCountdownFixture.departure
-        let report = departure.addingTimeInterval(-90 * 60)
-        let presentations: [(FlightOperationalState, Date?, String)] = [
-            (.preReport, report, "Report in"),
-            (.preDeparture, report, "Dep in")
-        ]
-
-        for (state, reportTimeUTC, expectedPrefix) in presentations {
-            let presentation = try XCTUnwrap(
-                OperationalCountdownPresentation.make(
-                    state: state,
-                    plannedDepartureUTC: departure,
-                    reportTimeUTC: reportTimeUTC
-                )
-            )
-            XCTAssertEqual(presentation.prefix, expectedPrefix)
-        }
+        XCTAssertTrue(HomeWidgetFamily.medium.showsArrivalTime)
+        XCTAssertTrue(HomeWidgetFamily.medium.showsUTCTime)
+        XCTAssertTrue(HomeWidgetFamily.medium.showsDestinationWeather)
+        XCTAssertTrue(HomeWidgetFamily.medium.showsLayover)
     }
 
     private func compactSyntax(_ source: String) -> String {
@@ -1170,10 +1286,15 @@ private actor FlightCountdownPopulationGate {
 
 private actor FlightCountdownSnapshotSpy: FlightCountdownSnapshotClient {
     private var persisted: [FlightCountdownSnapshot?] = []
+    private var persistedHomeWidgetSchedules: [HomeWidgetScheduleSnapshot?] = []
     private var reloadCount = 0
 
     func persist(_ snapshot: FlightCountdownSnapshot?) async {
         persisted.append(snapshot)
+    }
+
+    func persistHomeWidgetSchedule(_ snapshot: HomeWidgetScheduleSnapshot?) async {
+        persistedHomeWidgetSchedules.append(snapshot)
     }
 
     func reloadWidgets() async {
@@ -1182,6 +1303,20 @@ private actor FlightCountdownSnapshotSpy: FlightCountdownSnapshotClient {
 
     func persistedLegIDs() -> [String?] {
         persisted.map { $0?.legID }
+    }
+
+    func persistedHomeWidgetFirstLegIDs() -> [String?] {
+        persistedHomeWidgetSchedules.map { $0?.trips.first?.legs.first?.id }
+    }
+
+    func persistedHomeWidgetTripIDs() -> [[String]?] {
+        persistedHomeWidgetSchedules.map { snapshot in
+            snapshot?.trips.map(\.tripID)
+        }
+    }
+
+    func homeWidgetCounts() -> (persist: Int, reload: Int) {
+        (persistedHomeWidgetSchedules.count, reloadCount)
     }
 
     func counts() -> (persist: Int, reload: Int) {
@@ -1230,27 +1365,55 @@ final class FlightCountdownSnapshotCoordinatorTests: XCTestCase {
         XCTAssertEqual(counts.reload, 2)
     }
 
-    @MainActor
-    func test_boundarySchedulingRetainsSharedReportSTDAndExpirationTransitions() throws {
-        let report = F.departure.addingTimeInterval(-90 * 60)
-        let leg = F.leg(report: report)
-        let preReportNow = report.addingTimeInterval(-60)
-        let output = try XCTUnwrap(FlightCountdownEngine.buildCountdownOutput(
-            from: [leg],
-            nowUTC: preReportNow
-        ))
+    func test_newHomeWidgetReconcilePublishesOneScheduleProjection() async {
+        let snapshotClient = FlightCountdownSnapshotSpy()
+        let coordinator = FlightCountdownCoordinator(snapshotClient: snapshotClient)
+
+        await coordinator.refreshHomeWidget(snapshot: HomeWidgetTestFixture.snapshot, mode: .reconcile)
+
+        let tripIDs = await snapshotClient.persistedHomeWidgetTripIDs()
+        let counts = await snapshotClient.homeWidgetCounts()
+        XCTAssertEqual(tripIDs, [["A70640", "A70639"]])
+        XCTAssertEqual(counts.persist, 1)
+        XCTAssertEqual(counts.reload, 1)
+    }
+
+    func test_newHomeWidgetDestructiveRebuildClearsThenPublishes() async {
+        let snapshotClient = FlightCountdownSnapshotSpy()
+        let coordinator = FlightCountdownCoordinator(snapshotClient: snapshotClient)
+
+        await coordinator.refreshHomeWidget(
+            snapshot: HomeWidgetTestFixture.snapshot,
+            mode: .destructiveRebuild
+        )
+
+        let tripIDs = await snapshotClient.persistedHomeWidgetTripIDs()
+        let counts = await snapshotClient.homeWidgetCounts()
+        XCTAssertEqual(tripIDs, [nil, ["A70640", "A70639"]])
+        XCTAssertEqual(counts.persist, 2)
+        XCTAssertEqual(counts.reload, 2)
+    }
+
+    func test_boundarySchedulingCarriesReportEverySTDAndReleaseTransitions() throws {
+        let snapshot = HomeWidgetTestFixture.snapshot
+        let timeline = HomeWidgetDomain.timeline(
+            from: snapshot,
+            nowUTC: HomeWidgetTestFixture.report.addingTimeInterval(-60)
+        )
 
         XCTAssertEqual(
-            AppViewModel.nextFlightCountdownEvaluationBoundary(for: output, after: preReportNow),
-            report
-        )
-        XCTAssertEqual(
-            AppViewModel.nextFlightCountdownEvaluationBoundary(for: output, after: report),
-            F.departure
-        )
-        XCTAssertEqual(
-            AppViewModel.nextFlightCountdownEvaluationBoundary(for: output, after: F.departure),
-            F.departure.addingTimeInterval(61 * 60)
+            timeline.map(\.date),
+            [
+                HomeWidgetTestFixture.report.addingTimeInterval(-60),
+                HomeWidgetTestFixture.report,
+                HomeWidgetTestFixture.firstDeparture,
+                HomeWidgetTestFixture.secondDeparture,
+                HomeWidgetTestFixture.finalDeparture,
+                HomeWidgetTestFixture.release,
+                HomeWidgetTestFixture.nextReport,
+                HomeWidgetTestFixture.nextDeparture,
+                HomeWidgetTestFixture.nextRelease
+            ]
         )
     }
 
@@ -1285,6 +1448,734 @@ final class FlightCountdownSnapshotCoordinatorTests: XCTestCase {
                 XCTAssertFalse(source.contains(token), "\(relativePath) retained \(token)")
             }
         }
+    }
+}
+
+final class HomeWidgetDomainTests: XCTestCase {
+    private typealias F = HomeWidgetTestFixture
+
+    func test_reportStateBeforeReportSelectsNextTrip() throws {
+        let selection = try XCTUnwrap(HomeWidgetDomain.selection(
+            from: F.snapshot,
+            nowUTC: F.report.addingTimeInterval(-1)
+        ))
+
+        XCTAssertEqual(selection.state, .nextTripReport)
+        XCTAssertEqual(selection.trip.tripID, "A70639")
+        XCTAssertNil(selection.displayedLeg)
+    }
+
+    func test_exactReportTransitionsToActiveTripAndFirstFlight() throws {
+        let selection = try XCTUnwrap(HomeWidgetDomain.selection(
+            from: F.snapshot,
+            nowUTC: F.report
+        ))
+
+        XCTAssertEqual(selection.state, .activeTripNextFlight)
+        XCTAssertEqual(selection.trip.tripID, "A70639")
+        XCTAssertEqual(selection.displayedLeg?.id, "first")
+    }
+
+    func test_reportPresentationUsesReportLocationLCLAndEquivalentUTCInstant() throws {
+        let presentation = try XCTUnwrap(HomeWidgetDomain.presentation(
+            from: F.snapshot,
+            nowUTC: F.report.addingTimeInterval(-1)
+        ))
+
+        XCTAssertEqual(presentation.reportTime?.local, "AUG 30 14:00")
+        XCTAssertEqual(presentation.reportTime?.utc, "AUG 30 22:00")
+        XCTAssertEqual(F.currentTrip.reportTimeUTC, F.report)
+    }
+
+    func test_nextFlightSelectionChangesAtEveryExactSTD() throws {
+        let checkpoints: [(Date, String, HomeWidgetOperationalState)] = [
+            (F.firstDeparture.addingTimeInterval(-1), "first", .activeTripNextFlight),
+            (F.firstDeparture, "second", .activeTripNextFlight),
+            (F.firstDeparture.addingTimeInterval(30 * 60), "second", .activeTripNextFlight),
+            (F.secondDeparture, "final", .activeTripNextFlight),
+            (F.finalDeparture, "final", .activeTripFinalLeg)
+        ]
+
+        for (now, expectedLegID, expectedState) in checkpoints {
+            let selection = try XCTUnwrap(HomeWidgetDomain.selection(from: F.snapshot, nowUTC: now))
+            XCTAssertEqual(selection.displayedLeg?.id, expectedLegID, "now=\(now)")
+            XCTAssertEqual(selection.state, expectedState, "now=\(now)")
+        }
+    }
+
+    func test_activeTripSuppressesFollowingTripReport() throws {
+        let selection = try XCTUnwrap(HomeWidgetDomain.selection(
+            from: F.snapshot,
+            nowUTC: F.finalDeparture.addingTimeInterval(60)
+        ))
+
+        XCTAssertEqual(selection.trip.tripID, "A70639")
+        XCTAssertEqual(selection.state, .activeTripFinalLeg)
+        XCTAssertNotEqual(selection.trip.tripID, F.nextTrip.tripID)
+    }
+
+    func test_finalLegFallbackPersistsUntilReleaseThenNextReportBecomesEligible() throws {
+        let atFinalSTD = try XCTUnwrap(HomeWidgetDomain.selection(
+            from: F.snapshot,
+            nowUTC: F.finalDeparture
+        ))
+        let justBeforeRelease = try XCTUnwrap(HomeWidgetDomain.selection(
+            from: F.snapshot,
+            nowUTC: F.release.addingTimeInterval(-1)
+        ))
+        let atRelease = try XCTUnwrap(HomeWidgetDomain.selection(
+            from: F.snapshot,
+            nowUTC: F.release
+        ))
+
+        XCTAssertEqual(atFinalSTD.state, .activeTripFinalLeg)
+        XCTAssertEqual(atFinalSTD.displayedLeg?.id, "final")
+        XCTAssertEqual(justBeforeRelease.trip.tripID, "A70639")
+        XCTAssertEqual(justBeforeRelease.state, .activeTripFinalLeg)
+        XCTAssertEqual(atRelease.trip.tripID, "A70640")
+        XCTAssertEqual(atRelease.state, .nextTripReport)
+    }
+
+    func test_finalFallbackPresentationRetainsNeutralFinalLegInformation() throws {
+        let presentation = try XCTUnwrap(HomeWidgetDomain.presentation(
+            from: F.snapshot,
+            nowUTC: F.finalDeparture
+        ))
+
+        XCTAssertEqual(presentation.state, .activeTripFinalLeg)
+        XCTAssertEqual(presentation.flightNumber, "5X789")
+        XCTAssertEqual(presentation.departureAirportIATA, "NRT")
+        XCTAssertEqual(presentation.arrivalAirportIATA, "ANC")
+        XCTAssertNil(presentation.reportTime)
+    }
+
+    func test_departureAndArrivalLCLUseTheirAirportTimezonesAndUTCUsesSameDates() throws {
+        let presentation = try XCTUnwrap(HomeWidgetDomain.presentation(
+            from: F.snapshot,
+            nowUTC: F.report
+        ))
+
+        XCTAssertEqual(presentation.departureTime?.local, "AUG 30 15:00")
+        XCTAssertEqual(presentation.departureTime?.utc, "AUG 30 23:00")
+        XCTAssertEqual(presentation.arrivalTime?.local, "AUG 30 21:00")
+        XCTAssertEqual(presentation.arrivalTime?.utc, "AUG 31 01:00")
+        XCTAssertEqual(F.firstLeg.plannedDepartureUTC, F.firstDeparture)
+        XCTAssertEqual(F.firstLeg.plannedArrivalUTC, F.firstArrival)
+    }
+
+    func test_DSTTransitionUsesAirportTimezonesNotDeviceTimezone() throws {
+        let departure = F.date("2026-03-08T10:30:00Z")
+        let arrival = F.date("2026-03-08T12:30:00Z")
+        let snapshot = singleLegSnapshot(
+            report: departure.addingTimeInterval(-60 * 60),
+            departure: departure,
+            arrival: arrival,
+            departureTimeZoneID: "America/Los_Angeles",
+            arrivalTimeZoneID: "America/New_York"
+        )
+        let original = NSTimeZone.default
+        defer { NSTimeZone.default = original }
+
+        for deviceTimeZoneID in ["Asia/Seoul", "Pacific/Honolulu"] {
+            NSTimeZone.default = try XCTUnwrap(TimeZone(identifier: deviceTimeZoneID))
+            let presentation = try XCTUnwrap(HomeWidgetDomain.presentation(
+                from: snapshot,
+                nowUTC: departure.addingTimeInterval(-1)
+            ))
+            XCTAssertEqual(presentation.departureTime?.local, "MAR 08 03:30")
+            XCTAssertEqual(presentation.arrivalTime?.local, "MAR 08 08:30")
+            XCTAssertEqual(presentation.departureTime?.utc, "MAR 08 10:30")
+            XCTAssertEqual(presentation.arrivalTime?.utc, "MAR 08 12:30")
+        }
+    }
+
+    func test_internationalDateLineCanShowDifferentLocalCalendarDates() throws {
+        let departure = F.date("2026-07-01T16:00:00Z")
+        let arrival = F.date("2026-07-02T02:00:00Z")
+        let snapshot = singleLegSnapshot(
+            report: departure.addingTimeInterval(-60 * 60),
+            departure: departure,
+            arrival: arrival,
+            departureTimeZoneID: "Asia/Seoul",
+            arrivalTimeZoneID: "America/Anchorage"
+        )
+        let presentation = try XCTUnwrap(HomeWidgetDomain.presentation(
+            from: snapshot,
+            nowUTC: departure.addingTimeInterval(-1)
+        ))
+
+        XCTAssertEqual(presentation.departureTime?.local, "JUL 02 01:00")
+        XCTAssertEqual(presentation.arrivalTime?.local, "JUL 01 18:00")
+        XCTAssertEqual(presentation.departureTime?.utc, "JUL 01 16:00")
+        XCTAssertEqual(presentation.arrivalTime?.utc, "JUL 02 02:00")
+    }
+
+    func test_layoverUsesArrivalToFollowingDepartureAbsoluteDurationAndArrivalAirport() {
+        XCTAssertTrue(ScheduledLayoverPolicy.isLayover(
+            arrivalUTC: F.firstArrival,
+            nextDepartureUTC: F.secondDeparture,
+            sameTrip: true,
+            arrivalAirportIATA: "SDF",
+            nextDepartureAirportIATA: "SDF"
+        ))
+        XCTAssertEqual(
+            ScheduledLayoverPolicy.durationMinutes(
+                arrivalUTC: F.firstArrival,
+                nextDepartureUTC: F.secondDeparture
+            ),
+            180
+        )
+        XCTAssertEqual(F.firstLeg.arrivalAirportIATA, "SDF")
+        XCTAssertEqual(HomeWidgetDomain.layoverDurationText(minutes: 18 * 60 + 25), "18h 25m")
+    }
+
+    func test_ordinaryConnectionAndAirportMismatchAreNotLayovers() {
+        XCTAssertFalse(ScheduledLayoverPolicy.isLayover(
+            arrivalUTC: F.firstArrival,
+            nextDepartureUTC: F.firstArrival.addingTimeInterval(179 * 60),
+            sameTrip: true,
+            arrivalAirportIATA: "SDF",
+            nextDepartureAirportIATA: "SDF"
+        ))
+        XCTAssertFalse(ScheduledLayoverPolicy.isLayover(
+            arrivalUTC: F.firstArrival,
+            nextDepartureUTC: F.secondDeparture,
+            sameTrip: true,
+            arrivalAirportIATA: "SDF",
+            nextDepartureAirportIATA: "CVG"
+        ))
+    }
+
+    func test_nearestArrivalForecastMapsSymbolTemperatureAndDestination() throws {
+        let hours = [
+            HomeWidgetWeatherHour(
+                date: F.firstArrival.addingTimeInterval(-55 * 60),
+                temperatureCelsius: 20.1,
+                symbolName: "cloud"
+            ),
+            HomeWidgetWeatherHour(
+                date: F.firstArrival.addingTimeInterval(5 * 60),
+                temperatureCelsius: 25.6,
+                symbolName: "cloud.sun.fill"
+            )
+        ]
+        let weather = try XCTUnwrap(HomeWidgetDomain.nearestWeather(
+            to: F.firstArrival,
+            destinationAirportIATA: "SDF",
+            hours: hours
+        ))
+
+        XCTAssertEqual(weather.destinationAirportIATA, "SDF")
+        XCTAssertEqual(weather.forecastDateUTC, hours[1].date)
+        XCTAssertEqual(weather.symbolName, "cloud.sun.fill")
+        XCTAssertEqual(weather.temperatureCelsius, 25.6)
+        XCTAssertEqual(weather.temperatureText, "26°C")
+    }
+
+    func test_unavailableWeatherNeverRemovesOperationalPresentation() throws {
+        XCTAssertNil(HomeWidgetDomain.nearestWeather(
+            to: F.firstArrival,
+            destinationAirportIATA: "SDF",
+            hours: []
+        ))
+        let presentation = try XCTUnwrap(HomeWidgetDomain.presentation(
+            from: F.snapshot,
+            nowUTC: F.report
+        ))
+        XCTAssertEqual(presentation.flightNumber, "5X123")
+        XCTAssertEqual(presentation.arrivalAirportIATA, "SDF")
+    }
+
+    func test_weatherEnrichmentIsBoundedToCurrentEntryAndLaterEntriesRemainUsable() async throws {
+        let points = HomeWidgetDomain.timeline(
+            from: F.snapshot,
+            nowUTC: F.report
+        )
+        let counter = HomeWidgetWeatherEnrichmentCounter()
+
+        let enriched: [HomeWidgetEnrichedTimelinePoint<String>] =
+            await HomeWidgetTimelineEnrichmentPolicy.enrich(
+                points: points,
+                allowsWeather: true
+            ) { presentation in
+                await counter.recordAndReturn(presentation?.flightNumber)
+            }
+
+        let callCount = await counter.value()
+        XCTAssertEqual(callCount, 1)
+        XCTAssertEqual(HomeWidgetTimelineEnrichmentPolicy.maximumWeatherEnrichmentCount, 1)
+        XCTAssertEqual(enriched.count, points.count)
+        XCTAssertEqual(enriched.first?.enrichment, "5X123")
+        XCTAssertTrue(enriched.dropFirst().allSatisfy { $0.enrichment == nil })
+        let laterFlight = try XCTUnwrap(
+            enriched.dropFirst().first(where: { $0.point.presentation?.flightNumber != nil })
+        )
+        XCTAssertNotNil(laterFlight.point.presentation?.departureTime)
+        XCTAssertNotNil(laterFlight.point.presentation?.arrivalTime)
+    }
+
+    func test_weatherFailureStillReturnsEveryUsableTimelinePoint() async {
+        let points = HomeWidgetDomain.timeline(
+            from: F.snapshot,
+            nowUTC: F.report
+        )
+        let counter = HomeWidgetWeatherEnrichmentCounter()
+
+        let enriched: [HomeWidgetEnrichedTimelinePoint<String>] =
+            await HomeWidgetTimelineEnrichmentPolicy.enrich(
+                points: points,
+                allowsWeather: true
+            ) { _ in
+                await counter.recordAndReturn(nil)
+            }
+
+        let callCount = await counter.value()
+        XCTAssertEqual(callCount, 1)
+        XCTAssertEqual(enriched.count, points.count)
+        XCTAssertEqual(
+            enriched.map(\.point.presentation),
+            points.map(\.presentation)
+        )
+        XCTAssertTrue(enriched.allSatisfy { $0.enrichment == nil })
+    }
+
+    func test_disallowedWeatherPerformsNoEnrichmentAndKeepsEveryPoint() async {
+        let points = HomeWidgetDomain.timeline(from: F.snapshot, nowUTC: F.report)
+        let counter = HomeWidgetWeatherEnrichmentCounter()
+
+        let enriched: [HomeWidgetEnrichedTimelinePoint<String>] =
+            await HomeWidgetTimelineEnrichmentPolicy.enrich(
+                points: points,
+                allowsWeather: false
+            ) { _ in
+                await counter.recordAndReturn("unexpected")
+            }
+
+        let callCount = await counter.value()
+        XCTAssertEqual(callCount, 0)
+        XCTAssertEqual(enriched.count, points.count)
+        XCTAssertTrue(enriched.allSatisfy { $0.enrichment == nil })
+    }
+
+    func test_arrivalOutsideHourlyForecastHorizonIsUnavailableWithoutARequest() {
+        let now = F.report
+        XCTAssertTrue(HomeWidgetDomain.canRequestArrivalForecast(
+            arrivalUTC: now.addingTimeInterval(9 * 24 * 60 * 60),
+            nowUTC: now
+        ))
+        XCTAssertFalse(HomeWidgetDomain.canRequestArrivalForecast(
+            arrivalUTC: now.addingTimeInterval(11 * 24 * 60 * 60),
+            nowUTC: now
+        ))
+    }
+
+    func test_weatherCoordinateComesFromArrivalAirportMetadata() throws {
+        let presentation = try XCTUnwrap(HomeWidgetDomain.presentation(
+            from: F.snapshot,
+            nowUTC: F.report
+        ))
+
+        XCTAssertEqual(presentation.arrivalAirportIATA, "SDF")
+        XCTAssertEqual(presentation.arrivalCoordinate, F.sdfCoordinate)
+        XCTAssertEqual(
+            IATATimeZoneResolver.shared.coordinate("SDF"),
+            HomeWidgetAirportCoordinate(latitude: 38.1706, longitude: -85.735076)
+        )
+    }
+
+    func test_scheduleBuilderAttachesCanonicalLayoverAndArrivalCoordinates() throws {
+        let first = sourceLeg(
+            sequence: 1,
+            flight: "5X123",
+            departureAirport: "ANC",
+            arrivalAirport: "SDF",
+            departure: F.firstDeparture,
+            arrival: F.firstArrival
+        )
+        let second = sourceLeg(
+            sequence: 2,
+            flight: "5X456",
+            departureAirport: "SDF",
+            arrivalAirport: "NRT",
+            departure: F.secondDeparture,
+            arrival: F.secondArrival
+        )
+        let schedule = PayPeriodSchedule(
+            id: "PP26-08",
+            label: "PP26-08",
+            tripCount: 1,
+            legCount: 2,
+            openTimeCount: 0,
+            updatedAt: F.report,
+            legs: [first, second],
+            openTimeTrips: []
+        )
+        let snapshot = try XCTUnwrap(HomeWidgetScheduleBuilder.build(
+            schedules: [schedule],
+            domicileAirportCode: "ANC",
+            nowUTC: F.report.addingTimeInterval(-24 * 60 * 60)
+        ))
+        let projectedFirst = try XCTUnwrap(snapshot.trips.first?.legs.first)
+
+        XCTAssertEqual(projectedFirst.arrivalAirportIATA, "SDF")
+        XCTAssertEqual(projectedFirst.layoverAfterMinutes, 180)
+        XCTAssertEqual(
+            projectedFirst.arrivalCoordinate,
+            IATATimeZoneResolver.shared.coordinate("SDF")
+        )
+        XCTAssertNotEqual(
+            projectedFirst.arrivalCoordinate,
+            IATATimeZoneResolver.shared.coordinate("ANC")
+        )
+    }
+
+    func test_builderDerivesReleaseFromLastValidProjectedLegWhenSourceFinalIsMalformed() throws {
+        let first = sourceLeg(
+            sequence: 1,
+            flight: "5X123",
+            departureAirport: "ANC",
+            arrivalAirport: "SDF",
+            departure: F.firstDeparture,
+            arrival: F.firstArrival
+        )
+        var malformedFinal = sourceLeg(
+            sequence: 2,
+            flight: "5X456",
+            departureAirport: "SDF",
+            arrivalAirport: "NRT",
+            departure: F.secondDeparture,
+            arrival: F.secondArrival
+        )
+        malformedFinal.arrUTC = "not-a-date"
+        malformedFinal.staUTC = "not-a-date"
+        let schedule = sourceSchedule(legs: [first, malformedFinal])
+
+        let snapshot = try XCTUnwrap(HomeWidgetScheduleBuilder.build(
+            schedules: [schedule],
+            domicileAirportCode: "ANC",
+            nowUTC: F.report.addingTimeInterval(-24 * 60 * 60)
+        ))
+        let trip = try XCTUnwrap(snapshot.trips.first)
+
+        XCTAssertEqual(trip.legs.map(\.id), [first.id.uuidString])
+        XCTAssertEqual(
+            trip.releaseBoundaryUTC,
+            F.firstArrival.addingTimeInterval(HomeWidgetDomain.postFinalArrivalInterval)
+        )
+    }
+
+    func test_builderUsesFinalSourceArrivalWhenFinalLegTimezoneIsUnresolved() throws {
+        let first = sourceLeg(
+            sequence: 1,
+            flight: "5X123",
+            departureAirport: "ANC",
+            arrivalAirport: "SDF",
+            departure: F.firstDeparture,
+            arrival: F.firstArrival
+        )
+        let final = sourceLeg(
+            sequence: 2,
+            flight: "5X456",
+            departureAirport: "SDF",
+            arrivalAirport: "XYZ",
+            departure: F.secondDeparture,
+            arrival: F.finalArrival
+        )
+        let snapshot = try XCTUnwrap(HomeWidgetScheduleBuilder.build(
+            schedules: [sourceSchedule(legs: [first, final])],
+            domicileAirportCode: "ANC",
+            nowUTC: F.report.addingTimeInterval(-24 * 60 * 60),
+            tzResolver: ANCSDFIATATimeZoneResolver()
+        ))
+        let trip = try XCTUnwrap(snapshot.trips.first)
+
+        XCTAssertEqual(trip.legs.map(\.id), [first.id.uuidString])
+        XCTAssertEqual(
+            trip.releaseBoundaryUTC,
+            F.finalArrival.addingTimeInterval(HomeWidgetDomain.postFinalArrivalInterval)
+        )
+
+        let selectionSnapshot = HomeWidgetScheduleSnapshot(
+            updatedAtUTC: snapshot.updatedAtUTC,
+            trips: snapshot.trips + [F.nextTrip]
+        )
+        let atProjectedRelease = try XCTUnwrap(HomeWidgetDomain.selection(
+            from: selectionSnapshot,
+            nowUTC: F.firstArrival.addingTimeInterval(HomeWidgetDomain.postFinalArrivalInterval)
+        ))
+        let atSourceRelease = try XCTUnwrap(HomeWidgetDomain.selection(
+            from: selectionSnapshot,
+            nowUTC: F.finalArrival.addingTimeInterval(HomeWidgetDomain.postFinalArrivalInterval)
+        ))
+
+        XCTAssertEqual(atProjectedRelease.trip.tripID, "A70639")
+        XCTAssertEqual(atProjectedRelease.state, .activeTripFinalLeg)
+        XCTAssertNotEqual(atProjectedRelease.trip.tripID, F.nextTrip.tripID)
+        XCTAssertEqual(atSourceRelease.trip.tripID, F.nextTrip.tripID)
+        XCTAssertEqual(atSourceRelease.state, .nextTripReport)
+    }
+
+    func test_builderNormalTripReleaseUsesFinalScheduledArrival() throws {
+        let first = sourceLeg(
+            sequence: 1,
+            flight: "5X123",
+            departureAirport: "ANC",
+            arrivalAirport: "SDF",
+            departure: F.firstDeparture,
+            arrival: F.firstArrival
+        )
+        let final = sourceLeg(
+            sequence: 2,
+            flight: "5X456",
+            departureAirport: "SDF",
+            arrivalAirport: "NRT",
+            departure: F.secondDeparture,
+            arrival: F.finalArrival
+        )
+        let snapshot = try XCTUnwrap(HomeWidgetScheduleBuilder.build(
+            schedules: [sourceSchedule(legs: [first, final])],
+            domicileAirportCode: "ANC",
+            nowUTC: F.report.addingTimeInterval(-24 * 60 * 60)
+        ))
+
+        XCTAssertEqual(
+            snapshot.trips.first?.releaseBoundaryUTC,
+            F.finalArrival.addingTimeInterval(HomeWidgetDomain.postFinalArrivalInterval)
+        )
+    }
+
+    func test_builderExcludesTripWhenEveryFlightFailsTimezoneResolution() {
+        let schedule = sourceSchedule(legs: [
+            sourceLeg(
+                sequence: 1,
+                flight: "5X123",
+                departureAirport: "ANC",
+                arrivalAirport: "SDF",
+                departure: F.firstDeparture,
+                arrival: F.firstArrival
+            )
+        ])
+
+        XCTAssertNil(HomeWidgetScheduleBuilder.build(
+            schedules: [schedule],
+            domicileAirportCode: "ANC",
+            nowUTC: F.report.addingTimeInterval(-24 * 60 * 60),
+            tzResolver: ANCOnlyIATATimeZoneResolver()
+        ))
+    }
+
+    func test_nilReleaseTripIsNeverActiveAndDoesNotSuppressLaterValidReport() throws {
+        let malformedTrip = HomeWidgetTrip(
+            id: "malformed",
+            tripID: "BAD",
+            reportTimeUTC: F.report.addingTimeInterval(-60 * 60),
+            reportTimeZoneID: "America/Anchorage",
+            releaseBoundaryUTC: nil,
+            legs: [F.firstLeg]
+        )
+        let snapshot = HomeWidgetScheduleSnapshot(
+            updatedAtUTC: F.report,
+            trips: [malformedTrip, F.nextTrip]
+        )
+        let selection = try XCTUnwrap(HomeWidgetDomain.selection(
+            from: snapshot,
+            nowUTC: F.report
+        ))
+
+        XCTAssertEqual(selection.state, .nextTripReport)
+        XCTAssertEqual(selection.trip.tripID, F.nextTrip.tripID)
+        XCTAssertNotEqual(selection.trip.tripID, malformedTrip.tripID)
+    }
+
+    func test_emptyProjectedTripIsIneligibleForDomainSelection() throws {
+        let emptyTrip = HomeWidgetTrip(
+            id: "empty",
+            tripID: "EMPTY",
+            reportTimeUTC: F.report.addingTimeInterval(-60 * 60),
+            reportTimeZoneID: "America/Anchorage",
+            releaseBoundaryUTC: F.release,
+            legs: []
+        )
+        let snapshot = HomeWidgetScheduleSnapshot(
+            updatedAtUTC: F.report,
+            trips: [emptyTrip, F.nextTrip]
+        )
+        let selection = try XCTUnwrap(HomeWidgetDomain.selection(from: snapshot, nowUTC: F.report))
+
+        XCTAssertEqual(selection.trip.tripID, F.nextTrip.tripID)
+        XCTAssertEqual(selection.state, .nextTripReport)
+    }
+
+    func test_familyPresentationContractsConsumeOneSharedPresentation() throws {
+        let presentation = try XCTUnwrap(HomeWidgetDomain.presentation(
+            from: F.snapshot,
+            nowUTC: F.report
+        ))
+
+        XCTAssertNotNil(presentation.departureTime)
+        XCTAssertNotNil(presentation.arrivalTime)
+        XCTAssertFalse(HomeWidgetFamily.small.showsArrivalTime)
+        XCTAssertFalse(HomeWidgetFamily.small.showsUTCTime)
+        XCTAssertFalse(HomeWidgetFamily.small.showsDestinationWeather)
+        XCTAssertTrue(HomeWidgetFamily.medium.showsArrivalTime)
+        XCTAssertTrue(HomeWidgetFamily.medium.showsUTCTime)
+        XCTAssertTrue(HomeWidgetFamily.medium.showsDestinationWeather)
+        XCTAssertTrue(HomeWidgetFamily.medium.showsLayover)
+        XCTAssertEqual(presentation.layoverAfterMinutes, 180)
+    }
+
+    func test_timelineIncludesImmediateReportEverySTDAndFinalRelease() {
+        let now = F.report.addingTimeInterval(-60 * 60)
+        let timeline = HomeWidgetDomain.timeline(from: F.snapshot, nowUTC: now)
+
+        XCTAssertEqual(timeline.first?.presentation?.state, .nextTripReport)
+        XCTAssertEqual(
+            timeline.map(\.date),
+            [
+                now,
+                F.report,
+                F.firstDeparture,
+                F.secondDeparture,
+                F.finalDeparture,
+                F.release,
+                F.nextReport,
+                F.nextDeparture,
+                F.nextRelease
+            ]
+        )
+        XCTAssertEqual(
+            timeline.map { $0.presentation?.state },
+            [
+                .nextTripReport,
+                .activeTripNextFlight,
+                .activeTripNextFlight,
+                .activeTripNextFlight,
+                .activeTripFinalLeg,
+                .nextTripReport,
+                .activeTripNextFlight,
+                .activeTripFinalLeg,
+                nil
+            ]
+        )
+    }
+
+    func test_timelineIsBoundedForManyTripsAndLegs() {
+        let now = F.report
+        let legs = (1...40).map { index in
+            let departure = now.addingTimeInterval(TimeInterval(index * 60 * 60))
+            return F.leg(
+                id: "many-\(index)",
+                flightNumber: "5X\(index)",
+                departureAirport: "ANC",
+                arrivalAirport: "SDF",
+                departure: departure,
+                arrival: departure.addingTimeInterval(30 * 60),
+                departureTimeZoneID: "America/Anchorage",
+                arrivalTimeZoneID: "America/Kentucky/Louisville"
+            )
+        }
+        let trip = HomeWidgetTrip(
+            id: "many",
+            tripID: "MANY",
+            reportTimeUTC: now.addingTimeInterval(-60),
+            reportTimeZoneID: "America/Anchorage",
+            releaseBoundaryUTC: now.addingTimeInterval(41 * 60 * 60),
+            legs: legs
+        )
+        let timeline = HomeWidgetDomain.timeline(
+            from: .init(updatedAtUTC: now, trips: [trip]),
+            nowUTC: now
+        )
+
+        XCTAssertEqual(timeline.count, HomeWidgetDomain.maximumTimelineEntryCount)
+        XCTAssertTrue(timeline.allSatisfy {
+            $0.date <= now.addingTimeInterval(HomeWidgetDomain.timelineHorizon)
+        })
+        XCTAssertEqual(timeline.first?.presentation?.flightNumber, "5X1")
+        XCTAssertEqual(timeline.last?.presentation?.flightNumber, "5X12")
+    }
+
+    func test_legacyWindowDistanceDoesNotHideCurrentReportWithinBoundedTimeline() {
+        let now = F.report.addingTimeInterval(-40 * 60 * 60)
+        let timeline = HomeWidgetDomain.timeline(from: F.snapshot, nowUTC: now)
+
+        XCTAssertEqual(timeline.first?.presentation?.state, .nextTripReport)
+        XCTAssertEqual(
+            timeline.map(\.date),
+            [now, F.report, F.firstDeparture, F.secondDeparture]
+        )
+    }
+
+    private func singleLegSnapshot(
+        report: Date,
+        departure: Date,
+        arrival: Date,
+        departureTimeZoneID: String,
+        arrivalTimeZoneID: String
+    ) -> HomeWidgetScheduleSnapshot {
+        let leg = F.leg(
+            id: "timezone",
+            flightNumber: "5X1",
+            departureAirport: "DEP",
+            arrivalAirport: "ARR",
+            departure: departure,
+            arrival: arrival,
+            departureTimeZoneID: departureTimeZoneID,
+            arrivalTimeZoneID: arrivalTimeZoneID
+        )
+        return HomeWidgetScheduleSnapshot(
+            updatedAtUTC: report,
+            trips: [
+                HomeWidgetTrip(
+                    id: "timezone-trip",
+                    tripID: "TZ1",
+                    reportTimeUTC: report,
+                    reportTimeZoneID: departureTimeZoneID,
+                    releaseBoundaryUTC: arrival.addingTimeInterval(30 * 60),
+                    legs: [leg]
+                )
+            ]
+        )
+    }
+
+    private func sourceLeg(
+        sequence: Int,
+        flight: String,
+        departureAirport: String,
+        arrivalAirport: String,
+        departure: Date,
+        arrival: Date
+    ) -> TripLeg {
+        let formatter = ISO8601DateFormatter()
+        return TripLeg(
+            payPeriod: "PP26-08",
+            pairing: "A70639",
+            leg: sequence,
+            flight: flight,
+            depAirport: departureAirport,
+            depLocal: "00:00",
+            arrAirport: arrivalAirport,
+            arrLocal: "00:00",
+            depUTC: formatter.string(from: departure),
+            arrUTC: formatter.string(from: arrival),
+            status: "-",
+            block: "2:00",
+            stdUTC: formatter.string(from: departure),
+            staUTC: formatter.string(from: arrival)
+        )
+    }
+
+    private func sourceSchedule(legs: [TripLeg]) -> PayPeriodSchedule {
+        PayPeriodSchedule(
+            id: "PP26-08",
+            label: "PP26-08",
+            tripCount: 1,
+            legCount: legs.count,
+            openTimeCount: 0,
+            updatedAt: F.report,
+            legs: legs,
+            openTimeTrips: []
+        )
     }
 }
 
@@ -1683,10 +2574,120 @@ final class DebugFlightCountdownFixtureTests: XCTestCase {
 
         XCTAssertTrue(previewSource.hasPrefix("#if DEBUG\n"))
         XCTAssertTrue(previewSource.hasSuffix("#endif\n"))
+        XCTAssertEqual(AppViewModel.debugFlightCountdownFixtureID, "A79999R")
+        XCTAssertEqual(AppViewModel.debugFlightCountdownFixtureID.count, 7)
         XCTAssertFalse(settingsSource.contains("FlightCountdownDebugScenario"))
         XCTAssertFalse(settingsSource.contains("Countdown State"))
         assertToken("Start Home Widget Fixture", isInsideDebugBlockIn: settingsSource)
         assertToken("startDebugFlightCountdownFixture", isInsideDebugBlockIn: settingsSource)
+    }
+
+    func test_homeWidgetPreTripLayoutHasCompactAccessibilityFallbacks() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(contentsOf: repositoryRoot.appendingPathComponent(
+            "TripDataCountdownWidgetExtension/TripDataCountdownWidget.swift"
+        ))
+        let compact = source.replacingOccurrences(
+            of: #"\s+"#,
+            with: "",
+            options: .regularExpression
+        )
+
+        XCTAssertTrue(compact.contains("HomeWidgetSmallReportView(presentation:presentation)"))
+        XCTAssertTrue(compact.contains("HomeWidgetRouteTimeGrid(presentation:presentation).dynamicTypeSize(...DynamicTypeSize.large)"))
+        XCTAssertTrue(compact.contains("Text(\"TRIPINPROGRESS\").font(.caption2.weight(.bold)).foregroundStyle(palette.secondaryText).lineLimit(1).minimumScaleFactor(0.65).allowsTightening(true).dynamicTypeSize(...DynamicTypeSize.large)"))
+        XCTAssertTrue(compact.contains("timeRow(departure:presentation.departureTime?.local,arrival:presentation.arrivalTime?.local,marker:\"L\")"))
+        XCTAssertTrue(compact.contains("timeRow(departure:presentation.departureTime?.utc,arrival:presentation.arrivalTime?.utc,marker:\"Z\")"))
+        XCTAssertTrue(compact.contains("HomeWidgetRouteTimeGrid(presentation:presentation)"))
+        XCTAssertTrue(compact.contains(".dynamicTypeSize(...DynamicTypeSize.large)"))
+        XCTAssertTrue(compact.contains("weather:weather,attribution:attribution).dynamicTypeSize(...DynamicTypeSize.large)"))
+        XCTAssertTrue(compact.contains("ViewThatFits(in:.vertical)"))
+        XCTAssertTrue(compact.contains("alignment:.topLeading"))
+        XCTAssertFalse(compact.contains(".environment(\\.colorScheme,.dark)"))
+        XCTAssertTrue(compact.contains("HomeWidgetPalette(colorScheme:colorScheme)"))
+        XCTAssertTrue(compact.contains("attribution.combinedMarkDarkData:attribution.combinedMarkLightData"))
+    }
+
+    func test_homeWidgetPass2ScenariosUseProductionDomainAtExactBoundaries() throws {
+        let anchorUTC = date("2026-09-01T00:00:00Z")
+        let variants: [(
+            HomeWidgetDebugAcceptanceScenario,
+            HomeWidgetOperationalState,
+            String?,
+            String
+        )] = [
+            (.preTrip, .nextTripReport, nil, "A79999R"),
+            (.activeFirst, .activeTripNextFlight, AppViewModel.debugFlightCountdownSecondLegID.uuidString, "A79999R"),
+            (.beforeFirstSTD, .activeTripNextFlight, AppViewModel.debugFlightCountdownSecondLegID.uuidString, "A79999R"),
+            (.atFirstSTD, .activeTripNextFlight, AppViewModel.debugHomeWidgetFinalLegID.uuidString, "A79999R"),
+            (.afterFirstSTD, .activeTripNextFlight, AppViewModel.debugHomeWidgetFinalLegID.uuidString, "A79999R"),
+            (.finalLeg, .activeTripFinalLeg, AppViewModel.debugHomeWidgetFinalLegID.uuidString, "A79999R"),
+            (.beforeRelease, .activeTripFinalLeg, AppViewModel.debugHomeWidgetFinalLegID.uuidString, "A79999R"),
+            (.atRelease, .nextTripReport, nil, "12165")
+        ]
+
+        for (scenario, expectedState, expectedLegID, expectedTripID) in variants {
+            let fixture = AppViewModel.debugHomeWidgetAcceptanceFixture(
+                scenario: scenario,
+                anchorUTC: anchorUTC
+            )
+            let snapshot = try XCTUnwrap(HomeWidgetScheduleBuilder.build(
+                schedules: fixture.schedules,
+                domicileAirportCode: "ANC",
+                nowUTC: fixture.effectiveNowUTC
+            ))
+            let selection = try XCTUnwrap(HomeWidgetDomain.selection(
+                from: snapshot,
+                nowUTC: fixture.effectiveNowUTC
+            ))
+
+            XCTAssertEqual(selection.state, expectedState, scenario.rawValue)
+            XCTAssertEqual(selection.displayedLeg?.id, expectedLegID, scenario.rawValue)
+            XCTAssertEqual(selection.trip.tripID, expectedTripID, scenario.rawValue)
+        }
+
+        let activeFixture = AppViewModel.debugHomeWidgetAcceptanceFixture(
+            scenario: .activeFirst,
+            anchorUTC: anchorUTC
+        )
+        let activeSnapshot = try XCTUnwrap(HomeWidgetScheduleBuilder.build(
+            schedules: activeFixture.schedules,
+            domicileAirportCode: "ANC",
+            nowUTC: activeFixture.effectiveNowUTC
+        ))
+        let activePresentation = try XCTUnwrap(HomeWidgetDomain.presentation(
+            from: activeSnapshot,
+            nowUTC: activeFixture.effectiveNowUTC
+        ))
+        XCTAssertEqual(activePresentation.flightNumber, "5X108")
+        XCTAssertEqual(activePresentation.departureAirportIATA, "SDF")
+        XCTAssertEqual(activePresentation.arrivalAirportIATA, "NRT")
+        XCTAssertEqual(activePresentation.layoverAfterMinutes, 38 * 60 + 25)
+    }
+
+    func test_homeWidgetPass2DebugClockAndLaunchHookRemainDEBUGOnly() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sharedSource = try String(contentsOf: repositoryRoot.appendingPathComponent(
+            "TripDataHub/Models/FlightCountdownSharedModels.swift"
+        ))
+        let previewSource = try String(contentsOf: repositoryRoot.appendingPathComponent(
+            "TripDataHub/ViewModels/AppViewModel+PreviewData.swift"
+        ))
+        let widgetSource = try String(contentsOf: repositoryRoot.appendingPathComponent(
+            "TripDataCountdownWidgetExtension/TripDataCountdownWidget.swift"
+        ))
+
+        assertToken("enum HomeWidgetDebugClockStore", isInsideDebugBlockIn: sharedSource)
+        XCTAssertTrue(previewSource.hasPrefix("#if DEBUG\n"))
+        XCTAssertTrue(previewSource.contains("UITEST_HOME_WIDGET_SCENARIO"))
+        XCTAssertTrue(widgetSource.contains("HomeWidgetDebugClockStore.load() ?? wallNowUTC"))
+        XCTAssertTrue(widgetSource.contains(
+            "HomeWidgetDomain.presentation(from: snapshot, nowUTC: now)"
+        ))
     }
 
     func test_T45_fixtureUsesProductionOperationalStateBuilder() throws {
@@ -1812,7 +2813,7 @@ final class DebugFlightCountdownFixtureTests: XCTestCase {
         XCTAssertEqual(uploadCountsAfterStart, .init(shared: 0, snapshot: 0))
         XCTAssertEqual(deviceUploadsAfterStart, 0)
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
-        let persistedLegIDsAfterStart = await snapshotSpy.persistedLegIDs()
+        let persistedLegIDsAfterStart = await snapshotSpy.persistedHomeWidgetFirstLegIDs()
         XCTAssertEqual(
             persistedLegIDsAfterStart.last,
             AppViewModel.debugFlightCountdownFirstLegID.uuidString
@@ -1822,7 +2823,7 @@ final class DebugFlightCountdownFixtureTests: XCTestCase {
             mode: .reconcile,
             nowUTC: canonicalNowUTC.addingTimeInterval(10 * 60)
         )
-        let persistedLegIDsAfterRefresh = await snapshotSpy.persistedLegIDs()
+        let persistedLegIDsAfterRefresh = await snapshotSpy.persistedHomeWidgetFirstLegIDs()
         XCTAssertEqual(
             persistedLegIDsAfterRefresh.last,
             AppViewModel.debugFlightCountdownFirstLegID.uuidString
@@ -1833,7 +2834,7 @@ final class DebugFlightCountdownFixtureTests: XCTestCase {
         let notificationInvalidationsAfterStop = await notificationSpy.invalidationCount()
         let uploadCountsAfterStop = await friendUploadSpy.counts()
         let deviceUploadsAfterStop = await deviceUploadSpy.uploadCount()
-        let persistedLegIDsAfterStop = await snapshotSpy.persistedLegIDs()
+        let persistedLegIDsAfterStop = await snapshotSpy.persistedHomeWidgetFirstLegIDs()
         XCTAssertFalse(viewModel.isDebugFlightCountdownFixtureActive)
         XCTAssertEqual(viewModel.schedules, schedulesBefore)
         XCTAssertEqual(viewModel.crewAccessSchedules, crewSchedulesBefore)

@@ -206,7 +206,11 @@ orientation 等の他の Info.plist / build-setting 二重管理はこの font r
 
 ## F-9. Home Screen Widget active visual acceptance
 
-**状態**: `PASS`
+**状態**: `SUPERSEDED BY 2026-08-31 REDESIGN — VISUAL ACCEPTANCE PENDING`
+
+The prior Small/Medium acceptance below is historical evidence for the retired countdown layout.
+The current Trip/next-flight redesign adds a Large family and materially changes every family, so
+its Light/Dark, Dynamic Type, and long-date visual acceptance must be rerun before release.
 
 canonical fixture（`DEBUG-ANC-ICN-ANC` / `STD = now + 5h`）を変更せず、DEBUG-only の `homeWidgetPreReport` scenario（`STD = now + 9h`）を追加して production WidgetKit / SpringBoard 経路を検証した。
 

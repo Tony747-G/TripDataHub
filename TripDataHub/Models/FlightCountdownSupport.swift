@@ -229,3 +229,52 @@ extension TripLeg {
         )
     }
 }
+
+enum ScheduledLayoverPolicy {
+    static let minimumConnectionMinutes = 180
+
+    static func isLayover(
+        arrivalUTC: Date?,
+        nextDepartureUTC: Date?,
+        sameTrip: Bool
+    ) -> Bool {
+        guard sameTrip,
+              let arrivalUTC,
+              let nextDepartureUTC
+        else {
+            return false
+        }
+        return Int(nextDepartureUTC.timeIntervalSince(arrivalUTC) / 60)
+            >= minimumConnectionMinutes
+    }
+
+    static func isLayover(
+        arrivalUTC: Date?,
+        nextDepartureUTC: Date?,
+        sameTrip: Bool,
+        arrivalAirportIATA: String,
+        nextDepartureAirportIATA: String
+    ) -> Bool {
+        guard normalizedAirport(arrivalAirportIATA) == normalizedAirport(nextDepartureAirportIATA)
+        else {
+            return false
+        }
+        return isLayover(
+            arrivalUTC: arrivalUTC,
+            nextDepartureUTC: nextDepartureUTC,
+            sameTrip: sameTrip
+        )
+    }
+
+    static func durationMinutes(
+        arrivalUTC: Date,
+        nextDepartureUTC: Date
+    ) -> Int? {
+        let minutes = Int(nextDepartureUTC.timeIntervalSince(arrivalUTC) / 60)
+        return minutes >= 0 ? minutes : nil
+    }
+
+    private static func normalizedAirport(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+}

@@ -170,91 +170,89 @@ Timeline remains compact: Original Scheduled is the normal state, Revised Schedu
 
 ---
 
-## INV-013: Real-Time Operational Countdown Uses STD, Report Time, and Now Only
+## INV-013: Home Widget State Uses Scheduled Report, STD, and Final STA+30
 
-**Rule:** Real-time countdown state, current-leg selection, status descriptors, and boundary scheduling take only required `plannedDepartureUTC`, optional trip-level `reportTimeUTC`, and `nowUTC`. All duration math is an absolute `Date` difference. `plannedArrivalUTC` may be carried only as route display metadata. STA, ATD, ATA, `depUTC`, and `arrUTC` MUST NOT drive operational state or presentation lifecycle.
+**Rule:** The Home Screen Widget answers one question from one shared domain result: the next Trip report before report time, or the next scheduled flight during an active Trip. Selection and boundary scheduling use absolute `Date` comparisons against Trip report time, every flight STD, and `final planned arrival + 30 minutes`. `plannedArrivalUTC` is otherwise display metadata and the final Trip release anchor. ATD, ATA, `depUTC`, and `arrUTC` MUST NOT drive Widget state.
 
-If a required planned departure or presentation timezone cannot be resolved, no operational presentation is created for that leg. The leg is excluded from current-leg selection, the reason is recorded through `SyncDiagnosticsLog`, and selection continues. There is no `.unknown` operational state and no default timestamp is synthesized. Missing or invalid Actual data does not exclude a leg whose planned-departure inputs are valid.
+If a required planned endpoint or presentation timezone cannot be resolved, that leg is excluded from the Widget projection and the reason is recorded through `SyncDiagnosticsLog`. Trip completion is independent of renderability: after at least one leg projects, the release boundary uses the last source flight in canonical sequence whose planned arrival parses, even when that source leg cannot project because its airport timezone is unresolved. If later source flights have no parseable planned arrival, release falls back in source order to the last parseable source arrival, then to the last valid projected arrival only when necessary. A Trip with no projected legs is excluded. A decoded/input Trip with a nil release boundary is ineligible for Widget selection; it MUST NOT remain active indefinitely. No default timestamp, device timezone, Actual value, or release time is synthesized.
 
-**Why:** CrewAccess Actual information is not a reliable real-time source. INV-012 deliberately retains Actual values for history and display, but feeding them into operational state makes the live presentation depend on data normally imported only after the trip. STA is likewise a planned route timestamp, not evidence of arrival.
+**Why:** CrewAccess Actual information is historical and not a contracted realtime feed. Scheduled boundaries are deterministic and available when the schedule is imported; the final STA+30 rule matches the established active-Trip suppression boundary.
 
-**Forbidden:** Accepting ATD, ATA, or STA in the operational evaluator signature; reading `depUTC` / `arrUTC` in the operational path; using planned arrival as a state, selection, lifecycle, or status anchor; using device-local wall-clock math; backfilling a missing planned departure or timezone; excluding a leg only because Actual data is invalid; adding an `.unknown` state or operational error banner.
+**Forbidden:** Making Trip completion depend on timezone projection when a source planned arrival is valid; choosing completion by maximum timestamp instead of canonical source sequence; treating nil release as active forever; using ATD or ATA for Widget transition; comparing formatted clock strings; substituting the device timezone; inventing a final release time; treating scheduled time passage as proof of an Actual event.
 
-**Enforced by:** the restricted `FlightOperationalState` signature, the single operational-state builder, reason-coded `SyncDiagnosticsLog`, and parity tests proving that ATD/ATA-only changes do not alter operational output. Tests: revised T-1, T-2, T-3, T-6, T-11, T-16, T-17, and T-22.
+**Enforced by:** `HomeWidgetScheduleBuilder`, `HomeWidgetDomain`, reason-coded diagnostics, and `HomeWidgetDomainTests` covering report, STD, final-release, timezone, and Actual-independent selection.
 
 **See also:** INV-001, INV-002, INV-012, and `docs/ADR/ADR-004-flight-operational-state-model.md`.
 
 ---
 
-## INV-014: Time Passage Reports a Schedule Boundary, Not an Actual Event
+## INV-014: Exact STD Selects the Following Scheduled Flight
 
-**Rule:** Time passage alone MUST NOT produce `Delayed`, `Departed`, `In flight`, `Arriving`, `Arrived`, or `Completed`. From STD inclusive through STD+61 exclusive, the schedule-domain state is `.departureTimePassed`: it means only that the scheduled departure boundary has passed. At STD+61 the leg becomes `.expired` for current-leg selection and snapshot reconstruction. This invariant defines no post-STD visible prefix, elapsed value, timer, or shell lifecycle.
+**Rule:** During an active Trip, the Widget selects the first flight whose `STD > now`. Equality belongs to the transition: at a displayed flight's exact STD, that flight is no longer “next” and the following flight is selected. While the prior flight may be airborne, the Widget continues showing the following scheduled flight. Time passage alone MUST NOT produce `Delayed`, `Departed`, `In flight`, `Arriving`, `Arrived`, or `Completed`.
 
-**Why:** A passed STD is known from the schedule; what the aircraft actually did is not. STA passage is not used to infer a realtime operational fact.
+**Why:** The Widget is an operational look-ahead, not a realtime aircraft-status surface.
 
-**Forbidden:** Treating `.departureTimePassed` as proof of departure; mapping STD or STA passage to an Actual event; using a future leg, connection, location, ATD, ATA, or elapsed schedule time to infer a real-time aircraft state; retaining `Delayed`, `Arriving in`, `Scheduled Arrival Time Passed`, or schedule-derived `Completed` copy on any operational surface.
+**Forbidden:** Keeping a flight selected at `now == STD`; applying the retired STD+61 current-leg rule to the Home Widget; inferring Actual status from STD or STA passage; creating a fake following leg.
 
-**Enforced by:** the four-state evaluator, current-leg selector, and STD+61 model boundary. Tests: revised T-6, T-10 through T-12, T-17, T-20, and T-21.
+**Enforced by:** `HomeWidgetDomain.selection` and exact-boundary tests for every STD.
 
 **See also:** `docs/ADR/ADR-004-flight-operational-state-model.md`.
 
 ---
 
-## INV-015: Derived Operational Presentation Has One Builder and Two Explicit Refresh Modes
+## INV-015: Home Widget Has One Schedule Projection and Two Explicit Refresh Modes
 
-**Rule:** Home Screen Widget snapshot and current-leg reconstruction derive from one operational-state builder output. Normal operation uses explicit `reconcile` semantics to publish the current snapshot. A Trip Revision or Replacement alone uses explicit `destructiveRebuild` semantics to clear the old Widget snapshot before publishing the revised generation. Report notification scheduling remains independently owned by `NextReportNotificationService` and its report-window builder.
+**Rule:** The app publishes one compact multi-Trip `HomeWidgetScheduleSnapshot`; `HomeWidgetDomain` is the only Trip/leg selector and is compiled into both the app and Widget extension. Small and Medium consume the same presentation and may differ only in layout/information density. Normal operation uses explicit `reconcile` semantics. A Trip Revision or Replacement alone uses explicit `destructiveRebuild` semantics to clear the old snapshot before publishing the revised generation. Report notifications remain independently owned by `NextReportNotificationService`.
 
 The Timeline Top Next Report Countdown represents the next Trip's report instant rather than current-flight operational state. Its selector and visibility are governed by INV-020 and MUST NOT be fed back into notification or Home Screen Widget lifecycle decisions.
 
-**Why:** Independent Widget derivation paths drift and leave obsolete snapshot information alive. Replacement and ordinary state progression have different publication requirements and must remain distinct.
+**Why:** Family-specific or process-specific selectors drift at exact boundaries. Replacement and ordinary progression also have different publication requirements.
 
-**Forbidden:** A second Home Screen Widget state builder; coordinator-side guessing of refresh mode; publishing a revised generation without first clearing the prior snapshot during Trip Replacement; coupling INV-020 selection back into Widget or notification state.
+**Forbidden:** Selecting a Trip or leg in SwiftUI; separate family selectors; coordinator-side guessing of refresh mode; publishing a revised generation without first clearing the prior snapshot during Trip Replacement; coupling notification selection into Widget state.
 
-**Enforced by:** the single operational-state builder and optional Home Screen Widget countdown presentation; caller-selected `FlightCountdownRefreshMode`; the snapshot-only `FlightCountdownCoordinator`; boundary-driven report/STD/STD+61 evaluation; and the replacement-only, timeout-bounded destructive invalidation seam. Tests: shared snapshot coordinator regressions, T-4 through T-7, revised T-16, and T-22.
+**Enforced by:** `HomeWidgetScheduleBuilder`, `HomeWidgetDomain`, caller-selected `FlightCountdownRefreshMode`, `FlightCountdownCoordinator.refreshHomeWidget`, and family contract tests.
 
 **See also:** INV-006, INV-007, INV-008, and `docs/ADR/ADR-004-flight-operational-state-model.md`.
 
 ---
 
-## INV-016: Presentation Windows Do Not Define Operational State
+## INV-016: Home Widget Is Always Operational, Not Window-Gated
 
-**Rule:** T-12h, T-6h, and other surface visibility windows belong only to Presentation Policy. They determine whether and where a valid operational state is shown; they MUST NOT participate in `FlightOperationalState` evaluation.
+**Rule:** Once a valid future or active Trip exists in the published schedule projection, the Widget presents it regardless of distance from STD. The former T-12h through T-6h visibility window is not part of the Home Widget contract.
 
-**Why:** A leg's operational meaning does not change because the Home Screen Widget has entered or left its display window. Combining the two concepts caused presentation phases to masquerade as flight state.
+**Why:** A Widget that answers “what operational event do I need next?” cannot disappear based on an unrelated departure-relative window.
 
-**Forbidden:** A state case whose meaning is a Widget window; using a visibility lead/tail constant to decide `.departureTimePassed` or `.expired`; adding `.preTrip` to represent “not visible yet.”
+**Forbidden:** Applying `FlightPresentationPolicy.widgetLeadTime` or `widgetEndLeadTime` to the new Widget projection; hiding a valid future report because it is more than 12 hours away; letting a view decide visibility.
 
-**Enforced by:** separate `FlightOperationalState` and Presentation Policy types, with no presentation-window input in the operational-state evaluator signature. Test: T-23 is the dedicated enforcing regression; it requires the same valid operational state outside the T-12h presentation window and regardless of surface visibility.
+**Enforced by:** the absence of a presentation-window input in `HomeWidgetDomain` and a timeline regression beginning 40 hours before report.
 
 **See also:** `docs/ADR/ADR-004-flight-operational-state-model.md`.
 
 ---
 
-## INV-017: Actual Events Are History-Only for Real-Time Countdown
+## INV-017: Actual Events Are History-Only for Home Widget State
 
-**Rule:** ATD and ATA remain persisted, leg-scoped history under INV-012, but they MUST NOT affect real-time operational state, current-leg selection, status text, boundary scheduling, or Home Screen Widget snapshots. Two schedules differing only in ATD or ATA produce identical operational output.
+**Rule:** ATD and ATA remain persisted, leg-scoped history under INV-012, but they MUST NOT affect Home Widget Trip/leg selection, copy, or timeline boundaries. Two schedules differing only in ATD or ATA produce identical Widget projections.
 
 **Why:** CrewAccess Actual data is commonly imported after trip completion and is not a contracted real-time source. Allowing it to affect live countdown would make normal operation depend on unavailable evidence while leaving surfaces vulnerable to revision-time changes.
 
-**Forbidden:** `.inFlight` or `.completed` cases in the real-time state enum; operational evaluator parameters for ATD or ATA; converting an Actual observation into live `Arriving`, `Arrived`, or `Completed` copy; rejecting a planned-departure countdown because an Actual timestamp is missing or malformed.
+**Forbidden:** Widget evaluator parameters for ATD or ATA; converting an Actual observation into `Arriving`, `Arrived`, or `Completed` copy; rejecting a valid planned leg because an Actual timestamp is missing or malformed.
 
-**Enforced by:** a type signature with no Actual inputs, operational conversion that does not parse Actual fields, source guards for retired state/copy, and ATD/ATA parity regression tests. Tests: revised T-11, T-17, T-20, T-21, and T-22.
+**Enforced by:** a Widget projection that parses only planned endpoints, source guards for retired status copy, and scheduled-boundary tests.
 
 **See also:** INV-012, INV-013, INV-014, and `docs/ADR/ADR-004-flight-operational-state-model.md`.
 
 ---
 
-## INV-018: STD+61 Is the Exact Operational Expiration Boundary
+## INV-018: Final STD Falls Back Until Final STA+30
 
-**Rule:** Operational state is evaluated in this exact order: `now >= STD+61min` → `.expired`; otherwise `now >= STD` → `.departureTimePassed`; otherwise a non-nil report time with `now < reportTime` → `.preReport`; otherwise → `.preDeparture`. Equality belongs to the later state. The closed-open interval `[STD, STD+61min)` belongs to `.departureTimePassed`; STD+61:00 belongs to `.expired`. These are absolute-Date domain boundaries, not a visible elapsed-time contract.
+**Rule:** If no flight has `STD > now` after the final leg reaches STD, the current Trip remains active until `final planned arrival + 30 minutes`. During this interval the shared presentation has state `.activeTripFinalLeg`, retains the final flight number, route, departure and arrival schedule, exposes no report time, and uses neutral copy `TRIP IN PROGRESS`. Small renders the final leg's departure `(L)`/`(Z)` times only; Medium retains both departure and arrival columns. No fake next leg is created. At release-boundary equality the following future Trip report becomes eligible.
 
-Current-leg selection gives `.departureTimePassed` legs priority through minute 60, choosing the latest STD when multiple such legs exist. Only at STD+61 is that leg excluded and selection allowed to advance to the earliest valid future leg. Short turns may therefore have a shortened or absent next-leg `Dep in` interval; this is accepted product behavior.
+**Why:** Advancing to the next Trip at final STD is premature, while implying an Actual flight status would be unsupported.
 
-**Why:** The order preserves the exact STD+61 domain contract and prevents a future leg from displacing the selected passed leg early. It remains a model/selection boundary; no Flight Countdown Live Activity exists to expose it on Lock Screen or Dynamic Island.
+**Forbidden:** Showing the following Trip before release; resurrecting the current Trip report; inventing a next leg or release time; labeling the flight departed/in-flight/arrived.
 
-**Forbidden:** Using strict `>` at STD or STD+61; expiring model state at STD+60; allowing a future leg to outrank a non-expired `.departureTimePassed` leg; using STA, STA+1h, ATD, or ATA as an operational boundary; reintroducing a local-only Flight Countdown Live Activity to present this boundary.
-
-**Enforced by:** the pure state evaluator, latest-STD passed-leg selector, and report/STD/STD+61 boundary scheduler used for shared snapshot reconstruction. Tests: revised T-6, T-10, T-12, T-20, and T-21.
+**Enforced by:** `HomeWidgetDomain.selection`, `HomeWidgetDomain.presentation`, pre-release/exact-release tests, and the shared final-leg presentation consumed by every family.
 
 **See also:** INV-014, INV-017, and `docs/ADR/ADR-004-flight-operational-state-model.md`.
 
@@ -280,7 +278,7 @@ The final flight is determined before parsing its arrival. If that leg has no va
 
 Before the current Trip's report time, its existing three-line countdown remains visible. At report-time equality the entire Top countdown is absent, and it remains absent through `releaseBoundary - 1 second`. Selection is independent of the viewed/selected Trip and Timeline scroll position. Duration is the absolute UTC instant difference; LCL/UTC changes rendering timezone and zone label only.
 
-This Timeline-only visibility MUST NOT cancel, hide, or alter report notifications or the Home Screen Widget snapshot. Those remain governed by their own builders and INV-013 through INV-018.
+Timeline visibility MUST NOT cancel, hide, or alter report notifications or the Home Screen Widget snapshot. The Home Widget independently applies the same final-STA+30 active-Trip boundary through `HomeWidgetDomain`, while notifications remain governed by their existing builder and preferences.
 
 **Enforced by:** `TimelineNextReportCountdownBuilder`, the shared iPhone/iPad `TimelineNextReportCountdownView`, and `NextReportWindowBuilderTests` covering report-time and release boundaries, commercial deadhead and foreign endings, overlap, multiple future Trips, missing final arrival, format, timezone, color, and responsibility separation.
 

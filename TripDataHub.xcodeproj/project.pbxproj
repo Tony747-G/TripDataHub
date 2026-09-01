@@ -637,6 +637,11 @@
 					629B3D6DDB789EA0AAE1A672 = {
 						DevelopmentTeam = 54WZM2U9MK;
 						ProvisioningStyle = Automatic;
+						SystemCapabilities = {
+							com.apple.WeatherKit = {
+								enabled = 1;
+							};
+						};
 					};
 					9CDD311DB999C310E3ADCC73 = {
 						DevelopmentTeam = 54WZM2U9MK;

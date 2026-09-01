@@ -7,7 +7,12 @@ enum FlightCountdownRefreshMode: Sendable {
 
 protocol FlightCountdownSnapshotClient: Sendable {
     func persist(_ snapshot: FlightCountdownSnapshot?) async
+    func persistHomeWidgetSchedule(_ snapshot: HomeWidgetScheduleSnapshot?) async
     func reloadWidgets() async
+}
+
+extension FlightCountdownSnapshotClient {
+    func persistHomeWidgetSchedule(_ snapshot: HomeWidgetScheduleSnapshot?) async {}
 }
 
 #if os(iOS)
@@ -39,6 +44,28 @@ struct AppGroupFlightCountdownSnapshotClient: FlightCountdownSnapshotClient {
         }
     }
 
+    func persistHomeWidgetSchedule(_ snapshot: HomeWidgetScheduleSnapshot?) async {
+        guard let containerURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: FlightCountdownSharedStore.appGroupIdentifier
+        ) else {
+            return
+        }
+        let fileURL = containerURL.appendingPathComponent(
+            FlightCountdownSharedStore.widgetSnapshotFileName
+        )
+        guard let snapshot else {
+            try? FileManager.default.removeItem(at: fileURL)
+            return
+        }
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            try encoder.encode(snapshot).write(to: fileURL, options: .atomic)
+        } catch {
+            // A missing Home Screen Widget schedule fails closed to its empty state.
+        }
+    }
+
     func reloadWidgets() async {
         WidgetCenter.shared.reloadAllTimelines()
     }
@@ -46,6 +73,7 @@ struct AppGroupFlightCountdownSnapshotClient: FlightCountdownSnapshotClient {
 #else
 struct AppGroupFlightCountdownSnapshotClient: FlightCountdownSnapshotClient {
     func persist(_ snapshot: FlightCountdownSnapshot?) async {}
+    func persistHomeWidgetSchedule(_ snapshot: HomeWidgetScheduleSnapshot?) async {}
     func reloadWidgets() async {}
 }
 #endif
@@ -84,6 +112,23 @@ actor FlightCountdownCoordinator {
             await snapshotClient.reloadWidgets()
             guard let snapshot else { return }
             await snapshotClient.persist(snapshot)
+            await snapshotClient.reloadWidgets()
+        }
+    }
+
+    func refreshHomeWidget(
+        snapshot: HomeWidgetScheduleSnapshot?,
+        mode: FlightCountdownRefreshMode
+    ) async {
+        switch mode {
+        case .reconcile:
+            await snapshotClient.persistHomeWidgetSchedule(snapshot)
+            await snapshotClient.reloadWidgets()
+        case .destructiveRebuild:
+            await snapshotClient.persistHomeWidgetSchedule(nil)
+            await snapshotClient.reloadWidgets()
+            guard let snapshot else { return }
+            await snapshotClient.persistHomeWidgetSchedule(snapshot)
             await snapshotClient.reloadWidgets()
         }
     }

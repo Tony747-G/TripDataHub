@@ -1,10 +1,160 @@
 #if DEBUG
 import Foundation
 
+enum HomeWidgetDebugAcceptanceScenario: String, CaseIterable {
+    case preTrip = "pre-trip"
+    case activeFirst = "active-first"
+    case beforeFirstSTD = "before-first-std"
+    case atFirstSTD = "at-first-std"
+    case afterFirstSTD = "after-first-std"
+    case finalLeg = "final-leg"
+    case beforeRelease = "before-release"
+    case atRelease = "at-release"
+
+    func effectiveNowUTC(anchorUTC: Date) -> Date {
+        let firstArrivalUTC = anchorUTC.addingTimeInterval((13 * 60 + 25) * 60)
+        let finalDepartureUTC = firstArrivalUTC.addingTimeInterval((38 * 60 + 25) * 60)
+        let finalArrivalUTC = finalDepartureUTC.addingTimeInterval(12 * 60 * 60)
+        let releaseUTC = finalArrivalUTC.addingTimeInterval(HomeWidgetDomain.postFinalArrivalInterval)
+
+        switch self {
+        case .preTrip:
+            return anchorUTC.addingTimeInterval(-8 * 60 * 60)
+        case .activeFirst:
+            return anchorUTC.addingTimeInterval(-30 * 60)
+        case .beforeFirstSTD:
+            return anchorUTC.addingTimeInterval(-1)
+        case .atFirstSTD:
+            return anchorUTC
+        case .afterFirstSTD:
+            return anchorUTC.addingTimeInterval(1)
+        case .finalLeg:
+            return finalDepartureUTC.addingTimeInterval(60)
+        case .beforeRelease:
+            return releaseUTC.addingTimeInterval(-1)
+        case .atRelease:
+            return releaseUTC
+        }
+    }
+}
+
+struct HomeWidgetDebugAcceptanceFixture {
+    let schedules: [PayPeriodSchedule]
+    let effectiveNowUTC: Date
+}
+
 extension AppViewModel {
-    static let debugFlightCountdownFixtureID = "DEBUG-ANC-ICN-ANC"
+    // Seven characters matches the longest current operational format observed in imported Trips
+    // (for example, A70193R) without forcing Widget layout around an artificial DEBUG identifier.
+    static let debugFlightCountdownFixtureID = "A79999R"
     static let debugFlightCountdownFirstLegID = UUID(uuidString: "D3B60001-0000-4000-8000-000000000001")!
     static let debugFlightCountdownSecondLegID = UUID(uuidString: "D3B60002-0000-4000-8000-000000000002")!
+    static let debugHomeWidgetFinalLegID = UUID(uuidString: "D3B60005-0000-4000-8000-000000000005")!
+    static let debugHomeWidgetNextTripFirstLegID = UUID(uuidString: "D3B60003-0000-4000-8000-000000000003")!
+    static let debugHomeWidgetNextTripSecondLegID = UUID(uuidString: "D3B60004-0000-4000-8000-000000000004")!
+
+    static func debugHomeWidgetAcceptanceAnchor(nowUTC: Date) -> Date {
+        debugFixtureDate("2026-09-01T09:05:00Z")
+    }
+
+    static func debugHomeWidgetAcceptanceFixture(
+        scenario: HomeWidgetDebugAcceptanceScenario,
+        anchorUTC: Date
+    ) -> HomeWidgetDebugAcceptanceFixture {
+        let firstDepartureUTC = anchorUTC
+        let firstArrivalUTC = firstDepartureUTC.addingTimeInterval((13 * 60 + 25) * 60)
+        let secondDepartureUTC = firstArrivalUTC.addingTimeInterval((38 * 60 + 25) * 60)
+        let secondArrivalUTC = secondDepartureUTC.addingTimeInterval(12 * 60 * 60)
+        let positioningDepartureUTC = firstDepartureUTC.addingTimeInterval(-6 * 60 * 60)
+        let positioningArrivalUTC = firstDepartureUTC.addingTimeInterval(-2 * 60 * 60)
+        let releaseUTC = secondArrivalUTC.addingTimeInterval(HomeWidgetDomain.postFinalArrivalInterval)
+        let nextReportUTC = releaseUTC.addingTimeInterval(2 * 60 * 60)
+        let nextDepartureUTC = nextReportUTC.addingTimeInterval(90 * 60)
+        let nextArrivalUTC = nextDepartureUTC.addingTimeInterval(6 * 60 * 60)
+        let nextReturnDepartureUTC = nextArrivalUTC.addingTimeInterval(4 * 60 * 60)
+        let nextReturnArrivalUTC = nextReturnDepartureUTC.addingTimeInterval(6 * 60 * 60)
+
+        let currentPairing = debugFlightCountdownFixtureID
+        let nextPairing = "12165"
+        let legs = [
+            debugHomeWidgetLeg(
+                id: debugFlightCountdownFirstLegID,
+                payPeriod: "DEBUG-CURRENT",
+                pairing: currentPairing,
+                leg: 1,
+                flight: "107",
+                departureAirport: "ANC",
+                arrivalAirport: "SDF",
+                departureUTC: positioningDepartureUTC,
+                arrivalUTC: positioningArrivalUTC,
+                block: "4:00"
+            ),
+            debugHomeWidgetLeg(
+                id: debugFlightCountdownSecondLegID,
+                payPeriod: "DEBUG-CURRENT",
+                pairing: currentPairing,
+                leg: 2,
+                flight: "108",
+                departureAirport: "SDF",
+                arrivalAirport: "NRT",
+                departureUTC: firstDepartureUTC,
+                arrivalUTC: firstArrivalUTC,
+                block: "13:25"
+            ),
+            debugHomeWidgetLeg(
+                id: debugHomeWidgetFinalLegID,
+                payPeriod: "DEBUG-CURRENT",
+                pairing: currentPairing,
+                leg: 3,
+                flight: "109",
+                departureAirport: "NRT",
+                arrivalAirport: "ANC",
+                departureUTC: secondDepartureUTC,
+                arrivalUTC: secondArrivalUTC,
+                block: "12:00"
+            ),
+            debugHomeWidgetLeg(
+                id: debugHomeWidgetNextTripFirstLegID,
+                payPeriod: "DEBUG-NEXT",
+                pairing: nextPairing,
+                leg: 1,
+                flight: "903",
+                departureAirport: "ANC",
+                arrivalAirport: "SDF",
+                departureUTC: nextDepartureUTC,
+                arrivalUTC: nextArrivalUTC,
+                block: "6:00"
+            ),
+            debugHomeWidgetLeg(
+                id: debugHomeWidgetNextTripSecondLegID,
+                payPeriod: "DEBUG-NEXT",
+                pairing: nextPairing,
+                leg: 2,
+                flight: "904",
+                departureAirport: "SDF",
+                arrivalAirport: "ANC",
+                departureUTC: nextReturnDepartureUTC,
+                arrivalUTC: nextReturnArrivalUTC,
+                block: "6:00"
+            )
+        ]
+        let schedules = [
+            PayPeriodSchedule(
+                id: "DEBUG-HOME-WIDGET-PASS-2",
+                label: "DEBUG Home Widget Pass 2",
+                tripCount: 2,
+                legCount: legs.count,
+                openTimeCount: 0,
+                updatedAt: anchorUTC,
+                legs: legs,
+                openTimeTrips: []
+            )
+        ]
+        return HomeWidgetDebugAcceptanceFixture(
+            schedules: schedules,
+            effectiveNowUTC: scenario.effectiveNowUTC(anchorUTC: anchorUTC)
+        )
+    }
 
     static func debugFlightCountdownCanonicalSchedules() -> [PayPeriodSchedule] {
         debugFlightCountdownSchedules(
@@ -115,6 +265,39 @@ extension AppViewModel {
         return formatter.string(from: value)
     }
 
+    private static func debugHomeWidgetLeg(
+        id: UUID,
+        payPeriod: String,
+        pairing: String,
+        leg: Int,
+        flight: String,
+        departureAirport: String,
+        arrivalAirport: String,
+        departureUTC: Date,
+        arrivalUTC: Date,
+        block: String
+    ) -> TripLeg {
+        let departure = debugFixtureUTCString(departureUTC)
+        let arrival = debugFixtureUTCString(arrivalUTC)
+        return TripLeg(
+            id: id,
+            payPeriod: payPeriod,
+            pairing: pairing,
+            leg: leg,
+            flight: flight,
+            depAirport: departureAirport,
+            depLocal: debugFixtureLocalString(departureUTC),
+            arrAirport: arrivalAirport,
+            arrLocal: debugFixtureLocalString(arrivalUTC),
+            depUTC: departure,
+            arrUTC: arrival,
+            status: "-",
+            block: block,
+            stdUTC: departure,
+            staUTC: arrival
+        )
+    }
+
     static var previewSchedules: [PayPeriodSchedule] {
         let legs2602 = [
             TripLeg(
@@ -195,6 +378,14 @@ extension AppViewModel {
 
     func applyDebugLaunchOverridesIfNeeded() {
         let arguments = ProcessInfo.processInfo.arguments
+
+        if let markerIndex = arguments.firstIndex(of: "UITEST_HOME_WIDGET_SCENARIO"),
+           arguments.indices.contains(markerIndex + 1),
+           let scenario = HomeWidgetDebugAcceptanceScenario(rawValue: arguments[markerIndex + 1]) {
+            Task { [weak self] in
+                await self?.startDebugHomeWidgetAcceptanceFixture(scenario: scenario)
+            }
+        }
 
         if arguments.contains("UITEST_TIMELINE_SEED") {
             isOpenTimeDemoMode = false

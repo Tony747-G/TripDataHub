@@ -282,7 +282,6 @@ final class AppViewModel: ObservableObject {
     private let replacementInvalidationTimeoutNanoseconds: UInt64
     private let importCommitVerificationFaultInjector: (@MainActor @Sendable (URL) throws -> Void)?
     private let flightCountdownCoordinator: FlightCountdownCoordinator
-    private var flightCountdownBoundaryTask: Task<Void, Never>?
 #if DEBUG
     @Published private(set) var isDebugFlightCountdownFixtureActive = false
     private var debugFlightCountdownFixtureSchedules: [PayPeriodSchedule]?
@@ -650,6 +649,7 @@ final class AppViewModel: ObservableObject {
             //   and would clear the seeded crewAccessSchedules
             let isUITest = ProcessInfo.processInfo.arguments.contains("UITEST_TIMELINE_SEED")
                 || ProcessInfo.processInfo.arguments.contains("UITEST_LOGGED_OUT_VERIFIED")
+                || ProcessInfo.processInfo.arguments.contains("UITEST_HOME_WIDGET_SCENARIO")
             let isXCTest = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
             if isUITest || isXCTest { return }
 #endif
@@ -1959,14 +1959,12 @@ final class AppViewModel: ObservableObject {
     private func invalidateReplacementDerivedState() async {
         await notificationService.invalidateNextReportNotifications()
         let nowUTC = Date()
-        let output = nextFlightCountdownOutput(nowUTC: nowUTC)
-        await flightCountdownCoordinator.refresh(
-            output: output,
-            mode: .destructiveRebuild,
-            nowUTC: nowUTC
+        let snapshot = homeWidgetScheduleSnapshot(nowUTC: nowUTC)
+        await flightCountdownCoordinator.refreshHomeWidget(
+            snapshot: snapshot,
+            mode: .destructiveRebuild
         )
-        operationalCountdownOutput = output
-        scheduleFlightCountdownBoundary(for: output, after: nowUTC)
+        operationalCountdownOutput = nextFlightCountdownOutput(nowUTC: nowUTC)
     }
 
     /// Trip key for a CrewAccess trip id and information date, using this device's domicile.
@@ -4496,6 +4494,33 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func homeWidgetScheduleSnapshot(nowUTC: Date = Date()) -> HomeWidgetScheduleSnapshot? {
+#if DEBUG
+        if let debugFlightCountdownFixtureSchedules {
+            return homeWidgetScheduleSnapshot(
+                schedules: debugFlightCountdownFixtureSchedules,
+                domicileAirportCode: "ANC",
+                nowUTC: nowUTC
+            )
+        }
+#endif
+        let crewBase = CrewBase(normalizing: verifiedIdentity?.domicile)
+        return HomeWidgetScheduleBuilder.build(
+            schedules: schedules,
+            domicileAirportCode: crewBase.reportAirportCode,
+            nowUTC: nowUTC,
+            tzResolver: tzResolver
+        ) { [diagnostics] exclusion in
+            diagnostics.record(
+                .flightStateInputExcluded,
+                [
+                    "leg": SyncDiagnosticsLog.tag(exclusion.legID),
+                    "reason": exclusion.reason.rawValue
+                ]
+            )
+        }
+    }
+
 #if DEBUG
     /// DEBUG-only integration seam. Supplied schedules never enter either persisted schedule
     /// array, so the fixture cannot trigger cache, CloudKit, or Friends publication.
@@ -4520,9 +4545,31 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func homeWidgetScheduleSnapshot(
+        schedules: [PayPeriodSchedule],
+        domicileAirportCode: String,
+        nowUTC: Date
+    ) -> HomeWidgetScheduleSnapshot? {
+        HomeWidgetScheduleBuilder.build(
+            schedules: schedules,
+            domicileAirportCode: domicileAirportCode,
+            nowUTC: nowUTC,
+            tzResolver: tzResolver
+        ) { [diagnostics] exclusion in
+            diagnostics.record(
+                .flightStateInputExcluded,
+                [
+                    "leg": SyncDiagnosticsLog.tag(exclusion.legID),
+                    "reason": exclusion.reason.rawValue
+                ]
+            )
+        }
+    }
+
     func startDebugFlightCountdownFixture(
         nowUTC: Date = Date()
     ) async {
+        HomeWidgetDebugClockStore.save(nil)
         let fixtureSchedules = Self.debugFlightCountdownInteractiveSchedules(
             nowUTC: nowUTC
         )
@@ -4534,22 +4581,53 @@ final class AppViewModel: ObservableObject {
             domicileAirportCode: "ANC",
             nowUTC: nowUTC
         )
-        await flightCountdownCoordinator.refresh(
-            output: output,
-            mode: .reconcile,
+        let snapshot = homeWidgetScheduleSnapshot(
+            schedules: fixtureSchedules,
+            domicileAirportCode: "ANC",
             nowUTC: nowUTC
         )
+        await flightCountdownCoordinator.refreshHomeWidget(
+            snapshot: snapshot,
+            mode: .reconcile
+        )
         operationalCountdownOutput = output
-        scheduleFlightCountdownBoundary(for: output, after: nowUTC)
+    }
+
+    func startDebugHomeWidgetAcceptanceFixture(
+        scenario: HomeWidgetDebugAcceptanceScenario,
+        anchorUTC: Date? = nil
+    ) async {
+        let resolvedAnchorUTC = anchorUTC ?? Self.debugHomeWidgetAcceptanceAnchor(nowUTC: Date())
+        let fixture = Self.debugHomeWidgetAcceptanceFixture(
+            scenario: scenario,
+            anchorUTC: resolvedAnchorUTC
+        )
+        HomeWidgetDebugClockStore.save(fixture.effectiveNowUTC)
+        debugFlightCountdownFixtureSchedules = fixture.schedules
+        isDebugFlightCountdownFixtureActive = true
+
+        let output = nextFlightCountdownOutput(
+            schedules: fixture.schedules,
+            domicileAirportCode: "ANC",
+            nowUTC: fixture.effectiveNowUTC
+        )
+        let snapshot = homeWidgetScheduleSnapshot(
+            schedules: fixture.schedules,
+            domicileAirportCode: "ANC",
+            nowUTC: fixture.effectiveNowUTC
+        )
+        await flightCountdownCoordinator.refreshHomeWidget(
+            snapshot: snapshot,
+            mode: .reconcile
+        )
+        operationalCountdownOutput = output
     }
 
     func stopDebugFlightCountdownFixture(nowUTC: Date = Date()) async {
-        flightCountdownBoundaryTask?.cancel()
-        flightCountdownBoundaryTask = nil
-        await flightCountdownCoordinator.refresh(
-            output: nil,
-            mode: .reconcile,
-            nowUTC: nowUTC
+        HomeWidgetDebugClockStore.save(nil)
+        await flightCountdownCoordinator.refreshHomeWidget(
+            snapshot: nil,
+            mode: .reconcile
         )
         operationalCountdownOutput = nil
         debugFlightCountdownFixtureSchedules = nil
@@ -4569,60 +4647,12 @@ final class AppViewModel: ObservableObject {
         mode: FlightCountdownRefreshMode,
         nowUTC: Date = Date()
     ) async {
-        let output = nextFlightCountdownOutput(nowUTC: nowUTC)
-        await flightCountdownCoordinator.refresh(
-            output: output,
-            mode: mode,
-            nowUTC: nowUTC
+        let snapshot = homeWidgetScheduleSnapshot(nowUTC: nowUTC)
+        await flightCountdownCoordinator.refreshHomeWidget(
+            snapshot: snapshot,
+            mode: mode
         )
-        operationalCountdownOutput = output
-        scheduleFlightCountdownBoundary(for: output, after: nowUTC)
-    }
-
-    static func nextFlightCountdownEvaluationBoundary(
-        for output: CountdownEngineOutput?,
-        after nowUTC: Date
-    ) -> Date? {
-        guard let leg = output?.leg else { return nil }
-        let candidates = [
-            leg.reportTimeUTC,
-            Optional(leg.plannedDepartureUTC),
-            Optional(leg.plannedDepartureUTC.addingTimeInterval(FlightOperationalState.expirationInterval)),
-            FlightPresentationPolicy.nextVisibilityBoundary(
-                plannedDepartureUTC: leg.plannedDepartureUTC,
-                nowUTC: nowUTC
-            )
-        ]
-        return candidates.compactMap { $0 }
-            .filter { $0 > nowUTC }
-            .min()
-    }
-
-    private func scheduleFlightCountdownBoundary(
-        for output: CountdownEngineOutput?,
-        after nowUTC: Date
-    ) {
-        flightCountdownBoundaryTask?.cancel()
-        guard let boundary = Self.nextFlightCountdownEvaluationBoundary(
-            for: output,
-            after: nowUTC
-        ) else {
-            flightCountdownBoundaryTask = nil
-            return
-        }
-
-        let delayNanoseconds = UInt64(
-            max(0, boundary.timeIntervalSince(nowUTC) + 0.05) * 1_000_000_000
-        )
-        flightCountdownBoundaryTask = Task { [weak self] in
-            do {
-                try await Task.sleep(nanoseconds: delayNanoseconds)
-            } catch {
-                return
-            }
-            guard let self else { return }
-            await self.refreshFlightCountdownPresentation(mode: .reconcile, nowUTC: Date())
-        }
+        operationalCountdownOutput = nextFlightCountdownOutput(nowUTC: nowUTC)
     }
 
     func exportCrewAccessFlightsLogTenCSV(nowUTC: Date = Date()) -> LogTenExportOutput? {
