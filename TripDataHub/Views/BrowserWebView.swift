@@ -26,6 +26,341 @@ private let browserPerformanceLogger = Logger(
 )
 #endif
 
+#if DEBUG
+private let browserProbeLogger = Logger(
+    subsystem: "com.sfune.TripDataHub",
+    category: "AutoPrintProbe"
+)
+
+/// Phase 0 evidence gathering for `docs/INVESTIGATION_CREWACCESS_AUTO_PRINT.md`.
+///
+/// **Observational only.** Nothing in this type — or on the path that calls it — clicks, focuses,
+/// submits a form, invokes a site function, or dispatches a synthetic event. It reads a page that
+/// has already finished loading and logs a redacted description of it.
+///
+/// It exists to answer one question on a real device instead of inferring it from comments and RCA
+/// documents: **is the CrewAccess Print control a same-origin DOM element reachable from this
+/// WebView's JavaScript context, or a Zscaler-injected / cross-origin surface?**
+///
+/// Privacy: the probe never reads cookies, storage, credentials, or auth tokens, and never returns
+/// a URL query value. Every string it returns is whitespace-collapsed, truncated, and has digit
+/// runs of four or more masked, so trip identifiers, crew IDs, and seniority numbers do not reach
+/// the log. Element labels are page chrome; they are logged so the Print control can be identified.
+enum CrewAccessPageProbe {
+
+    enum PageKind: String {
+        /// `crewaccess.inside.ups.com/access/rs/reports/<uuid>/content/Trip_Information…`
+        case tripInformationReport = "trip-information-report"
+        /// Some other generated report under the same `/access/rs/reports/` tree.
+        case crewAccessReport = "crewaccess-report"
+        case crewAccessOther = "crewaccess-other"
+        case fltopsPortal = "fltops-portal"
+        case zscaler = "zscaler"
+        case upsOther = "ups-other"
+        case other = "other"
+        case unknown = "unknown"
+    }
+
+    /// Intervals *between* samples, in seconds — cumulatively 1s / 3s / 6s / 10s after `didFinish`.
+    ///
+    /// One sample cannot answer *when* a Print control appears, because the report DOM keeps
+    /// changing after `didFinish` (that is why the popup performance sampler debounces mutations).
+    /// The schedule is bounded and is abandoned as soon as the navigation is superseded.
+    static let resampleIntervals: [TimeInterval] = [1, 2, 3, 4]
+
+    static func pageKind(for url: URL?) -> PageKind {
+        guard let url, let host = url.host?.lowercased() else { return .unknown }
+        if host.contains("zscaler") || host.contains("zscloud") {
+            return .zscaler
+        }
+        if host == "crewaccess.inside.ups.com" {
+            let path = url.path
+            let tripInformationPattern =
+                #"^/access/rs/reports/[0-9a-fA-F-]{36}/content/Trip_Information"#
+            if path.range(of: tripInformationPattern, options: .regularExpression) != nil {
+                return .tripInformationReport
+            }
+            if path.hasPrefix("/access/rs/reports/") {
+                return .crewAccessReport
+            }
+            return .crewAccessOther
+        }
+        if host == "fltops-portal.ups.com" { return .fltopsPortal }
+        if host == "ups.com" || host.hasSuffix(".ups.com") { return .upsOther }
+        return .other
+    }
+
+    /// Whether a page of this kind is worth re-reading on the bounded schedule.
+    ///
+    /// Phase 0 is discovery, so every UPS or Zscaler surface qualifies: the Trip Details document
+    /// has not yet been proven to live on the host the printed PDFs point at.
+    static func warrantsResampling(_ kind: PageKind) -> Bool {
+        switch kind {
+        case .tripInformationReport, .crewAccessReport, .crewAccessOther,
+             .fltopsPortal, .zscaler, .upsOther:
+            return true
+        case .other, .unknown:
+            return false
+        }
+    }
+
+    /// A loggable form of a URL: scheme, host, and path with report UUIDs and long digit runs
+    /// masked. Query **values** are never included — only the parameter names, because a query can
+    /// carry a session or auth token.
+    static func urlShape(for url: URL?) -> String {
+        guard let url else { return "<nil>" }
+        let scheme = url.scheme ?? "?"
+        let host = url.host ?? "?"
+        let uuidPattern =
+            #"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"#
+        let path = url.path
+            .replacingOccurrences(of: uuidPattern, with: "<uuid>", options: .regularExpression)
+            .replacingOccurrences(of: #"\d{4,}"#, with: "<n>", options: .regularExpression)
+        let names = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .map(\.name)
+            .sorted() ?? []
+        let query = names.isEmpty
+            ? ""
+            : "?<\(names.count) params: \(names.prefix(6).joined(separator: ","))>"
+        return "\(scheme)://\(host)\(path)\(query)"
+    }
+
+    /// The JavaScript expression merged into the existing page-inspection script as `probe`.
+    ///
+    /// Read-only by construction: it queries, measures, and reads attributes. There is no
+    /// assignment to the page, no event dispatch, and no invocation of any page function.
+    static let probeExpression: String = #"""
+            (() => {
+                try {
+                    const MAXIMUM_LOGGED_ELEMENTS = 12;
+                    const MAXIMUM_SCANNED_ELEMENTS = 4000;
+                    const redact = value => String(value === null || value === undefined ? '' : value)
+                        .replace(/\s+/g, ' ')
+                        .replace(/\d{4,}/g, '<n>')
+                        .trim()
+                        .slice(0, 60);
+                    const originOf = value => {
+                        try { return new URL(String(value), location.href).origin; } catch (error) { return '<unparsable>'; }
+                    };
+                    const pathShapeOf = value => {
+                        try {
+                            const parsed = new URL(String(value), location.href);
+                            const path = parsed.pathname
+                                .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<uuid>')
+                                .replace(/\d{4,}/g, '<n>');
+                            return (parsed.origin + path).slice(0, 120);
+                        } catch (error) { return '<unparsable>'; }
+                    };
+                    const attributeOf = (element, name) => (
+                        element && element.getAttribute ? element.getAttribute(name) : null
+                    );
+                    const labelOf = element => [
+                        element.innerText,
+                        element.value,
+                        attributeOf(element, 'aria-label'),
+                        attributeOf(element, 'title'),
+                        attributeOf(element, 'alt')
+                    ].filter(Boolean).join(' ');
+                    const identityOf = element => [
+                        element.id,
+                        typeof element.className === 'string' ? element.className : '',
+                        attributeOf(element, 'name')
+                    ].filter(Boolean).join(' ');
+                    const isVisible = element => {
+                        const rects = element.getClientRects ? element.getClientRects() : [];
+                        if (!rects || rects.length === 0) return false;
+                        const style = window.getComputedStyle(element);
+                        if (!style) return true;
+                        return style.visibility !== 'hidden'
+                            && style.display !== 'none'
+                            && Number(style.opacity || '1') > 0.01;
+                    };
+                    const printMatch = element => {
+                        const ownText = Array.from(element.childNodes || [])
+                            .filter(node => node.nodeType === 3)
+                            .map(node => node.textContent)
+                            .join(' ');
+                        const label = ownText + ' ' + (element.value || '') + ' '
+                            + (attributeOf(element, 'aria-label') || '') + ' '
+                            + (attributeOf(element, 'title') || '') + ' '
+                            + (attributeOf(element, 'alt') || '');
+                        const identity = identityOf(element);
+                        if (/^\s*print(\s+trip)?\s*$/i.test(label)) return 'exact';
+                        if (/print/i.test(label)) return 'label-substring';
+                        if (/print/i.test(identity)) return 'identity-substring';
+                        return '';
+                    };
+                    const describe = (element, rootName) => {
+                        const rect = element.getBoundingClientRect
+                            ? element.getBoundingClientRect()
+                            : { x: 0, y: 0, width: 0, height: 0 };
+                        const form = element.form || (element.closest ? element.closest('form') : null);
+                        return {
+                            root: rootName,
+                            tagName: (element.tagName || '?').toLowerCase(),
+                            type: redact(attributeOf(element, 'type')),
+                            id: redact(element.id),
+                            className: redact(typeof element.className === 'string' ? element.className : ''),
+                            role: redact(attributeOf(element, 'role')),
+                            label: redact(labelOf(element)),
+                            value: redact(element.value),
+                            ariaLabel: redact(attributeOf(element, 'aria-label')),
+                            title: redact(attributeOf(element, 'title')),
+                            href: element.href ? pathShapeOf(element.href) : '',
+                            target: redact(attributeOf(element, 'target')),
+                            hasOnclickAttribute: attributeOf(element, 'onclick') !== null,
+                            onclickAttribute: redact(attributeOf(element, 'onclick')),
+                            hasOnclickProperty: typeof element.onclick === 'function',
+                            formAction: form ? pathShapeOf(form.action || location.href) : '',
+                            formMethod: form ? redact(form.method) : '',
+                            isDisabled: element.disabled === true || attributeOf(element, 'aria-disabled') === 'true',
+                            tabIndex: typeof element.tabIndex === 'number' ? element.tabIndex : -1,
+                            isVisible: isVisible(element),
+                            rect: [
+                                Math.round(rect.x || 0),
+                                Math.round(rect.y || 0),
+                                Math.round(rect.width || 0),
+                                Math.round(rect.height || 0)
+                            ],
+                            printMatch: printMatch(element)
+                        };
+                    };
+
+                    const controlSelector = 'a, button, input[type="button"], input[type="submit"], '
+                        + 'input[type="image"], [role="button"], [onclick]';
+                    const roots = [{ name: 'document', node: document }];
+                    const shadowHosts = Array.from(document.querySelectorAll('*'))
+                        .slice(0, MAXIMUM_SCANNED_ELEMENTS)
+                        .filter(element => element.shadowRoot)
+                        .slice(0, 8);
+                    shadowHosts.forEach((host, index) => roots.push({
+                        name: 'shadow[' + index + ']:' + (host.tagName || '?').toLowerCase(),
+                        node: host.shadowRoot
+                    }));
+
+                    let printElements = [];
+                    let interactiveElements = [];
+                    let scannedElementCount = 0;
+                    let vendorMarkerCount = 0;
+                    const vendorMarkerSamples = [];
+                    roots.forEach(root => {
+                        const scanned = Array.from(
+                            root.node.querySelectorAll ? root.node.querySelectorAll('*') : []
+                        ).slice(0, MAXIMUM_SCANNED_ELEMENTS);
+                        scannedElementCount += scanned.length;
+                        scanned.forEach(element => {
+                            if (printMatch(element)) {
+                                printElements.push({ element: element, root: root.name });
+                            }
+                            if (element.matches && element.matches(controlSelector)) {
+                                interactiveElements.push({ element: element, root: root.name });
+                            }
+                            const vendorSource = identityOf(element) + ' '
+                                + (attributeOf(element, 'src') || '') + ' '
+                                + (attributeOf(element, 'href') || '');
+                            if (/zscaler|zpa\b|zia\b|zsc-/i.test(vendorSource)) {
+                                vendorMarkerCount += 1;
+                                if (vendorMarkerSamples.length < 4) {
+                                    vendorMarkerSamples.push(redact(vendorSource));
+                                }
+                            }
+                        });
+                    });
+
+                    const frames = Array.from(document.querySelectorAll('iframe, frame'))
+                        .slice(0, 8)
+                        .map(frame => {
+                            let isSameOriginAccessible = false;
+                            let innerPrintElementCount = -1;
+                            let innerReadyState = '';
+                            try {
+                                const frameDocument = frame.contentDocument;
+                                isSameOriginAccessible = Boolean(frameDocument && frameDocument.body);
+                                if (isSameOriginAccessible) {
+                                    innerReadyState = frameDocument.readyState;
+                                    innerPrintElementCount = Array.from(
+                                        frameDocument.querySelectorAll(controlSelector)
+                                    ).slice(0, 500).filter(element => printMatch(element)).length;
+                                }
+                            } catch (error) {
+                                isSameOriginAccessible = false;
+                            }
+                            return {
+                                srcOrigin: originOf(attributeOf(frame, 'src') || ''),
+                                srcShape: pathShapeOf(attributeOf(frame, 'src') || ''),
+                                id: redact(frame.id),
+                                className: redact(typeof frame.className === 'string' ? frame.className : ''),
+                                isSameOriginAccessible: isSameOriginAccessible,
+                                innerReadyState: innerReadyState,
+                                innerPrintElementCount: innerPrintElementCount
+                            };
+                        });
+
+                    const distinctOrigins = selector => Array.from(new Set(
+                        Array.from(document.querySelectorAll(selector))
+                            .slice(0, 200)
+                            .map(element => originOf(
+                                attributeOf(element, 'src') || attributeOf(element, 'href') || ''
+                            ))
+                    )).slice(0, 8);
+
+                    const bodyText = document.body ? document.body.innerText : '';
+                    const rows = Array.from(document.querySelectorAll('tr')).slice(0, 2000);
+                    let isTopSameOrigin = false;
+                    try {
+                        isTopSameOrigin = window.top.location.origin === location.origin;
+                    } catch (error) {
+                        isTopSameOrigin = false;
+                    }
+
+                    return {
+                        readyState: document.readyState,
+                        title: redact(document.title),
+                        documentOrigin: location.origin,
+                        isInFrame: window.top !== window.self,
+                        isTopSameOrigin: isTopSameOrigin,
+                        frameCount: window.frames.length,
+                        frames: frames,
+                        scriptOrigins: distinctOrigins('script[src]'),
+                        styleOrigins: distinctOrigins('link[rel="stylesheet"]'),
+                        shadowRootCount: shadowHosts.length,
+                        scannedElementCount: scannedElementCount,
+                        vendorMarkerCount: vendorMarkerCount,
+                        vendorMarkerSamples: vendorMarkerSamples,
+                        bodyCharacterCount: bodyText.length,
+                        tableCount: document.querySelectorAll('table').length,
+                        nonEmptyRowCount: rows.filter(row => (row.innerText || '').trim().length > 0).length,
+                        legAnchorRowCount: rows.filter(row => {
+                            const text = row.innerText || '';
+                            return /[A-Z]{3}\s*[-–—]\s*[A-Z]{3}/.test(text) && /\d{2}:\d{2}/.test(text);
+                        }).length,
+                        hasTripIdLine: /\bTrip\s*Id\s*:\s*[A-Z0-9]{4,8}\s+\d{2}[A-Za-z]{3}\d{4}\b/.test(bodyText),
+                        hasTripInformationHeading: /\btrip\s+information\b/i.test(
+                            (document.title || '') + ' ' + bodyText.slice(0, 2000)
+                        ),
+                        hasRosterMarker: /\broster\b/i.test((document.title || '') + ' ' + bodyText.slice(0, 2000)),
+                        unableToLoadReport: bodyText.toLowerCase().includes('unable to load report'),
+                        busyIndicatorCount: document.querySelectorAll(
+                            '[aria-busy="true"], .loading, .spinner, [role="progressbar"]'
+                        ).length,
+                        printElementCount: printElements.length,
+                        interactiveElementCount: interactiveElements.length,
+                        printElements: printElements
+                            .slice(0, MAXIMUM_LOGGED_ELEMENTS)
+                            .map(entry => describe(entry.element, entry.root)),
+                        interactiveElements: interactiveElements
+                            .slice(0, MAXIMUM_LOGGED_ELEMENTS)
+                            .map(entry => describe(entry.element, entry.root))
+                    };
+                } catch (error) {
+                    return { error: String(error).slice(0, 200) };
+                }
+            })()
+    """#
+}
+#endif
+
 private final class BrowserPopupWebView: WKWebView {
     var didAttachToWindow: (@MainActor () -> Void)?
 
@@ -98,6 +433,15 @@ extension BrowserWebView {
         #if DEBUG
         private var nextPopupPerformanceTraceID: UInt = 0
         private var popupPerformanceTraces: [ObjectIdentifier: PopupPerformanceTrace] = [:]
+        /// Phase 0 probe bookkeeping. `didFinish` counts are keyed by redacted URL shape so a page
+        /// that completes navigation more than once is visible as such in the log.
+        private var crewAccessProbeDidFinishCounts: [String: Int] = [:]
+        private var crewAccessProbeSequences: [ObjectIdentifier: UInt] = [:]
+        private var nextCrewAccessProbeSequence: UInt = 0
+        /// Pending delayed probe work, keyed by `ObjectIdentifier` so the registry itself never
+        /// retains a WebView. The Coordinator owns these tasks; every task body captures the
+        /// Coordinator and the WebView weakly, so the ownership only ever points this way.
+        private var crewAccessProbeTasks: [ObjectIdentifier: Task<Void, Never>] = [:]
         #endif
 
         private struct PopupFocusAcquisitionState {
@@ -270,13 +614,33 @@ extension BrowserWebView {
             }
         }
 
-        private func inspectCompletedPage(_ webView: WKWebView, completedURL: URL?) {
-            let script = """
+        /// The single per-navigation DOM read. Both the main WebView and every popup reach it from
+        /// `didFinish`.
+        ///
+        /// In Release it returns exactly the two fields the status classifier consumes. In DEBUG it
+        /// additionally carries the Phase 0 `probe` object, so evidence gathering rides on this one
+        /// script instead of introducing a second, independent DOM inspection pipeline.
+        static func pageInspectionScript() -> String {
+            #if DEBUG
+            return """
+            (() => ({
+                pageText: document.body ? document.body.innerText : '',
+                hasPasswordField: document.querySelector('input[type="password"]') !== null,
+                probe: \(CrewAccessPageProbe.probeExpression)
+            }))()
+            """
+            #else
+            return """
             (() => ({
                 pageText: document.body ? document.body.innerText : '',
                 hasPasswordField: document.querySelector('input[type="password"]') !== null
             }))()
             """
+            #endif
+        }
+
+        private func inspectCompletedPage(_ webView: WKWebView, completedURL: URL?) {
+            let script = Self.pageInspectionScript()
             webView.evaluateJavaScript(script) { [weak self, weak webView] result, _ in
                 guard let self, let webView else { return }
                 let values = result as? [String: Any]
@@ -291,6 +655,19 @@ extension BrowserWebView {
                     guard webView.url == completedURL else { return }
                     self.viewModel.statusMessage = status
                 }
+                #if DEBUG
+                let probeValues = values?["probe"] as? [String: Any]
+                // Weak: a queued diagnostic hop must never hold the Coordinator or a popup
+                // WebView alive past the point the normal lifecycle would release them.
+                DispatchQueue.main.async { [weak self, weak webView] in
+                    guard let self, let webView else { return }
+                    self.beginCrewAccessProbe(
+                        probeValues,
+                        webView: webView,
+                        completedURL: completedURL
+                    )
+                }
+                #endif
             }
         }
 
@@ -677,6 +1054,272 @@ extension BrowserWebView {
         }
         #endif
 
+        // MARK: - Phase 0 auto-print evidence (DEBUG only, observational)
+
+        #if DEBUG
+        /// Logs one `didFinish` sample and, for UPS/Zscaler surfaces, schedules bounded re-reads.
+        ///
+        /// Observational only. This path never clicks, focuses, submits, invokes a site function,
+        /// or dispatches a synthetic event, and it changes no production state.
+        @MainActor
+        func beginCrewAccessProbe(
+            _ probe: [String: Any]?,
+            webView: WKWebView,
+            completedURL: URL?
+        ) {
+            // A newer navigation on this WebView supersedes any schedule still in flight.
+            cancelCrewAccessProbe(for: webView)
+
+            nextCrewAccessProbeSequence &+= 1
+            let sequence = nextCrewAccessProbeSequence
+            crewAccessProbeSequences[ObjectIdentifier(webView)] = sequence
+
+            let shape = CrewAccessPageProbe.urlShape(for: completedURL)
+            crewAccessProbeDidFinishCounts[shape, default: 0] += 1
+
+            logCrewAccessProbeSample(
+                probe,
+                webView: webView,
+                completedURL: completedURL,
+                attempt: 0,
+                sequence: sequence
+            )
+
+            // Nothing is scheduled against a WebView the Coordinator no longer owns, or while a
+            // popup teardown is running. Diagnostics never outlive the surface they describe.
+            let kind = CrewAccessPageProbe.pageKind(for: completedURL)
+            guard CrewAccessPageProbe.warrantsResampling(kind),
+                  activePopupTeardownGeneration == nil,
+                  ownsCrewAccessProbeTarget(webView) else {
+                crewAccessProbeSequences.removeValue(forKey: ObjectIdentifier(webView))
+                return
+            }
+            scheduleCrewAccessProbeResample(
+                webView: webView,
+                completedURL: completedURL,
+                nextAttempt: 1,
+                sequence: sequence
+            )
+        }
+
+        /// Whether this WebView is still one the Coordinator drives: the browser's main WebView, or
+        /// a currently tracked popup. A popup removed by teardown fails this immediately.
+        @MainActor
+        private func ownsCrewAccessProbeTarget(_ webView: WKWebView) -> Bool {
+            popupWebViews.contains(where: { $0 === webView }) || viewModel.webView === webView
+        }
+
+        /// Cancels and forgets any pending probe work for this WebView. Cancellation resumes a
+        /// sleeping task immediately, so pending diagnostics become inert at once rather than at
+        /// the end of the sampling schedule.
+        @MainActor
+        func cancelCrewAccessProbe(for webView: WKWebView) {
+            let key = ObjectIdentifier(webView)
+            crewAccessProbeTasks.removeValue(forKey: key)?.cancel()
+            crewAccessProbeSequences.removeValue(forKey: key)
+        }
+
+        /// Ends a probe chain that reached its bound or found itself stale, without disturbing a
+        /// newer chain that a later navigation may already have registered for the same WebView.
+        @MainActor
+        private func endCrewAccessProbe(for webView: WKWebView, sequence: UInt) {
+            let key = ObjectIdentifier(webView)
+            guard crewAccessProbeSequences[key] == sequence else { return }
+            crewAccessProbeTasks.removeValue(forKey: key)?.cancel()
+            crewAccessProbeSequences.removeValue(forKey: key)
+        }
+
+        /// Test introspection: whether any delayed probe work is still registered.
+        @MainActor
+        var hasPendingCrewAccessProbeWork: Bool {
+            !crewAccessProbeTasks.isEmpty
+        }
+
+        @MainActor
+        private func scheduleCrewAccessProbeResample(
+            webView: WKWebView,
+            completedURL: URL?,
+            nextAttempt: Int,
+            sequence: UInt
+        ) {
+            let intervalIndex = nextAttempt - 1
+            guard intervalIndex >= 0,
+                  intervalIndex < CrewAccessPageProbe.resampleIntervals.count else {
+                endCrewAccessProbe(for: webView, sequence: sequence)
+                return
+            }
+            let interval = CrewAccessPageProbe.resampleIntervals[intervalIndex]
+
+            // Registered so teardown can cancel it. The task captures nothing strongly: it holds a
+            // weak Coordinator and a weak WebView, and exits the moment either has gone.
+            let key = ObjectIdentifier(webView)
+            crewAccessProbeTasks.removeValue(forKey: key)?.cancel()
+            crewAccessProbeTasks[key] = Task { @MainActor [weak self, weak webView] in
+                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                guard !Task.isCancelled, let self, let webView else { return }
+                guard self.crewAccessProbeSequences[ObjectIdentifier(webView)] == sequence,
+                      self.activePopupTeardownGeneration == nil,
+                      self.ownsCrewAccessProbeTarget(webView),
+                      webView.url == completedURL else {
+                    self.endCrewAccessProbe(for: webView, sequence: sequence)
+                    return
+                }
+
+                webView.evaluateJavaScript(Self.pageInspectionScript()) { [weak self, weak webView] result, _ in
+                    let probe = (result as? [String: Any])?["probe"] as? [String: Any]
+                    DispatchQueue.main.async { [weak self, weak webView] in
+                        guard let self, let webView else { return }
+                        guard self.crewAccessProbeSequences[ObjectIdentifier(webView)] == sequence,
+                              self.activePopupTeardownGeneration == nil,
+                              self.ownsCrewAccessProbeTarget(webView) else {
+                            self.endCrewAccessProbe(for: webView, sequence: sequence)
+                            return
+                        }
+                        self.logCrewAccessProbeSample(
+                            probe,
+                            webView: webView,
+                            completedURL: completedURL,
+                            attempt: nextAttempt,
+                            sequence: sequence
+                        )
+                        self.scheduleCrewAccessProbeResample(
+                            webView: webView,
+                            completedURL: completedURL,
+                            nextAttempt: nextAttempt + 1,
+                            sequence: sequence
+                        )
+                    }
+                }
+            }
+        }
+
+        /// Every value logged here was redacted inside `CrewAccessPageProbe.probeExpression`
+        /// before it crossed the JavaScript boundary, so `.public` is safe and the log is readable
+        /// on device without an OS logging profile.
+        @MainActor
+        private func logCrewAccessProbeSample(
+            _ probe: [String: Any]?,
+            webView: WKWebView,
+            completedURL: URL?,
+            attempt: Int,
+            sequence: UInt
+        ) {
+            let isPopup = popupWebViews.contains(where: { $0 === webView })
+            let surface = isPopup ? "popup" : "main"
+            let isVisibleSurface = isPopup
+                ? viewModel.popupWebView === webView
+                : viewModel.popupWebView == nil
+            let kind = CrewAccessPageProbe.pageKind(for: completedURL)
+            let shape = CrewAccessPageProbe.urlShape(for: completedURL)
+            let didFinishCount = crewAccessProbeDidFinishCounts[shape] ?? 0
+            let header = "[AutoPrintProbe] seq=\(sequence) attempt=\(attempt) surface=\(surface)"
+
+            guard let probe else {
+                browserProbeLogger.info(
+                    "\(header, privacy: .public) kind=\(kind.rawValue, privacy: .public) url=\(shape, privacy: .public) result=no-probe-payload"
+                )
+                return
+            }
+            if let message = probe["error"] as? String {
+                browserProbeLogger.error(
+                    "\(header, privacy: .public) kind=\(kind.rawValue, privacy: .public) url=\(shape, privacy: .public) result=probe-error error=\(message, privacy: .public)"
+                )
+                return
+            }
+
+            let summary = [
+                "kind=\(kind.rawValue)",
+                "visible=\(isVisibleSurface)",
+                "didFinishCount=\(didFinishCount)",
+                "url=\(shape)",
+                "readyState=\(probeString(probe, "readyState"))",
+                "title=\(probeString(probe, "title"))",
+                "docOrigin=\(probeString(probe, "documentOrigin"))",
+                "inFrame=\(probeBool(probe, "isInFrame"))",
+                "topSameOrigin=\(probeBool(probe, "isTopSameOrigin"))",
+                "frameCount=\(probeInt(probe, "frameCount"))",
+                "shadowRoots=\(probeInt(probe, "shadowRootCount"))",
+                "scanned=\(probeInt(probe, "scannedElementCount"))",
+                "bodyChars=\(probeInt(probe, "bodyCharacterCount"))",
+                "tables=\(probeInt(probe, "tableCount"))",
+                "rows=\(probeInt(probe, "nonEmptyRowCount"))",
+                "legRows=\(probeInt(probe, "legAnchorRowCount"))",
+                "tripIdLine=\(probeBool(probe, "hasTripIdLine"))",
+                "tripInformation=\(probeBool(probe, "hasTripInformationHeading"))",
+                "roster=\(probeBool(probe, "hasRosterMarker"))",
+                "unableToLoadReport=\(probeBool(probe, "unableToLoadReport"))",
+                "busy=\(probeInt(probe, "busyIndicatorCount"))",
+                "printElements=\(probeInt(probe, "printElementCount"))",
+                "interactiveElements=\(probeInt(probe, "interactiveElementCount"))",
+                "vendorMarkers=\(probeInt(probe, "vendorMarkerCount"))",
+                "vendorSamples=\((probe["vendorMarkerSamples"] as? [String] ?? []).joined(separator: " | "))",
+                "scriptOrigins=\((probe["scriptOrigins"] as? [String] ?? []).joined(separator: ","))",
+                "styleOrigins=\((probe["styleOrigins"] as? [String] ?? []).joined(separator: ","))"
+            ].joined(separator: " ")
+            browserProbeLogger.info("\(header, privacy: .public) \(summary, privacy: .public)")
+
+            for (index, frame) in (probe["frames"] as? [[String: Any]] ?? []).enumerated() {
+                browserProbeLogger.info(
+                    "\(header, privacy: .public) frame[\(index, privacy: .public)] origin=\(self.probeString(frame, "srcOrigin"), privacy: .public) src=\(self.probeString(frame, "srcShape"), privacy: .public) id=\(self.probeString(frame, "id"), privacy: .public) class=\(self.probeString(frame, "className"), privacy: .public) sameOriginAccessible=\(self.probeBool(frame, "isSameOriginAccessible"), privacy: .public) innerReadyState=\(self.probeString(frame, "innerReadyState"), privacy: .public) innerPrintElements=\(self.probeInt(frame, "innerPrintElementCount"), privacy: .public)"
+                )
+            }
+
+            for (index, element) in (probe["printElements"] as? [[String: Any]] ?? []).enumerated() {
+                browserProbeLogger.info(
+                    "\(header, privacy: .public) printElement[\(index, privacy: .public)] \(self.describeProbeElement(element), privacy: .public)"
+                )
+            }
+
+            for (index, element) in (probe["interactiveElements"] as? [[String: Any]] ?? []).enumerated() {
+                browserProbeLogger.info(
+                    "\(header, privacy: .public) interactiveElement[\(index, privacy: .public)] \(self.describeProbeElement(element), privacy: .public)"
+                )
+            }
+        }
+
+        private func describeProbeElement(_ element: [String: Any]) -> String {
+            let rect = (element["rect"] as? [Any] ?? [])
+                .map { String((($0 as? NSNumber)?.intValue ?? 0)) }
+                .joined(separator: ",")
+            return [
+                "root=\(probeString(element, "root"))",
+                "tag=\(probeString(element, "tagName"))",
+                "type=\(probeString(element, "type"))",
+                "id=\(probeString(element, "id"))",
+                "class=\(probeString(element, "className"))",
+                "role=\(probeString(element, "role"))",
+                "label=\(probeString(element, "label"))",
+                "value=\(probeString(element, "value"))",
+                "ariaLabel=\(probeString(element, "ariaLabel"))",
+                "title=\(probeString(element, "title"))",
+                "href=\(probeString(element, "href"))",
+                "target=\(probeString(element, "target"))",
+                "hasOnclickAttribute=\(probeBool(element, "hasOnclickAttribute"))",
+                "onclickAttribute=\(probeString(element, "onclickAttribute"))",
+                "hasOnclickProperty=\(probeBool(element, "hasOnclickProperty"))",
+                "formAction=\(probeString(element, "formAction"))",
+                "formMethod=\(probeString(element, "formMethod"))",
+                "disabled=\(probeBool(element, "isDisabled"))",
+                "tabIndex=\(probeInt(element, "tabIndex"))",
+                "visible=\(probeBool(element, "isVisible"))",
+                "rect=[\(rect)]",
+                "printMatch=\(probeString(element, "printMatch"))"
+            ].joined(separator: " ")
+        }
+
+        private func probeString(_ values: [String: Any], _ key: String) -> String {
+            values[key] as? String ?? ""
+        }
+
+        private func probeBool(_ values: [String: Any], _ key: String) -> Bool {
+            values[key] as? Bool ?? false
+        }
+
+        private func probeInt(_ values: [String: Any], _ key: String) -> Int {
+            (values[key] as? NSNumber)?.intValue ?? -1
+        }
+        #endif
+
         // MARK: PDF検出 — スキームに応じて処理を分岐
 
         func webView(_ webView: WKWebView,
@@ -873,6 +1516,13 @@ extension BrowserWebView {
             activePopupTeardownGeneration = generation
             activePopupTeardownTargets = popups
             pendingWindowCloseCallbacks = popups.count
+            #if DEBUG
+            // Teardown has begun: pending diagnostics for these popups are made inert immediately,
+            // before any of the native cleanup below runs.
+            for popup in popups {
+                cancelCrewAccessProbe(for: popup)
+            }
+            #endif
             browserPopupLogger.info(
                 "[BrowserPopup] teardown begin tracked=\(self.popupWebViews.count, privacy: .public) parents=\(self.popupParents.count, privacy: .public) targets=\(popups.count, privacy: .public)"
             )
@@ -937,6 +1587,7 @@ extension BrowserWebView {
                 #if DEBUG
                 logPopupPerformanceEvent("popup teardown", for: popup)
                 popupPerformanceTraces.removeValue(forKey: ObjectIdentifier(popup))
+                cancelCrewAccessProbe(for: popup)
                 #endif
                 popupFocusAcquisitionStates.removeValue(forKey: ObjectIdentifier(popup))
                 (popup as? BrowserPopupWebView)?.didAttachToWindow = nil

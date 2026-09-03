@@ -1,4 +1,5 @@
 import XCTest
+import JavaScriptCore
 import WebKit
 @testable import TripDataHub
 
@@ -689,4 +690,332 @@ final class BrowserPopupLifecycleTests: XCTestCase {
     private enum PopupTestError: Error {
         case expected
     }
+}
+
+
+// MARK: - Phase 0 auto-print evidence instrumentation
+//
+// See `docs/INVESTIGATION_CREWACCESS_AUTO_PRINT.md`. Phase 0 is observational: it exists to
+// establish, on a real device, whether the CrewAccess Print control is a same-origin DOM element
+// reachable from the WebView's JavaScript context. These tests hold that boundary — the probe must
+// stay DEBUG-only, must never interact with the page, and must not change production behavior.
+
+final class CrewAccessAutoPrintProbeTests: XCTestCase {
+
+    private func browserWebViewSource() throws -> String {
+        let projectRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        return try String(
+            contentsOf: projectRoot.appendingPathComponent("TripDataHub/Views/BrowserWebView.swift"),
+            encoding: .utf8
+        )
+    }
+
+    /// `true` for every source line that sits inside an active `#if DEBUG` region.
+    private func debugRegionFlags(for source: String) -> [Bool] {
+        var stack: [Bool] = []
+        var debugDepth = 0
+        var flags: [Bool] = []
+        for line in source.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("#if") {
+                let introducesDebug = trimmed == "#if DEBUG"
+                stack.append(introducesDebug)
+                if introducesDebug { debugDepth += 1 }
+            } else if trimmed == "#else" || trimmed.hasPrefix("#elseif") {
+                if stack.last == true {
+                    debugDepth -= 1
+                    stack[stack.count - 1] = false
+                }
+            } else if trimmed.hasPrefix("#endif") {
+                if stack.popLast() == true { debugDepth -= 1 }
+            }
+            flags.append(debugDepth > 0)
+        }
+        return flags
+    }
+
+    func test_phase0ProbeInstrumentationIsDebugOnly() throws {
+        let source = try browserWebViewSource()
+        let lines = source.components(separatedBy: "\n")
+        let flags = debugRegionFlags(for: source)
+        XCTAssertEqual(lines.count, flags.count)
+
+        let probeSymbols = [
+            "CrewAccessPageProbe",
+            "browserProbeLogger",
+            "AutoPrintProbe",
+            "CrewAccessProbe",
+            "beginCrewAccessProbe",
+            "scheduleCrewAccessProbeResample",
+            "logCrewAccessProbeSample",
+            "describeProbeElement",
+            "crewAccessProbe",
+            "probeExpression",
+            "probeValues"
+        ]
+
+        var sawProbeSymbol = false
+        for (index, line) in lines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.hasPrefix("//") else { continue }
+            for symbol in probeSymbols where line.contains(symbol) {
+                sawProbeSymbol = true
+                XCTAssertTrue(
+                    flags[index],
+                    "probe symbol \(symbol) must live inside #if DEBUG (line \(index + 1))"
+                )
+            }
+        }
+        XCTAssertTrue(sawProbeSymbol, "probe instrumentation is missing from BrowserWebView.swift")
+    }
+
+    func test_phase0ProbeIntroducesNoSyntheticInteractionOrCredentialAccess() throws {
+        let source = try browserWebViewSource()
+
+        // Interaction. Phase 0 observes; it must not drive the page in any way.
+        for banned in [
+            ".click()",
+            "window.print(",
+            "dispatchEvent(",
+            "new MouseEvent",
+            "new TouchEvent",
+            "new PointerEvent",
+            ".submit()",
+            "requestSubmit",
+            "HTMLElement.prototype"
+        ] {
+            XCTAssertFalse(source.contains(banned), "Phase 0 must not introduce \(banned)")
+        }
+
+        // Focus workarounds remain forbidden (see the popup focus-acquisition contract).
+        XCTAssertFalse(source.contains("window.focus()"))
+        XCTAssertFalse(source.contains("document.body.focus()"))
+
+        // Credentials and session storage are never read.
+        for banned in ["document.cookie", "localStorage", "sessionStorage", "indexedDB"] {
+            XCTAssertFalse(source.contains(banned), "Phase 0 must not read \(banned)")
+        }
+    }
+
+    func test_phase0ProbeLeavesTheProductionPageInspectionScriptUnchanged() throws {
+        let source = try browserWebViewSource()
+        guard let releaseBranch = source
+            .components(separatedBy: "#else\n            return \"\"\"\n")
+            .dropFirst()
+            .first?
+            .components(separatedBy: "\"\"\"")
+            .first
+        else {
+            return XCTFail("release branch of pageInspectionScript() not found")
+        }
+
+        XCTAssertTrue(releaseBranch.contains("pageText: document.body ? document.body.innerText : ''"))
+        XCTAssertTrue(
+            releaseBranch.contains(
+                "hasPasswordField: document.querySelector('input[type=\"password\"]') !== null"
+            )
+        )
+        XCTAssertFalse(
+            releaseBranch.contains("probe:"),
+            "the Release page inspection script must carry only the two status-classifier fields"
+        )
+    }
+
+    #if DEBUG
+    func test_phase0ProbeScriptIsValidJavaScriptAndNeverTouchesThePage() throws {
+        let script = BrowserWebView.Coordinator.pageInspectionScript()
+        XCTAssertTrue(script.contains("probe:"), "DEBUG builds must carry the probe payload")
+        XCTAssertTrue(script.contains("pageText: document.body ? document.body.innerText : ''"))
+
+        for banned in [".click()", "dispatchEvent", ".submit()", "document.cookie", "window.print("] {
+            XCTAssertFalse(script.contains(banned), "probe script must not contain \(banned)")
+        }
+
+        // Parsing the script inside an uncalled function expression validates its syntax without
+        // executing it. There is no DOM in JavaScriptCore, and running it here is neither needed
+        // nor meaningful — a syntax error is what would otherwise silently disable the probe.
+        let context = try XCTUnwrap(JSContext())
+        var thrownMessage: String?
+        context.exceptionHandler = { _, value in thrownMessage = value?.toString() }
+        _ = context.evaluateScript("(function () { return \(script); })")
+        XCTAssertNil(thrownMessage, "page inspection script must be syntactically valid JavaScript")
+    }
+
+    func test_phase0ProbeClassifiesTheSurfacesItMustDistinguish() {
+        func kind(_ value: String?) -> CrewAccessPageProbe.PageKind {
+            CrewAccessPageProbe.pageKind(for: value.flatMap(URL.init(string:)))
+        }
+
+        let reportRoot = "https://crewaccess.inside.ups.com/access/rs/reports"
+        let syntheticUUID = "00000000-0000-4000-8000-000000000000"
+
+        XCTAssertEqual(
+            kind("\(reportRoot)/\(syntheticUUID)/content/Trip_Information_Z99999_01Jan2099.html"),
+            .tripInformationReport
+        )
+        XCTAssertEqual(kind("\(reportRoot)/\(syntheticUUID)/content/Roster_Z99999.html"), .crewAccessReport)
+        XCTAssertEqual(kind("https://crewaccess.inside.ups.com/access/home"), .crewAccessOther)
+        XCTAssertEqual(kind("https://fltops-portal.ups.com/"), .fltopsPortal)
+        XCTAssertEqual(kind("https://gateway.zscaler.net/print"), .zscaler)
+        XCTAssertEqual(kind("https://sso.ups.com/login"), .upsOther)
+        XCTAssertEqual(kind("https://example.com/anything"), .other)
+        XCTAssertEqual(kind(nil), .unknown)
+
+        // Phase 0 is discovery: every UPS or Zscaler surface is worth re-reading, because the
+        // Trip Details document has not yet been proven to live on any particular one of them.
+        for resampled: CrewAccessPageProbe.PageKind in [
+            .tripInformationReport, .crewAccessReport, .crewAccessOther,
+            .fltopsPortal, .zscaler, .upsOther
+        ] {
+            XCTAssertTrue(CrewAccessPageProbe.warrantsResampling(resampled))
+        }
+        XCTAssertFalse(CrewAccessPageProbe.warrantsResampling(.other))
+        XCTAssertFalse(CrewAccessPageProbe.warrantsResampling(.unknown))
+    }
+
+    func test_phase0ProbeUrlShapeRedactsIdentifiersAndDropsQueryValues() throws {
+        let url = try XCTUnwrap(URL(string:
+            "https://crewaccess.inside.ups.com/access/rs/reports"
+            + "/00000000-0000-4000-8000-000000000000"
+            + "/content/Trip_Information_Z99999_01Jan2099.html"
+            + "?sessionToken=shouldNeverBeLogged&sid=alsoNeverLogged"
+        ))
+        let shape = CrewAccessPageProbe.urlShape(for: url)
+
+        XCTAssertTrue(shape.contains("<uuid>"))
+        XCTAssertFalse(shape.contains("00000000-0000-4000-8000-000000000000"))
+        XCTAssertTrue(shape.contains("Trip_Information_Z<n>"))
+        XCTAssertFalse(shape.contains("99999"))
+        XCTAssertFalse(shape.contains("shouldNeverBeLogged"))
+        XCTAssertFalse(shape.contains("alsoNeverLogged"))
+        XCTAssertTrue(shape.contains("sessionToken"), "parameter names are kept, values are not")
+        XCTAssertTrue(shape.contains("sid"))
+        XCTAssertEqual(CrewAccessPageProbe.urlShape(for: nil), "<nil>")
+    }
+
+    func test_phase0ProbeResampleScheduleIsBounded() {
+        let intervals = CrewAccessPageProbe.resampleIntervals
+        XCTAssertEqual(intervals, [1, 2, 3, 4])
+        XCTAssertLessThanOrEqual(intervals.count, 5, "the probe must not poll indefinitely")
+        XCTAssertEqual(intervals.reduce(0, +), 10, "sampling stops 10 seconds after didFinish")
+        XCTAssertTrue(intervals.allSatisfy { $0 > 0 })
+    }
+
+    @MainActor
+    func test_phase0PopupTeardownMakesPendingProbeWorkHarmlessImmediately() {
+        let viewModel = BrowserViewModel()
+        let coordinator = BrowserWebView.Coordinator(
+            viewModel: viewModel,
+            javaScriptEvaluator: { _, _, _ in }
+        )
+        let popup = WKWebView()
+        popup.navigationDelegate = coordinator
+        popup.uiDelegate = coordinator
+        coordinator.popupWebViews.append(popup)
+        coordinator.popupParents[ObjectIdentifier(popup)] = WKWebView()
+        viewModel.popupWebView = popup
+
+        coordinator.beginCrewAccessProbe(
+            nil,
+            webView: popup,
+            completedURL: URL(string: "https://crewaccess.inside.ups.com/access/home")
+        )
+        XCTAssertTrue(
+            coordinator.hasPendingCrewAccessProbeWork,
+            "the probe must actually be pending for this test to mean anything"
+        )
+
+        coordinator.closePopups()
+
+        XCTAssertFalse(
+            coordinator.hasPendingCrewAccessProbeWork,
+            "popup teardown must cancel pending probe work immediately, not at the end of the schedule"
+        )
+    }
+
+    @MainActor
+    func test_phase0PendingProbeDoesNotExtendCoordinatorLifetime() {
+        weak var weakCoordinator: BrowserWebView.Coordinator?
+
+        autoreleasepool {
+            let viewModel = BrowserViewModel()
+            let coordinator = BrowserWebView.Coordinator(
+                viewModel: viewModel,
+                javaScriptEvaluator: { _, _, _ in }
+            )
+            let popup = WKWebView()
+            coordinator.popupWebViews.append(popup)
+
+            coordinator.beginCrewAccessProbe(
+                nil,
+                webView: popup,
+                completedURL: URL(string: "https://crewaccess.inside.ups.com/access/home")
+            )
+            XCTAssertTrue(coordinator.hasPendingCrewAccessProbeWork)
+            weakCoordinator = coordinator
+        }
+
+        XCTAssertNil(
+            weakCoordinator,
+            "delayed diagnostic work must not keep BrowserWebView.Coordinator alive"
+        )
+    }
+
+    func test_phase0DelayedProbeWorkUsesWeakOwnership() throws {
+        let source = try browserWebViewSource()
+
+        // The hop out of inspectCompletedPage is the one queued probe closure that sits outside
+        // the probe's own region, so it is pinned literally.
+        let inspectionHop = "DispatchQueue.main.async { [weak self, weak webView] in\n"
+            + "                    guard let self, let webView else { return }\n"
+            + "                    self.beginCrewAccessProbe("
+        XCTAssertTrue(
+            source.contains(inspectionHop),
+            "the probe hop out of inspectCompletedPage must capture self and webView weakly"
+        )
+
+        guard let region = source
+            .components(separatedBy: "// MARK: - Phase 0 auto-print evidence")
+            .dropFirst()
+            .first?
+            .components(separatedBy: "// MARK: PDF検出")
+            .first
+        else {
+            return XCTFail("Phase 0 probe region not found")
+        }
+
+        for line in region.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("DispatchQueue.") || trimmed.hasPrefix("Task {")
+                || trimmed.contains("= Task {") else { continue }
+            XCTAssertTrue(
+                trimmed.contains("[weak self"),
+                "delayed probe work must capture self weakly: \(trimmed)"
+            )
+            XCTAssertTrue(
+                trimmed.contains("weak webView"),
+                "delayed probe work must capture the WebView weakly: \(trimmed)"
+            )
+        }
+
+        // The probe's own state must never be able to retain a WebView: every collection is keyed
+        // by ObjectIdentifier, which does not retain, and none of them stores a WebView.
+        XCTAssertTrue(source.contains("crewAccessProbeTasks: [ObjectIdentifier: Task<Void, Never>]"))
+        XCTAssertTrue(source.contains("crewAccessProbeSequences: [ObjectIdentifier: UInt]"))
+        for line in source.components(separatedBy: "\n")
+        where line.contains("var ") && line.lowercased().contains("crewaccessprobe") {
+            XCTAssertFalse(
+                line.contains("WKWebView"),
+                "no probe property may store a WKWebView: \(line.trimmingCharacters(in: .whitespaces))"
+            )
+        }
+
+        // Teardown cancels; it does not merely mark work stale.
+        XCTAssertTrue(source.contains("cancelCrewAccessProbe(for: popup)"))
+        XCTAssertTrue(source.contains("crewAccessProbeTasks.removeValue(forKey: key)?.cancel()"))
+        XCTAssertTrue(source.contains("guard !Task.isCancelled, let self, let webView else { return }"))
+    }
+    #endif
 }
