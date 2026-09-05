@@ -223,17 +223,6 @@ struct BrowserPopupSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { onDismiss() }
                 }
-                #if DEBUG
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        viewModel.sendDiagnosticFocusPulse()
-                    } label: {
-                        Image(systemName: "scope")
-                    }
-                    .accessibilityLabel("Diagnostic Focus Pulse")
-                    .help("Send one diagnostic WebView focus pulse")
-                }
-                #endif
             }
         }
     }

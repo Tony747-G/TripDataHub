@@ -65,12 +65,6 @@ final class BrowserViewModel {
     /// BrowserWebView coordinator owns and mutates the popup lifecycle collections.
     @ObservationIgnored var requestPopupTeardown: (@MainActor () -> Void)?
 
-    #if DEBUG
-    /// Diagnostic-only bridge. The coordinator owns the popup and decides which
-    /// tracked WebView may receive the focus pulse.
-    @ObservationIgnored var requestDiagnosticFocusPulse: (@MainActor () -> Void)?
-    #endif
-
     // MARK: - AppViewModel への参照
 
     weak var appViewModel: AppViewModel?
@@ -97,12 +91,6 @@ final class BrowserViewModel {
     func teardownPopups() {
         requestPopupTeardown?()
     }
-
-    #if DEBUG
-    func sendDiagnosticFocusPulse() {
-        requestDiagnosticFocusPulse?()
-    }
-    #endif
 
     func prepareForBrowserReset() {
         webView?.stopLoading()
