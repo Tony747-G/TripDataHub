@@ -120,7 +120,10 @@ struct SettingsTabView: View {
             .onAppear {
                 Task {
                     await viewModel.refreshNotificationAuthorizationStatus()
-                    await viewModel.applyCrewAccessRetentionPolicy()
+                    await viewModel.applyCrewAccessRetentionPolicy(
+                        protectedURLs: [],
+                        diagnosticOrigin: "settings-on-appear"
+                    )
                     if viewModel.notificationAuthorizationStatus == .denied {
                         notify48h = false
                         notify24h = false

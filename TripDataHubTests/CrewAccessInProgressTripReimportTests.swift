@@ -756,6 +756,421 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
         XCTAssertNil(live, "automatic sync alone must never clear a tombstone")
     }
 
+    // MARK: - 2b. CloudKit fetch resuming inside the commit window
+
+    /// The record set a resumed fetch applies, and the delete branch it reaches.
+    private enum MidCommitDeleteBranch: String {
+        /// `performCrewAccessImportFileFetch` tombstone branch.
+        case tombstone
+        /// `performCrewAccessImportFileFetch` deletion-intent branch.
+        case deletionIntent
+        /// `performCrewAccessImportFileFetch` local-upload loop, unconfirmed-over-tombstone branch.
+        case unconfirmedOverTombstone
+    }
+
+    private struct MidCommitRaceOutcome {
+        let confirmed: Bool
+        let jsonNamesBeforeRelease: [String]
+        let jsonNamesInsideWindow: [String]
+        let fetchCountInsideWindow: Int
+        let deviceSyncStatusInsideWindow: String?
+        let importMessageInsideWindow: String?
+    }
+
+    /// Seeds an older generation of the same trip under a *different* file name, so
+    /// `persistCrewAccessJSON` reports it as stale and the commit stashes it. Its presence is what
+    /// made the stale-file stash a plausible suspect; it is included so the reproducer covers that
+    /// shape while proving the stash is not the deleter.
+    @discardableResult
+    private func seedStaleSameTripJSON(in harness: Harness) throws -> String {
+        let legacyFileName = "legacy_\(tripID).json"
+        let legacyURL = harness.device.importsDirectory.appendingPathComponent(legacyFileName)
+        try JSONEncoder().encode(originalTrip()).write(to: legacyURL)
+        XCTAssertTrue(
+            harness.device.localFileNames().contains(legacyFileName),
+            "precondition: the stale same-trip duplicate exists under a different file name"
+        )
+        return legacyFileName
+    }
+
+    /// Drives the RCA'd race exactly:
+    ///
+    /// 1. A CloudKit fetch passes the entry gate *before* the transaction opens and parks on the
+    ///    network — the first suspension point before local record application.
+    /// 2. `confirmPendingImport` opens its transaction and runs, without suspending, to
+    ///    `await applyCrewAccessRetentionPolicy`. The first yield that sees an active transaction
+    ///    therefore sees confirm parked *between* the JSON write and commit verification.
+    /// 3. The fetch is resumed there, with a record set that reaches one of the delete branches.
+    ///
+    /// The CloudKit upload is held for the whole window so the transaction cannot close early and
+    /// let the fetch resume outside it.
+    private func driveMidCommitFetchRace(
+        harness: Harness,
+        gate: SuspendedFetchGate,
+        records: (URL) -> [CrewAccessImportCloudKitRecord]
+    ) async -> MidCommitRaceOutcome {
+        let vm = harness.device.viewModel
+        await gate.arm()
+        let sync = Task { await vm.syncCrewAccessDeviceData(reason: "foreground") }
+        await gate.waitUntilParked()
+        XCTAssertFalse(
+            vm.isCrewAccessImportTransactionActive,
+            "precondition: the fetch passed the entry gate before any transaction opened"
+        )
+
+        await harness.cloud.setUploadsPaused(true)
+        vm.pendingImport = Self.pendingImport(for: revisedTrip())
+        let confirm = Task { await vm.confirmPendingImport() }
+
+        var spins = 0
+        while !vm.isCrewAccessImportTransactionActive, spins < 5_000 {
+            await Task.yield()
+            spins += 1
+        }
+        XCTAssertTrue(
+            vm.isCrewAccessImportTransactionActive,
+            "precondition: confirm reached its commit window"
+        )
+
+        let committedURL = harness.device.importsDirectory
+            .appendingPathComponent(Self.fileName(tripID: tripID, date: tripInformationDate))
+        let namesBeforeRelease = harness.device.jsonFileNames()
+        await gate.release(returning: records(committedURL))
+        for _ in 0..<400 { await Task.yield() }
+
+        let confirmed = await confirm.value
+        let outcome = MidCommitRaceOutcome(
+            confirmed: confirmed,
+            jsonNamesBeforeRelease: namesBeforeRelease,
+            jsonNamesInsideWindow: harness.device.jsonFileNames(),
+            fetchCountInsideWindow: await gate.fetchCallCount(),
+            deviceSyncStatusInsideWindow: vm.deviceSyncStatusMessage,
+            importMessageInsideWindow: vm.crewAccessImportMessage
+        )
+
+        await harness.cloud.setUploadsPaused(false)
+        _ = await sync.value
+        await harness.settle()
+        return outcome
+    }
+
+    /// A live record carrying the generation that was just confirmed. The record loop reads this as
+    /// "CloudKit now has it", retires the explicit-re-import override, and the pre-import tombstone
+    /// for the file name being replaced is then free to delete the committed source.
+    private func acknowledgementRecord(committedBytes: Data) -> CrewAccessImportCloudKitRecord {
+        CrewAccessImportCloudKitRecord(
+            fileName: "cloudkit-ack_\(tripID).json",
+            jsonData: committedBytes,
+            tripInformationDate: tripInformationDate,
+            firstDepartureUTC: nil,
+            updatedAt: Self.date("2026-07-20T23:50:00Z"),
+            deletedAt: nil
+        )
+    }
+
+    /// The pre-import tombstone another device published for the file name being replaced.
+    private func tombstoneRecord(fileName: String) -> CrewAccessImportCloudKitRecord {
+        CrewAccessImportCloudKitRecord(
+            fileName: fileName,
+            jsonData: (try? JSONEncoder().encode(originalTrip())) ?? Data(),
+            tripInformationDate: tripInformationDate,
+            firstDepartureUTC: nil,
+            updatedAt: Self.date("2026-07-20T23:51:00Z"),
+            deletedAt: Self.date("2026-07-20T23:51:00Z")
+        )
+    }
+
+    private func makeMidCommitRaceHarness(name: String) throws -> (Harness, SuspendedFetchGate) {
+        let gate = SuspendedFetchGate()
+        let harness = try makeHarness(
+            name: name,
+            crewAccessImportCloudKitService: { SuspendableImportRaceService(cloud: $0, gate: gate) }
+        )
+        return (harness, gate)
+    }
+
+    private func assertCommitSurvivedMidCommitFetch(
+        _ outcome: MidCommitRaceOutcome,
+        harness: Harness,
+        branch: MidCommitDeleteBranch,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let vm = harness.device.viewModel
+        XCTAssertTrue(
+            outcome.confirmed,
+            "[\(branch.rawValue)] confirm must succeed despite the mid-commit fetch",
+            file: file,
+            line: line
+        )
+        XCTAssertFalse(
+            (outcome.importMessageInsideWindow ?? "").hasPrefix("Import failed"),
+            "[\(branch.rawValue)] no Import failed message: \(outcome.importMessageInsideWindow ?? "nil")",
+            file: file,
+            line: line
+        )
+        let committedURL = harness.device.importsDirectory
+            .appendingPathComponent(Self.fileName(tripID: tripID, date: tripInformationDate))
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: committedURL.path),
+            "[\(branch.rawValue)] the committed source JSON must still exist",
+            file: file,
+            line: line
+        )
+        let data = try Data(contentsOf: committedURL)
+        let decoded = try JSONDecoder().decode(CrewAccessTripJSON.self, from: data)
+        XCTAssertEqual(
+            decoded.generatedAt,
+            Self.revisedGeneratedAt,
+            "[\(branch.rawValue)] the committed JSON must be the merged new generation",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            Set(decoded.items.map(\.flight)),
+            ["61", "GND", "62"],
+            "[\(branch.rawValue)] the merged generation must carry every revised leg",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            legs(in: vm, pairing: tripID).map(\.flight),
+            ["61", "GND", "62"],
+            "[\(branch.rawValue)] the Timeline must show the revision",
+            file: file,
+            line: line
+        )
+    }
+
+    /// T-A (tombstone branch). Reproducer for the RCA: a fetch that passed the entry gate before
+    /// the transaction opened resumes inside the commit window and deletes the just-written source
+    /// JSON, so verification correctly reports `sourceJSONMissing`.
+    func test_TA_midCommitFetch_tombstoneBranch_doesNotDeleteCommittedSourceJSON() async throws {
+        let (harness, gate) = try makeMidCommitRaceHarness(name: "race-tombstone")
+        try seedStaleSameTripJSON(in: harness)
+
+        let outcome = await driveMidCommitFetchRace(harness: harness, gate: gate) { committedURL in
+            let committedBytes = (try? Data(contentsOf: committedURL)) ?? Data()
+            return [
+                acknowledgementRecord(committedBytes: committedBytes),
+                tombstoneRecord(fileName: committedURL.lastPathComponent)
+            ]
+        }
+
+        try assertCommitSurvivedMidCommitFetch(outcome, harness: harness, branch: .tombstone)
+    }
+
+    /// T-A (deletion-intent branch). Same window, and a live pre-import record whose payload
+    /// resolves to a trip key this device still holds a deletion intent for — the second silent
+    /// `removeItem` in the record loop.
+    func test_TA_midCommitFetch_deletionIntentBranch_doesNotDeleteCommittedSourceJSON() async throws {
+        let (harness, gate) = try makeMidCommitRaceHarness(name: "race-intent")
+        let vm = harness.device.viewModel
+
+        // A trip this device imported and then deleted, so a deletion intent for its key survives
+        // into the import below. Its committed bytes are the generation the outbox recorded as
+        // deleted, so the outbox flush recognises the record as stale and leaves the intent armed.
+        await harness.confirm(payload: Self.raceDecoyTrip())
+        let decoyURL = harness.device.importsDirectory.appendingPathComponent(
+            Self.fileName(tripID: Self.raceDecoyTripID, date: Self.raceDecoyTripDate)
+        )
+        let decoyBytes = try Data(contentsOf: decoyURL)
+        await vm.deleteCrewAccessTrips(ids: Set(vm.crewAccessSchedules.map(\.id)))
+        XCTAssertTrue(vm.crewAccessSchedules.isEmpty, "precondition: the decoy trip was deleted")
+
+        try seedStaleSameTripJSON(in: harness)
+
+        let outcome = await driveMidCommitFetchRace(harness: harness, gate: gate) { committedURL in
+            [
+                CrewAccessImportCloudKitRecord(
+                    fileName: committedURL.lastPathComponent,
+                    jsonData: decoyBytes,
+                    tripInformationDate: Self.raceDecoyTripDate,
+                    firstDepartureUTC: nil,
+                    updatedAt: Self.date("2026-07-20T23:51:00Z"),
+                    deletedAt: nil
+                )
+            ]
+        }
+
+        try assertCommitSurvivedMidCommitFetch(outcome, harness: harness, branch: .deletionIntent)
+    }
+
+    /// T-A (local-upload loop branch). The same two records as the tombstone case, applied in the
+    /// other order: the record loop's override holds, the acknowledgement then retires it, and the
+    /// third silent `removeItem` — in the local-upload loop — takes the file instead.
+    func test_TA_midCommitFetch_uploadLoopBranch_doesNotDeleteCommittedSourceJSON() async throws {
+        let (harness, gate) = try makeMidCommitRaceHarness(name: "race-uploadloop")
+        try seedStaleSameTripJSON(in: harness)
+
+        let outcome = await driveMidCommitFetchRace(harness: harness, gate: gate) { committedURL in
+            let committedBytes = (try? Data(contentsOf: committedURL)) ?? Data()
+            return [
+                tombstoneRecord(fileName: committedURL.lastPathComponent),
+                acknowledgementRecord(committedBytes: committedBytes)
+            ]
+        }
+
+        try assertCommitSurvivedMidCommitFetch(outcome, harness: harness, branch: .unconfirmedOverTombstone)
+    }
+
+    /// T-B (control). No stale duplicate and no matching CloudKit record: a plain confirm still
+    /// succeeds and still uploads the new generation.
+    func test_TB_control_cleanConfirmStillCommitsAndUploads() async throws {
+        let harness = try makeHarness(name: "race-control")
+        let vm = harness.device.viewModel
+        XCTAssertTrue(harness.device.jsonFileNames().isEmpty, "precondition: nothing on disk")
+        let remoteBefore = await harness.cloud.allRecords()
+        XCTAssertTrue(remoteBefore.isEmpty, "precondition: nothing on CloudKit")
+
+        vm.pendingImport = Self.pendingImport(for: revisedTrip())
+        let confirmed = await vm.confirmPendingImport()
+        await harness.settle()
+
+        XCTAssertTrue(confirmed)
+        XCTAssertFalse((vm.crewAccessImportMessage ?? "").hasPrefix("Import failed"))
+        XCTAssertTrue(
+            harness.device.jsonFileNames().contains(Self.fileName(tripID: tripID, date: tripInformationDate))
+        )
+        XCTAssertEqual(legs(in: vm, pairing: tripID).map(\.flight), ["61", "GND", "62"])
+        let live = await harness.cloud.liveGeneratedAt(tripID: tripID)
+        XCTAssertEqual(live, Self.revisedGeneratedAt, "the confirmed generation must be uploaded")
+    }
+
+    /// T-C. No `*.json` in the imports directory is deleted while the import transaction is open.
+    func test_TC_noJSONIsDeletedWhileTheImportTransactionIsOpen() async throws {
+        let (harness, gate) = try makeMidCommitRaceHarness(name: "race-nodeletes")
+        try seedStaleSameTripJSON(in: harness)
+
+        let outcome = await driveMidCommitFetchRace(harness: harness, gate: gate) { committedURL in
+            let committedBytes = (try? Data(contentsOf: committedURL)) ?? Data()
+            return [
+                acknowledgementRecord(committedBytes: committedBytes),
+                tombstoneRecord(fileName: committedURL.lastPathComponent)
+            ]
+        }
+
+        XCTAssertFalse(outcome.jsonNamesBeforeRelease.isEmpty, "precondition: the commit wrote its source JSON")
+        let removed = Set(outcome.jsonNamesBeforeRelease).subtracting(outcome.jsonNamesInsideWindow)
+        XCTAssertTrue(
+            removed.isEmpty,
+            "no JSON may be deleted while the import transaction is active; removed: \(removed.sorted())"
+        )
+        try assertCommitSurvivedMidCommitFetch(outcome, harness: harness, branch: .tombstone)
+    }
+
+    /// T-C (companion). A deferral is not a sync failure, so the user must not be shown
+    /// "Trip sync download failed" for work that was merely parked.
+    func test_TC_deferredFetchIsNotReportedAsASyncDownloadFailure() async throws {
+        let (harness, gate) = try makeMidCommitRaceHarness(name: "race-nophantom")
+        try seedStaleSameTripJSON(in: harness)
+
+        let outcome = await driveMidCommitFetchRace(harness: harness, gate: gate) { committedURL in
+            let committedBytes = (try? Data(contentsOf: committedURL)) ?? Data()
+            return [
+                acknowledgementRecord(committedBytes: committedBytes),
+                tombstoneRecord(fileName: committedURL.lastPathComponent)
+            ]
+        }
+
+        XCTAssertNotEqual(
+            outcome.deviceSyncStatusInsideWindow,
+            "Trip sync download failed. Local schedule preserved.",
+            "a deferral must not surface as a download failure"
+        )
+        try assertCommitSurvivedMidCommitFetch(outcome, harness: harness, branch: .tombstone)
+    }
+
+    /// T-D. The deferred sync is replayed once the transaction closes — the fix parks the work, it
+    /// does not drop it.
+    func test_TD_deferredMidCommitFetchIsReplayedAfterTheTransactionCloses() async throws {
+        let (harness, gate) = try makeMidCommitRaceHarness(name: "race-replay")
+        try seedStaleSameTripJSON(in: harness)
+
+        let outcome = await driveMidCommitFetchRace(harness: harness, gate: gate) { committedURL in
+            let committedBytes = (try? Data(contentsOf: committedURL)) ?? Data()
+            return [
+                acknowledgementRecord(committedBytes: committedBytes),
+                tombstoneRecord(fileName: committedURL.lastPathComponent)
+            ]
+        }
+
+        try assertCommitSurvivedMidCommitFetch(outcome, harness: harness, branch: .tombstone)
+
+        // The replay is dispatched from `endCrewAccessImportTransaction`, so give it bounded time
+        // to reach the fake service rather than assuming one settle pass covered it.
+        var fetchCountAfterTransaction = await gate.fetchCallCount()
+        var spins = 0
+        while fetchCountAfterTransaction <= outcome.fetchCountInsideWindow, spins < 2_000 {
+            await Task.yield()
+            fetchCountAfterTransaction = await gate.fetchCallCount()
+            spins += 1
+        }
+        XCTAssertGreaterThan(
+            fetchCountAfterTransaction,
+            outcome.fetchCountInsideWindow,
+            "the deferred sync must be replayed after the transaction closes"
+        )
+        XCTAssertFalse(harness.device.viewModel.isCrewAccessImportTransactionActive)
+        let live = await harness.cloud.liveGeneratedAt(tripID: tripID)
+        XCTAssertEqual(live, Self.revisedGeneratedAt, "CloudKit must end on the new generation")
+    }
+
+    /// T-E. The failure path owns the same gate through rollback. A sync requested while rollback
+    /// is suspended must remain deferred, then replay exactly once after rollback closes the
+    /// transaction.
+    func test_TE_deferredFetchIsReplayedAfterFailureRollback() async throws {
+        let gate = SuspendedFetchGate()
+        let notifications = SuspendedRescheduleNotificationService()
+        let verificationFailure = CommitVerificationFileRemover()
+        let harness = try makeHarness(
+            name: "race-failure-replay",
+            importCommitVerificationFaultInjector: { try verificationFailure.removeIfArmed($0) },
+            notificationService: notifications,
+            crewAccessImportCloudKitService: { SuspendableImportRaceService(cloud: $0, gate: gate) }
+        )
+        let vm = harness.device.viewModel
+
+        // Reconcile performs the first reschedule. The verifier then removes the canonical source,
+        // and rollback suspends on its second reschedule while the transaction is still active.
+        await notifications.suspendReschedule(afterPassingCalls: 1)
+        verificationFailure.arm()
+        vm.pendingImport = Self.pendingImport(for: revisedTrip())
+        let confirmation = Task { await vm.confirmPendingImport() }
+        await notifications.waitUntilRescheduleIsSuspended()
+
+        XCTAssertTrue(vm.isCrewAccessImportTransactionActive)
+        await vm.syncCrewAccessDeviceData(reason: "during failed import rollback")
+        let fetchCountDuringRollback = await gate.fetchCallCount()
+        XCTAssertEqual(
+            fetchCountDuringRollback,
+            0,
+            "the deferred request must not enter CloudKit while rollback owns the transaction"
+        )
+
+        await notifications.resumeSuspendedReschedule()
+        let confirmed = await confirmation.value
+        XCTAssertFalse(confirmed, "the genuinely absent canonical JSON must still fail closed")
+
+        var replayFetchCount = await gate.fetchCallCount()
+        var spins = 0
+        while replayFetchCount == 0, spins < 2_000 {
+            await Task.yield()
+            replayFetchCount = await gate.fetchCallCount()
+            spins += 1
+        }
+        XCTAssertEqual(replayFetchCount, 1, "the failed transaction must replay deferred sync once")
+        XCTAssertFalse(vm.isCrewAccessImportTransactionActive)
+
+        let canonicalURL = harness.device.importsDirectory.appendingPathComponent(
+            Self.fileName(tripID: tripID, date: tripInformationDate)
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: canonicalURL.path),
+            "rollback must not recreate a canonical file that did not exist before the failed commit"
+        )
+    }
+
     // MARK: - 3. Reconcile failure protection
 
     /// T-32: the input PDF may be discarded once Preview owns the parsed value, while the canonical
@@ -797,6 +1212,76 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
         let committed = try JSONDecoder().decode(CrewAccessTripJSON.self, from: committedData)
         XCTAssertEqual(committed.generatedAt, revisedPayload.generatedAt)
         XCTAssertTrue(vm.crewAccessSchedules.flatMap(\.legs).contains { $0.pairing == Self.outOfRetentionTripID })
+    }
+
+    /// FileManager can enumerate the same physical file with a normalized URL even when the
+    /// injected imports directory still contains `..`. The active canonical file must be compared
+    /// by the same standardized path identity used by diagnostics at both discovery and stash time.
+    func test_reimportExcludesCanonicalPathAliasFromStashButStillStashesGenuineDuplicate() async throws {
+        let fm = FileManager.default
+        let testRoot = fm.temporaryDirectory
+            .appendingPathComponent("CrewAccessCanonicalIdentity-\(UUID().uuidString)", isDirectory: true)
+        let canonicalDirectory = testRoot.appendingPathComponent("CrewAccessImports", isDirectory: true)
+        let aliasAnchor = canonicalDirectory.appendingPathComponent("path-alias", isDirectory: true)
+        try fm.createDirectory(at: aliasAnchor, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: testRoot) }
+
+        let aliasedDirectory = aliasAnchor.appendingPathComponent("..", isDirectory: true)
+        let verificationObservation = CommitVerificationFileObservation()
+        let harness = try makeHarness(
+            name: "canonical-path-identity",
+            importsDirectory: aliasedDirectory,
+            importCommitVerificationFaultInjector: {
+                verificationObservation.capture(finalURL: $0)
+            }
+        )
+        let vm = harness.device.viewModel
+
+        await harness.confirm(payload: originalTrip())
+
+        let finalFileName = Self.fileName(tripID: tripID, date: tripInformationDate)
+        let aliasedFinalURL = aliasedDirectory.appendingPathComponent(finalFileName)
+        let canonicalFinalURL = canonicalDirectory.appendingPathComponent(finalFileName)
+        XCTAssertNotEqual(aliasedFinalURL.path, canonicalFinalURL.path)
+        XCTAssertEqual(
+            aliasedFinalURL.standardizedFileURL.path,
+            canonicalFinalURL.standardizedFileURL.path,
+            "precondition: both URL spellings identify the same canonical file"
+        )
+
+        let legacyFileName = "legacy_\(tripID).json"
+        let legacyURL = canonicalDirectory.appendingPathComponent(legacyFileName)
+        try JSONEncoder().encode(originalTrip()).write(to: legacyURL)
+        XCTAssertTrue(fm.fileExists(atPath: legacyURL.path), "precondition: genuine stale duplicate exists")
+
+        vm.pendingImport = Self.pendingImport(for: revisedTrip())
+        let confirmed = await vm.confirmPendingImport()
+        await harness.settle()
+
+        let observation = try XCTUnwrap(verificationObservation.snapshot())
+        XCTAssertTrue(confirmed)
+        XCTAssertTrue(
+            observation.finalURLExists,
+            "commit verification must receive the persisted canonical JSON"
+        )
+        XCTAssertFalse(
+            observation.hiddenFileNames.contains { $0.hasPrefix(".\(finalFileName).stale-") },
+            "the active finalURL must never be moved into a stale-file stash"
+        )
+        XCTAssertFalse(
+            observation.visibleFileNames.contains(legacyFileName),
+            "a genuine stale same-trip duplicate must be moved aside before verification"
+        )
+        XCTAssertTrue(
+            observation.hiddenFileNames.contains { $0.hasPrefix(".\(legacyFileName).stale-") },
+            "a genuine stale same-trip duplicate must still use the rollback-safe stash"
+        )
+
+        let committed = try JSONDecoder().decode(
+            CrewAccessTripJSON.self,
+            from: Data(contentsOf: canonicalFinalURL)
+        )
+        XCTAssertEqual(committed.generatedAt, revisedTrip().generatedAt)
     }
 
     func test_T33_confirmSourceReadFailureReleasesProcessingStateAndAllowsSamePDFRetry() async throws {
@@ -873,9 +1358,13 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
     /// fail-closed path exists to prevent.
     func test_failedImport_restoresStaleSameTripJSONRemovedBeforeVerification() async throws {
         let verificationFailure = CommitVerificationFileRemover()
+        let verificationObservation = CommitVerificationFileObservation()
         let harness = try makeHarness(
             retentionReferenceDate: Self.date("2026-07-20T12:00:00Z"),
-            importCommitVerificationFaultInjector: { try verificationFailure.removeIfArmed($0) }
+            importCommitVerificationFaultInjector: {
+                verificationObservation.capture(finalURL: $0)
+                try verificationFailure.removeIfArmed($0)
+            }
         )
         let vm = harness.device.viewModel
         pinRetentionSelection("1")
@@ -896,6 +1385,15 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
         await vm.confirmPendingImport()
         await harness.settle()
 
+        let observation = try XCTUnwrap(verificationObservation.snapshot())
+        XCTAssertFalse(
+            observation.visibleFileNames.contains(legacyFileName),
+            "precondition: rollback runs after the genuine stale duplicate was moved aside"
+        )
+        XCTAssertTrue(
+            observation.hiddenFileNames.contains { $0.hasPrefix(".\(legacyFileName).stale-") },
+            "precondition: the genuine stale duplicate was retained in the rollback-safe stash"
+        )
         XCTAssertTrue(
             (vm.crewAccessImportMessage ?? "").hasPrefix("Import failed"),
             "precondition: the import failed verification"
@@ -1165,6 +1663,29 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
         )
     }
 
+    private static let raceDecoyTripID = "T900099"
+    private static let raceDecoyTripDate = "2026-07-22"
+
+    /// A second trip, imported and then deleted, purely to leave a deletion intent behind for the
+    /// deletion-intent delete branch.
+    private static func raceDecoyTrip() -> CrewAccessTripJSON {
+        trip(
+            tripID: raceDecoyTripID,
+            tripInformationDate: raceDecoyTripDate,
+            generatedAt: "2026-07-19T12:00:00Z",
+            items: [
+                item(
+                    sequence: 1,
+                    from: "ANC",
+                    to: "ORD",
+                    flight: "990",
+                    startUtc: "2026-07-22T06:00:00Z",
+                    endUtc: "2026-07-22T12:00:00Z"
+                )
+            ]
+        )
+    }
+
     private static let outOfRetentionTripID = "T900001"
     private static let outOfRetentionGeneratedAt = "2025-12-04T10:00:00Z"
 
@@ -1295,6 +1816,12 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
             )) ?? []
             return urls.map(\.lastPathComponent).sorted()
         }
+
+        /// Visible source files only — stashed stale files are hidden dotfiles and are deliberately
+        /// excluded, exactly as the import-file scan excludes them.
+        func jsonFileNames() -> [String] {
+            localFileNames().filter { $0.lowercased().hasSuffix(".json") }
+        }
     }
 
     @MainActor
@@ -1337,7 +1864,8 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
         crewAccessImportService: CrewAccessPDFImportServiceProtocol = CrewAccessPDFImportService(),
         importCommitVerificationFaultInjector: (@MainActor @Sendable (URL) throws -> Void)? = nil,
         notificationService: NextReportNotificationServiceProtocol = ReimportNotificationNoop(),
-        flightCountdownCoordinator: FlightCountdownCoordinator = FlightCountdownCoordinator()
+        flightCountdownCoordinator: FlightCountdownCoordinator = FlightCountdownCoordinator(),
+        crewAccessImportCloudKitService: ((ImportRaceCloud) -> CrewAccessImportCloudKitServicing)? = nil
     ) throws -> Harness {
         let cloud = cloud ?? ImportRaceCloud()
         let directory = importsDirectory ?? FileManager.default.temporaryDirectory
@@ -1347,6 +1875,12 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         let deviceSchedules = RecordingDeviceScheduleService()
         let importFingerprintLedger = ImportFingerprintLedger(defaults: defaults)
+        let resolvedImportCloudKitService: CrewAccessImportCloudKitServicing
+        if let crewAccessImportCloudKitService {
+            resolvedImportCloudKitService = crewAccessImportCloudKitService(cloud)
+        } else {
+            resolvedImportCloudKitService = ImportRaceService(cloud: cloud)
+        }
 
         let viewModel = AppViewModel(
             cacheService: ReimportTestCacheService(),
@@ -1354,7 +1888,7 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
             crewAccessImportService: crewAccessImportService,
             friendScheduleCloudKitService: ReimportTestFriendService(),
             deviceScheduleCloudKitService: deviceSchedules,
-            crewAccessImportCloudKitService: ImportRaceService(cloud: cloud),
+            crewAccessImportCloudKitService: resolvedImportCloudKitService,
             syncStateDefaults: defaults,
             importFingerprintLedger: importFingerprintLedger,
             replacementDerivedStateInvalidator: replacementDerivedStateInvalidator,
@@ -1535,6 +2069,82 @@ private actor ImportRaceCloud {
     }
 }
 
+/// Holds one `fetchImportFiles` call open on the "network" so a test can drive
+/// `confirmPendingImport` into its commit window while a fetch that already passed the
+/// import-transaction entry gate is parked mid-flight. Only the first armed call is held; every
+/// other call passes straight through to the fake cloud, so the deferred replay after the
+/// transaction closes behaves normally.
+private actor SuspendedFetchGate {
+    private var isArmed = false
+    private var hasParked = false
+    private var parkedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var parked: CheckedContinuation<[CrewAccessImportCloudKitRecord], Never>?
+    private var queuedRelease: [CrewAccessImportCloudKitRecord]?
+    private var fetchCount = 0
+
+    func arm() {
+        isArmed = true
+        hasParked = false
+    }
+
+    func fetchCallCount() -> Int { fetchCount }
+
+    /// Resolves once the armed fetch is parked inside `fetchImportFiles`.
+    func waitUntilParked() async {
+        if hasParked { return }
+        await withCheckedContinuation { parkedWaiters.append($0) }
+    }
+
+    func enter(passthrough: [CrewAccessImportCloudKitRecord]) async -> [CrewAccessImportCloudKitRecord] {
+        fetchCount += 1
+        guard isArmed else { return passthrough }
+        isArmed = false
+        hasParked = true
+        let waiters = parkedWaiters
+        parkedWaiters = []
+        for waiter in waiters { waiter.resume() }
+        if let queuedRelease {
+            self.queuedRelease = nil
+            return queuedRelease
+        }
+        return await withCheckedContinuation { parked = $0 }
+    }
+
+    /// Resumes the parked fetch with the record set it should apply.
+    func release(returning records: [CrewAccessImportCloudKitRecord]) {
+        if let parked {
+            self.parked = nil
+            parked.resume(returning: records)
+        } else {
+            queuedRelease = records
+        }
+    }
+}
+
+private struct SuspendableImportRaceService: CrewAccessImportCloudKitServicing {
+    let cloud: ImportRaceCloud
+    let gate: SuspendedFetchGate
+
+    func uploadImportFile(
+        gemsID: String,
+        fileName: String,
+        jsonData: Data,
+        tripInformationDate: String?,
+        firstDepartureUTC: String?
+    ) async throws {
+        await cloud.upload(fileName: fileName, jsonData: jsonData, tripInformationDate: tripInformationDate)
+    }
+
+    func fetchImportFiles(gemsID: String) async throws -> [CrewAccessImportCloudKitRecord] {
+        let live = await cloud.allRecords()
+        return await gate.enter(passthrough: live)
+    }
+
+    func tombstoneImportFile(gemsID: String, fileName: String) async throws {
+        await cloud.tombstone(fileName: fileName)
+    }
+}
+
 private struct ImportRaceService: CrewAccessImportCloudKitServicing {
     let cloud: ImportRaceCloud
 
@@ -1625,6 +2235,40 @@ private final class CommitVerificationFileRemover: @unchecked Sendable {
         lock.unlock()
         guard shouldRemove else { return }
         try FileManager.default.removeItem(at: url)
+    }
+}
+
+private final class CommitVerificationFileObservation: @unchecked Sendable {
+    struct Snapshot {
+        let finalURLExists: Bool
+        let visibleFileNames: Set<String>
+        let hiddenFileNames: Set<String>
+    }
+
+    private let lock = NSLock()
+    private var capturedSnapshot: Snapshot?
+
+    func capture(finalURL: URL) {
+        let fm = FileManager.default
+        let fileURLs = (try? fm.contentsOfDirectory(
+            at: finalURL.deletingLastPathComponent(),
+            includingPropertiesForKeys: nil
+        )) ?? []
+        let fileNames = fileURLs.map(\.lastPathComponent)
+        let snapshot = Snapshot(
+            finalURLExists: fm.fileExists(atPath: finalURL.standardizedFileURL.path),
+            visibleFileNames: Set(fileNames.filter { !$0.hasPrefix(".") }),
+            hiddenFileNames: Set(fileNames.filter { $0.hasPrefix(".") })
+        )
+        lock.lock()
+        capturedSnapshot = snapshot
+        lock.unlock()
+    }
+
+    func snapshot() -> Snapshot? {
+        lock.lock()
+        defer { lock.unlock() }
+        return capturedSnapshot
     }
 }
 

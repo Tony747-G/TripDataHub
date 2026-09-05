@@ -7,6 +7,158 @@ import os
 
 private let logger = Logger(subsystem: "com.sfune.TripDataHub", category: "AppViewModel")
 
+private func crewAccessCanonicalPathIdentity(for url: URL) -> String {
+    url.standardizedFileURL.path
+}
+
+private typealias CrewAccessFileMutationLogger = @Sendable (
+    _ source: String,
+    _ operation: String,
+    _ url: URL,
+    _ details: String
+) -> Void
+
+#if DEBUG
+/// Read-only diagnostics for filesystem races in `Documents/CrewAccessImports`.
+///
+/// Detached retention/delete workers cannot safely await the MainActor merely to inspect import
+/// state: doing so would change the race being measured. This registry mirrors only diagnostic
+/// identity under a short lock, allowing every worker to snapshot the transaction at the exact
+/// mutation point without influencing whether the mutation proceeds.
+private final class CrewAccessFileMutationDiagnostics: @unchecked Sendable {
+    private struct TransactionSnapshot {
+        let depth: Int
+        let matchesActiveFinalURL: Bool
+
+        var isActive: Bool { depth > 0 }
+    }
+
+    private struct FileSnapshot {
+        let fileName: String
+        let pathHash: String
+        let exists: Bool
+        let byteCount: String
+        let resourceIdentifier: String
+    }
+
+    private let lock = NSLock()
+    private var transactionDepth = 0
+    private var activeCanonicalPathHashes: Set<String> = []
+
+    func transactionBegan(origin: String, depth: Int) {
+        lock.lock()
+        transactionDepth = depth
+        if depth == 1 {
+            activeCanonicalPathHashes = []
+        }
+        lock.unlock()
+        logger.info(
+            "[CrewAccessFileDiag] transaction=begin origin=\(origin, privacy: .public) depth=\(depth, privacy: .public) active=\(depth > 0, privacy: .public)"
+        )
+    }
+
+    func registerCanonicalURL(_ url: URL) {
+        let pathHash = Self.pathHash(for: url)
+        lock.lock()
+        activeCanonicalPathHashes.insert(pathHash)
+        let depth = transactionDepth
+        lock.unlock()
+        logCheckpoint("canonical-registered", url: url, depthOverride: depth)
+    }
+
+    func transactionEnded(origin: String, depth: Int) {
+        lock.lock()
+        transactionDepth = depth
+        let activeCanonicalCount = activeCanonicalPathHashes.count
+        if depth == 0 {
+            activeCanonicalPathHashes = []
+        }
+        lock.unlock()
+        logger.info(
+            "[CrewAccessFileDiag] transaction=end origin=\(origin, privacy: .public) depth=\(depth, privacy: .public) active=\(depth > 0, privacy: .public) canonicalCount=\(activeCanonicalCount, privacy: .public)"
+        )
+    }
+
+    func logCheckpoint(_ checkpoint: String, url: URL, outcome: String? = nil) {
+        logCheckpoint(checkpoint, url: url, depthOverride: nil, outcome: outcome)
+    }
+
+    func beginRetentionInvocation(origin: String, protectedURLs: Set<URL>) -> String {
+        let invocationID = String(UUID().uuidString.prefix(8))
+        let state = transactionSnapshot(for: nil)
+        let protectedPathHashes = protectedURLs
+            .map(Self.pathHash(for:))
+            .sorted()
+            .joined(separator: ",")
+        logger.info(
+            "[CrewAccessFileDiag] retention=begin invocation=\(invocationID, privacy: .public) origin=\(origin, privacy: .public) transactionActive=\(state.isActive, privacy: .public) depth=\(state.depth, privacy: .public) protectedCount=\(protectedURLs.count, privacy: .public) protectedPathHashes=\(protectedPathHashes.isEmpty ? "none" : protectedPathHashes, privacy: .public)"
+        )
+        return invocationID
+    }
+
+    func logMutation(
+        source: String,
+        operation: String,
+        url: URL,
+        details: String = "none"
+    ) {
+        let file = Self.fileSnapshot(for: url)
+        let state = transactionSnapshot(for: file.pathHash)
+        logger.info(
+            "[CrewAccessFileDiag] mutation source=\(source, privacy: .public) operation=\(operation, privacy: .public) file=\(file.fileName, privacy: .public) pathHash=\(file.pathHash, privacy: .public) matchesActiveFinalURL=\(state.matchesActiveFinalURL, privacy: .public) transactionActive=\(state.isActive, privacy: .public) depth=\(state.depth, privacy: .public) existsBefore=\(file.exists, privacy: .public) byteCount=\(file.byteCount, privacy: .public) resourceIdentifier=\(file.resourceIdentifier, privacy: .public) details=\(details, privacy: .public)"
+        )
+    }
+
+    private func logCheckpoint(
+        _ checkpoint: String,
+        url: URL,
+        depthOverride: Int?,
+        outcome: String? = nil
+    ) {
+        let file = Self.fileSnapshot(for: url)
+        let state = transactionSnapshot(for: file.pathHash)
+        let depth = depthOverride ?? state.depth
+        logger.info(
+            "[CrewAccessFileDiag] checkpoint=\(checkpoint, privacy: .public) outcome=\(outcome ?? "none", privacy: .public) file=\(file.fileName, privacy: .public) pathHash=\(file.pathHash, privacy: .public) matchesActiveFinalURL=\(state.matchesActiveFinalURL, privacy: .public) transactionActive=\(depth > 0, privacy: .public) depth=\(depth, privacy: .public) exists=\(file.exists, privacy: .public) byteCount=\(file.byteCount, privacy: .public) resourceIdentifier=\(file.resourceIdentifier, privacy: .public)"
+        )
+    }
+
+    private func transactionSnapshot(for pathHash: String?) -> TransactionSnapshot {
+        lock.lock()
+        defer { lock.unlock() }
+        return TransactionSnapshot(
+            depth: transactionDepth,
+            matchesActiveFinalURL: pathHash.map(activeCanonicalPathHashes.contains) ?? false
+        )
+    }
+
+    private nonisolated static func fileSnapshot(for url: URL) -> FileSnapshot {
+        let fm = FileManager.default
+        let path = crewAccessCanonicalPathIdentity(for: url)
+        let exists = fm.fileExists(atPath: path)
+        let values = try? url.resourceValues(forKeys: [.fileSizeKey, .fileResourceIdentifierKey])
+        let byteCount = values?.fileSize.map(String.init) ?? "unavailable"
+        let resourceIdentifier = values?.fileResourceIdentifier
+            .map { String(describing: $0) } ?? "unavailable"
+        return FileSnapshot(
+            fileName: url.lastPathComponent,
+            pathHash: pathHash(for: url),
+            exists: exists,
+            byteCount: byteCount,
+            resourceIdentifier: resourceIdentifier
+        )
+    }
+
+    private nonisolated static func pathHash(for url: URL) -> String {
+        let data = Data(crewAccessCanonicalPathIdentity(for: url).utf8)
+        return SHA256.hash(data: data)
+            .prefix(8)
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+}
+#endif
+
 protocol FriendLinkNotificationScheduling: Sendable {
     func notifyFriendLinked(_ friend: FriendConnection) async
     func notifyFriendRequestReceived(_ friend: FriendConnection) async
@@ -361,6 +513,9 @@ final class AppViewModel: ObservableObject {
     /// transaction just wrote and leave the Timeline empty.
     private var crewAccessImportTransactionDepth = 0
     private(set) var crewAccessImportTransactionStartCount = 0
+#if DEBUG
+    private let crewAccessFileMutationDiagnostics = CrewAccessFileMutationDiagnostics()
+#endif
 
     /// Sync reasons that arrived while an import transaction was open. Coalesced into one run so a
     /// deferred request is never lost and never replayed N times.
@@ -1884,15 +2039,27 @@ final class AppViewModel: ObservableObject {
     /// Read-only lifecycle state used by import regression tests and diagnostics.
     var isCrewAccessImportInProgress: Bool { importInProgress }
 
-    private func beginCrewAccessImportTransaction() {
+    private func beginCrewAccessImportTransaction(diagnosticOrigin: String) {
         crewAccessImportTransactionStartCount += 1
         crewAccessImportTransactionDepth += 1
+#if DEBUG
+        crewAccessFileMutationDiagnostics.transactionBegan(
+            origin: diagnosticOrigin,
+            depth: crewAccessImportTransactionDepth
+        )
+#endif
     }
 
     /// Closes the transaction and replays, exactly once, whatever sync was deferred while it ran.
-    private func endCrewAccessImportTransaction() {
+    private func endCrewAccessImportTransaction(diagnosticOrigin: String) {
         guard crewAccessImportTransactionDepth > 0 else { return }
         crewAccessImportTransactionDepth -= 1
+#if DEBUG
+        crewAccessFileMutationDiagnostics.transactionEnded(
+            origin: diagnosticOrigin,
+            depth: crewAccessImportTransactionDepth
+        )
+#endif
         guard crewAccessImportTransactionDepth == 0,
               !deferredCrewAccessSyncReasons.isEmpty else { return }
         let reason = deferredCrewAccessSyncReasons.joined(separator: "+")
@@ -1907,6 +2074,19 @@ final class AppViewModel: ObservableObject {
             deferredCrewAccessSyncReasons.append(reason)
         }
         logNonFatal("CrewAccess sync deferred by in-flight import transaction: \(reason)")
+    }
+
+    /// An import transaction can begin at any suspension point in an already-running fetch. Check
+    /// again whenever that fetch resumes before it can next read, replace or remove a local source
+    /// JSON. The deferred replay restarts the fetch from a clean entry point after the transaction.
+    private func deferCrewAccessFetchApplicationIfNeeded(
+        reason: String,
+        checkpoint: String
+    ) -> Bool {
+        guard isCrewAccessImportTransactionActive else { return false }
+        deferCrewAccessSyncDuringImportTransaction(reason: reason)
+        logNonFatal("CrewAccess import file fetch stood down before local apply: \(reason) checkpoint=\(checkpoint)")
+        return true
     }
 
     /// The local source is already durable and verified when this runs. Timeout or failure must
@@ -2346,26 +2526,40 @@ final class AppViewModel: ObservableObject {
 
     // MARK: - CrewAccess Import CloudKit Sync
 
+    /// Why a fetch ended. `deferred` is deliberately distinct from `failed`: the fetch stood down
+    /// for an in-flight import transaction and is replayed once that transaction closes, so the
+    /// caller must not report it to the user as a sync download failure.
+    private enum CrewAccessImportFetchOutcome: Equatable {
+        case succeeded
+        case failed
+        case deferred
+    }
+
     @discardableResult
     func fetchCrewAccessImportFilesIfNeeded(reason: String) async -> Bool {
-        guard isIdentityVerified else { return false }
+        let outcome = await fetchCrewAccessImportFiles(reason: reason)
+        return outcome == .succeeded
+    }
+
+    private func fetchCrewAccessImportFiles(reason: String) async -> CrewAccessImportFetchOutcome {
+        guard isIdentityVerified else { return .failed }
         // An open import transaction owns the local JSON directory until its new generation is on
         // CloudKit. Fetching here would apply the pre-import record set — including a tombstone for
         // the file just written — and reconcile would then rebuild an empty Timeline (INV-006).
         if isCrewAccessImportTransactionActive {
             deferCrewAccessSyncDuringImportTransaction(reason: reason)
-            return false
+            return .deferred
         }
         if isFetchingCrewAccessImports {
             needsCrewAccessImportFetch = true
             pendingCrewAccessImportFetchReason = reason
             logNonFatal("CrewAccess import file fetch coalesced: \(reason)")
-            return false
+            return .failed
         }
 
         isFetchingCrewAccessImports = true
         var nextReason: String? = reason
-        var allSucceeded = true
+        var aggregate: CrewAccessImportFetchOutcome = .succeeded
         defer {
             isFetchingCrewAccessImports = false
             needsCrewAccessImportFetch = false
@@ -2376,23 +2570,45 @@ final class AppViewModel: ObservableObject {
             nextReason = nil
             needsCrewAccessImportFetch = false
             pendingCrewAccessImportFetchReason = nil
-            let succeeded = await performCrewAccessImportFileFetch(reason: currentReason)
-            allSucceeded = allSucceeded && succeeded
+            let outcome = await performCrewAccessImportFileFetch(reason: currentReason)
+            switch outcome {
+            case .succeeded:
+                break
+            case .deferred:
+                // A deferral is not a failure, but it is not a success either: the work is parked,
+                // so an already-recorded failure still wins.
+                if aggregate == .succeeded { aggregate = .deferred }
+            case .failed:
+                aggregate = .failed
+            }
             if needsCrewAccessImportFetch {
                 nextReason = pendingCrewAccessImportFetchReason ?? "coalesced"
             }
         }
-        return allSucceeded
+        return aggregate
     }
 
-    private func performCrewAccessImportFileFetch(reason: String) async -> Bool {
-        guard isIdentityVerified, let verifiedIdentity else { return false }
+    private func performCrewAccessImportFileFetch(reason: String) async -> CrewAccessImportFetchOutcome {
+        guard isIdentityVerified, let verifiedIdentity else { return .failed }
 
         let fm = FileManager.default
-        guard let dir = crewAccessImportsDirectory else { return false }
+        guard let dir = crewAccessImportsDirectory else { return .failed }
 
         do {
             let records = try await crewAccessImportCloudKitService.fetchImportFiles(gemsID: verifiedIdentity.gemsID)
+            // The gate at the top of this fetch is entry-only, and the network await above is a
+            // suspension point: a fetch that passed the gate *before* `confirmPendingImport` opened
+            // its transaction resumes here in the middle of the commit window and would apply the
+            // pre-import record set over the generation that was just written — deleting the source
+            // JSON out from under commit verification. Re-check the gate before touching the
+            // filesystem and hand the request to the deferral queue instead; it is replayed when
+            // the transaction closes.
+            if deferCrewAccessFetchApplicationIfNeeded(
+                reason: reason,
+                checkpoint: "records-fetched-\(records.count)"
+            ) {
+                return .deferred
+            }
             let recordsByFileName = Dictionary(
                 records.map { ($0.fileName, $0) },
                 uniquingKeysWith: { current, candidate in
@@ -2406,6 +2622,12 @@ final class AppViewModel: ObservableObject {
                 records: records,
                 domicile: verifiedIdentity.domicile
             )
+            if deferCrewAccessFetchApplicationIfNeeded(
+                reason: reason,
+                checkpoint: "deletion-outbox-flushed"
+            ) {
+                return .deferred
+            }
             var writtenCount = 0
             for record in records {
                 let url = dir.appendingPathComponent(record.fileName)
@@ -2432,6 +2654,15 @@ final class AppViewModel: ObservableObject {
                         logNonFatal("CrewAccess tombstone overridden by explicit local re-import: \(record.fileName)")
                         continue
                     }
+                    logNonFatal("CrewAccess import file deleted [tombstone]: \(record.fileName) reason=\(reason)")
+#if DEBUG
+                    crewAccessFileMutationDiagnostics.logMutation(
+                        source: "cloudkit-fetch-tombstone",
+                        operation: "remove",
+                        url: url,
+                        details: "reason=\(reason)"
+                    )
+#endif
                     try? fm.removeItem(at: url)
                     continue
                 }
@@ -2441,12 +2672,31 @@ final class AppViewModel: ObservableObject {
                 // A live record for a trip this device deleted is left to the outbox, which decides
                 // by payload generation whether it is a stale re-upload or a new import.
                 if let tripKey, deletedCrewAccessTripIntents[tripKey] != nil {
-                    if fm.fileExists(atPath: url.path) { try? fm.removeItem(at: url) }
+                    if fm.fileExists(atPath: url.path) {
+                        logNonFatal("CrewAccess import file deleted [deletion-intent]: \(record.fileName) tripKey=\(tripKey) reason=\(reason)")
+#if DEBUG
+                        crewAccessFileMutationDiagnostics.logMutation(
+                            source: "cloudkit-fetch-deletion-intent",
+                            operation: "remove",
+                            url: url,
+                            details: "reason=\(reason) tripKey=\(tripKey)"
+                        )
+#endif
+                        try? fm.removeItem(at: url)
+                    }
                     continue
                 }
                 try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
                 let fileURL = url
                 guard localModifiedAt == nil || record.updatedAt > localModifiedAt! else { continue }
+#if DEBUG
+                crewAccessFileMutationDiagnostics.logMutation(
+                    source: "cloudkit-fetch-replacement-write",
+                    operation: "write",
+                    url: fileURL,
+                    details: "reason=\(reason) incomingByteCount=\(record.jsonData.count)"
+                )
+#endif
                 try? record.jsonData.write(to: fileURL)
                 writtenCount += 1
             }
@@ -2460,6 +2710,12 @@ final class AppViewModel: ObservableObject {
                     options: [.skipsHiddenFiles]
                 )) ?? []
                 for url in localURLs where url.pathExtension.lowercased() == "json" {
+                    if deferCrewAccessFetchApplicationIfNeeded(
+                        reason: reason,
+                        checkpoint: "local-upload-loop"
+                    ) {
+                        return .deferred
+                    }
                     guard let data = try? Data(contentsOf: url),
                           let json = try? JSONDecoder().decode(CrewAccessTripJSON.self, from: data)
                     else { continue }
@@ -2484,6 +2740,15 @@ final class AppViewModel: ObservableObject {
                         // generation as a live record. Automatic paths still cannot reach this —
                         // the fingerprint set is only ever written by `confirmPendingImport`.
                         guard isConfirmedCrewAccessImportGeneration(data) else {
+                            logNonFatal("CrewAccess import file deleted [unconfirmed-over-tombstone]: \(url.lastPathComponent) reason=\(reason)")
+#if DEBUG
+                            crewAccessFileMutationDiagnostics.logMutation(
+                                source: "cloudkit-fetch-unconfirmed-over-tombstone",
+                                operation: "remove",
+                                url: url,
+                                details: "reason=\(reason)"
+                            )
+#endif
                             try? fm.removeItem(at: url)
                             continue
                         }
@@ -2504,10 +2769,10 @@ final class AppViewModel: ObservableObject {
             lastCrewAccessImportFetchAt = Date()
             UserDefaults.standard.set(lastCrewAccessImportFetchAt, forKey: crewAccessImportFetchAtKey)
             logNonFatal("CrewAccess import files fetched: \(reason) total=\(records.count) written=\(writtenCount)")
-            return recoveryUploadsSucceeded
+            return recoveryUploadsSucceeded ? .succeeded : .failed
         } catch {
             logNonFatal("CrewAccess import file fetch failed: \(error.localizedDescription) reason=\(reason)")
-            return false
+            return .failed
         }
     }
 
@@ -2799,8 +3064,16 @@ final class AppViewModel: ObservableObject {
         // Download files first, rebuild local Timeline from the file source of truth,
         // then use the compact snapshot only as a legacy fallback when no import
         // files can rebuild the Timeline.
-        let filesFetched = await fetchCrewAccessImportFilesIfNeeded(reason: reason)
-        guard filesFetched else {
+        switch await fetchCrewAccessImportFiles(reason: reason) {
+        case .succeeded:
+            break
+        case .deferred:
+            // Not a failure: the fetch stood down for an in-flight import transaction and is
+            // replayed when that transaction closes. Surfacing a download failure here would show
+            // the user a phantom error for work that has not been dropped.
+            logNonFatal("CrewAccess device sync deferred by in-flight import transaction: \(reason)")
+            return false
+        case .failed:
             deviceSyncStatusMessage = "Trip sync download failed. Local schedule preserved."
             logNonFatal("CrewAccess device sync stopped after import file fetch failure: \(reason)")
             return false
@@ -2810,7 +3083,10 @@ final class AppViewModel: ObservableObject {
         // reconcile → pruneCrewAccessLegImportReferenceTimes() filters these down to the
         // rebuilt Timeline and persists the result.
         let referenceTimesBeforeReconcile = crewAccessLegImportReferenceTimes
-        await applyCrewAccessRetentionPolicy()
+        await applyCrewAccessRetentionPolicy(
+            protectedURLs: [],
+            diagnosticOrigin: "device-sync:\(reason)"
+        )
         if crewAccessSchedules.isEmpty {
             // An empty rebuild means "no import files to rebuild from", not "the user deleted
             // every trip", so reconcile's prune of the LogTen reference times was not
@@ -3175,9 +3451,13 @@ final class AppViewModel: ObservableObject {
             // because a fetch landing between the local commit and the upload applies the
             // pre-import record set — including a tombstone for the generation being replaced — and
             // reconcile then rebuilds a Timeline without the trip the user just confirmed.
-            beginCrewAccessImportTransaction()
+            beginCrewAccessImportTransaction(diagnosticOrigin: "import-confirm")
             var transactionHandedToUpload = false
-            defer { if !transactionHandedToUpload { endCrewAccessImportTransaction() } }
+            defer {
+                if !transactionHandedToUpload {
+                    endCrewAccessImportTransaction(diagnosticOrigin: "import-confirm")
+                }
+            }
 
             // Fail-closed rollback state, captured before the first write.
             let rollbackState = CrewAccessImportRollbackState(
@@ -3188,6 +3468,12 @@ final class AppViewModel: ObservableObject {
             )
 
             let jsonWriteContext = try persistCrewAccessJSON(json)
+#if DEBUG
+            crewAccessFileMutationDiagnostics.logCheckpoint(
+                "after-persist",
+                url: jsonWriteContext.finalURL
+            )
+#endif
             let incomingTripKey = Self.crewAccessTripKey(
                 tripID: json.tripId,
                 tripInformationDate: json.tripInformationDate,
@@ -3198,7 +3484,8 @@ final class AppViewModel: ObservableObject {
             // while moving to a different schedule ID / Bid Period key.
             let protectedOverlapTripKeys = overlapTripKeys.filter { $0 != incomingTripKey }
             let protectedOverlapArtifacts = overlapArtifacts.filter { artifact in
-                artifact.url.standardizedFileURL != jsonWriteContext.finalURL.standardizedFileURL
+                crewAccessCanonicalPathIdentity(for: artifact.url)
+                    != crewAccessCanonicalPathIdentity(for: jsonWriteContext.finalURL)
                     && protectedOverlapTripKeys.contains(artifact.tripKey)
             }
             // Stale same-trip files are moved aside rather than deleted, because they are removed
@@ -3211,27 +3498,56 @@ final class AppViewModel: ObservableObject {
                     payloadFingerprint: Self.canonicalFingerprint(json)
                 )
                 staleStashes = stashStaleCrewAccessJSONFilesBestEffort(
-                    jsonWriteContext.staleSameBidPeriodTripURLs
+                    jsonWriteContext.staleSameBidPeriodTripURLs,
+                    excluding: jsonWriteContext.finalURL
                 )
                 overlapStashes = stashStaleCrewAccessJSONFilesBestEffort(
-                    protectedOverlapArtifacts.map(\.url)
+                    protectedOverlapArtifacts.map(\.url),
+                    excluding: jsonWriteContext.finalURL
                 )
                 // Retention still applies to every other source artifact, but the canonical JSON
                 // owned by this transaction must survive until the commit verifier has re-read it.
                 // The protection is scoped to this call; ordinary retention runs remain unchanged.
                 await applyCrewAccessRetentionPolicy(
-                    protectedURLs: [jsonWriteContext.finalURL]
+                    protectedURLs: [jsonWriteContext.finalURL],
+                    diagnosticOrigin: "import-confirm"
                 )
                 try importCommitVerificationFaultInjector?(jsonWriteContext.finalURL)
                 // The reconcile above rebuilds the Timeline from the JSON directory. If the trip
                 // the user just confirmed is not in the result, the import did not succeed no
                 // matter how well the individual steps reported — persisting or uploading that
                 // state would publish "old trip gone, new trip gone".
+#if DEBUG
+                crewAccessFileMutationDiagnostics.logCheckpoint(
+                    "before-verification",
+                    url: jsonWriteContext.finalURL
+                )
+                do {
+                    try verifyCrewAccessImportCommit(
+                        json: json,
+                        jsonURL: jsonWriteContext.finalURL,
+                        supersededScheduleIDs: overlapIDs
+                    )
+                    crewAccessFileMutationDiagnostics.logCheckpoint(
+                        "after-verification",
+                        url: jsonWriteContext.finalURL,
+                        outcome: "success"
+                    )
+                } catch {
+                    crewAccessFileMutationDiagnostics.logCheckpoint(
+                        "after-verification",
+                        url: jsonWriteContext.finalURL,
+                        outcome: "failure"
+                    )
+                    throw error
+                }
+#else
                 try verifyCrewAccessImportCommit(
                     json: json,
                     jsonURL: jsonWriteContext.finalURL,
                     supersededScheduleIDs: overlapIDs
                 )
+#endif
             } catch {
                 do {
                     try rollbackCrewAccessJSONWrite(with: jsonWriteContext)
@@ -3300,7 +3616,7 @@ final class AppViewModel: ObservableObject {
                 // The transaction stays open across these uploads and is closed exactly once, in
                 // this defer, so a deferred foreground sync resumes only after the new generation
                 // is on CloudKit.
-                defer { self.endCrewAccessImportTransaction() }
+                defer { self.endCrewAccessImportTransaction(diagnosticOrigin: "import-confirm") }
 
                 // Source JSON first, schedule snapshot second. INV-006 makes the JSON the
                 // recoverable source and the snapshot merely derived, so publishing the snapshot
@@ -3882,14 +4198,45 @@ final class AppViewModel: ObservableObject {
     }
 
     func applyCrewAccessRetentionPolicy(protectedURLs: Set<URL> = []) async {
+        await applyCrewAccessRetentionPolicy(
+            protectedURLs: protectedURLs,
+            diagnosticOrigin: "direct"
+        )
+    }
+
+    func applyCrewAccessRetentionPolicy(
+        protectedURLs: Set<URL>,
+        diagnosticOrigin: String
+    ) async {
         let directory = crewAccessImportsDirectory
+#if DEBUG
+        let fileMutationDiagnostics = crewAccessFileMutationDiagnostics
+        let retentionInvocationID = fileMutationDiagnostics.beginRetentionInvocation(
+            origin: diagnosticOrigin,
+            protectedURLs: protectedURLs
+        )
+        let diagnosticMutation: CrewAccessFileMutationLogger? = { source, operation, url, details in
+            fileMutationDiagnostics.logMutation(
+                source: source,
+                operation: operation,
+                url: url,
+                details: details
+            )
+        }
+#else
+        let retentionInvocationID = "unavailable"
+        let diagnosticMutation: CrewAccessFileMutationLogger? = nil
+#endif
         let deletedFileCount: Int
         if let retainedOrders = retainedCrewAccessBidPeriodOrders() {
             deletedFileCount = await Task.detached(priority: .utility) {
                 Self.deleteCrewAccessImportFilesOutsideRetainedBidPeriods(
                     retainedOrders: retainedOrders,
                     protectedURLs: protectedURLs,
-                    directory: directory
+                    directory: directory,
+                    diagnosticMutation: diagnosticMutation,
+                    diagnosticOrigin: diagnosticOrigin,
+                    retentionInvocationID: retentionInvocationID
                 )
             }.value
             if deletedFileCount > 0 {
@@ -4007,8 +4354,8 @@ final class AppViewModel: ObservableObject {
             items: updatedItems
         )
 
-        beginCrewAccessImportTransaction()
-        defer { endCrewAccessImportTransaction() }
+        beginCrewAccessImportTransaction(diagnosticOrigin: "registration-update")
+        defer { endCrewAccessImportTransaction(diagnosticOrigin: "registration-update") }
 
         // Same fail-closed shape as `confirmPendingImport`: capture the pre-write in-memory state
         // before the first write so a failed verification restores memory, the derived schedule
@@ -4090,10 +4437,24 @@ final class AppViewModel: ObservableObject {
             Self.crewAccessPayloadFingerprints(at: urls)
         }.value
 
+#if DEBUG
+        let fileMutationDiagnostics = crewAccessFileMutationDiagnostics
+        let diagnosticMutation: CrewAccessFileMutationLogger? = { source, operation, url, details in
+            fileMutationDiagnostics.logMutation(
+                source: source,
+                operation: operation,
+                url: url,
+                details: details
+            )
+        }
+#else
+        let diagnosticMutation: CrewAccessFileMutationLogger? = nil
+#endif
         let deletionResults = await Task.detached(priority: .utility) {
             Self.deleteCrewAccessImportFilesAndCollectMatches(
                 targetURLs: urls,
-                scheduleReferences: scheduleReferences
+                scheduleReferences: scheduleReferences,
+                diagnosticMutation: diagnosticMutation
             )
         }.value
 
@@ -4260,12 +4621,26 @@ final class AppViewModel: ObservableObject {
             payloads: deletedPayloads
         )
         let importsDirectory = crewAccessImportsDirectory
+#if DEBUG
+        let fileMutationDiagnostics = crewAccessFileMutationDiagnostics
+        let diagnosticMutation: CrewAccessFileMutationLogger? = { source, operation, url, details in
+            fileMutationDiagnostics.logMutation(
+                source: source,
+                operation: operation,
+                url: url,
+                details: details
+            )
+        }
+#else
+        let diagnosticMutation: CrewAccessFileMutationLogger? = nil
+#endif
         let fileDeleteResult = await Task.detached(priority: .utility) {
             Self.deleteCrewAccessImportFilesBestEffort(
                 scheduleIDs: scheduleIDsToDelete,
                 tripIDs: Array(Set(toDelete.flatMap { $0.legs.map(\.pairing) })),
                 tripKeys: tripKeysToDelete,
-                directory: importsDirectory
+                directory: importsDirectory,
+                diagnosticMutation: diagnosticMutation
             )
         }.value
         logger.info("[CrewAccessDelete] detached file delete complete deleted=\(fileDeleteResult.deleted, privacy: .public) failures=\(fileDeleteResult.failures, privacy: .public)")
@@ -5755,7 +6130,10 @@ final class AppViewModel: ObservableObject {
     private nonisolated static func deleteCrewAccessImportFilesOutsideRetainedBidPeriods(
         retainedOrders: Set<Int>,
         protectedURLs: Set<URL> = [],
-        directory: URL?
+        directory: URL?,
+        diagnosticMutation: CrewAccessFileMutationLogger? = nil,
+        diagnosticOrigin: String,
+        retentionInvocationID: String
     ) -> Int {
         let fm = FileManager.default
         guard let dir = directory else {
@@ -5790,6 +6168,13 @@ final class AppViewModel: ObservableObject {
             guard !retainedOrders.contains(order) else {
                 continue
             }
+            let protectedURLMatch = protectedPaths.contains(url.standardizedFileURL.path)
+            diagnosticMutation?(
+                "retention",
+                "remove",
+                url,
+                "invocation=\(retentionInvocationID) origin=\(diagnosticOrigin) protectedURLMatch=\(protectedURLMatch) derivedBidPeriodOrder=\(order) retainedOrders=\(retainedOrders.sorted().map(String.init).joined(separator: ","))"
+            )
             do {
                 try fm.removeItem(at: url)
                 deletedCount += 1
@@ -6591,7 +6976,8 @@ final class AppViewModel: ObservableObject {
 
     private nonisolated static func deleteCrewAccessImportFilesAndCollectMatches(
         targetURLs: [URL],
-        scheduleReferences: [CrewAccessScheduleReference]
+        scheduleReferences: [CrewAccessScheduleReference],
+        diagnosticMutation: CrewAccessFileMutationLogger? = nil
     ) -> [CrewAccessFileDeletionResult] {
         let fm = FileManager.default
         return targetURLs.map { url in
@@ -6630,6 +7016,12 @@ final class AppViewModel: ObservableObject {
             }
 
             do {
+                diagnosticMutation?(
+                    "explicit-file-manager-delete",
+                    "remove",
+                    url,
+                    "none"
+                )
                 try fm.removeItem(at: url)
                 logger.info("[CrewAccessFileDelete] deletedFile=\(url.path, privacy: .private)")
                 return CrewAccessFileDeletionResult(
@@ -6654,7 +7046,8 @@ final class AppViewModel: ObservableObject {
         scheduleIDs: [String],
         tripIDs: [String] = [],
         tripKeys: [String],
-        directory: URL?
+        directory: URL?,
+        diagnosticMutation: CrewAccessFileMutationLogger? = nil
     ) -> (deleted: Int, failures: Int, deletedFileNames: [String]) {
         struct ImportFileHeader {
             let url: URL
@@ -6726,6 +7119,12 @@ final class AppViewModel: ObservableObject {
             guard shouldDelete else { continue }
 
             do {
+                diagnosticMutation?(
+                    "explicit-trip-delete",
+                    "remove",
+                    file.url,
+                    "none"
+                )
                 try fm.removeItem(at: file.url)
                 deletedCount += 1
                 deletedFileNames.append(name)
@@ -6767,6 +7166,9 @@ final class AppViewModel: ObservableObject {
         ).dateString
         let fileName = "\(normalizedDate)_\(safeTripID).json"
         let finalURL = dir.appendingPathComponent(fileName)
+#if DEBUG
+        crewAccessFileMutationDiagnostics.registerCanonicalURL(finalURL)
+#endif
 
         var isDirectory: ObjCBool = false
         if fm.fileExists(atPath: finalURL.path, isDirectory: &isDirectory), isDirectory.boolValue {
@@ -6789,8 +7191,9 @@ final class AppViewModel: ObservableObject {
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
         ) {
+            let finalPathIdentity = crewAccessCanonicalPathIdentity(for: finalURL)
             for fileURL in existingFiles {
-                guard fileURL.path != finalURL.path,
+                guard crewAccessCanonicalPathIdentity(for: fileURL) != finalPathIdentity,
                       fileURL.pathExtension.lowercased() == "json",
                       let incomingTripKey,
                       let data = try? Data(contentsOf: fileURL),
@@ -6817,8 +7220,24 @@ final class AppViewModel: ObservableObject {
         do {
             try data.write(to: tempURL, options: .atomic)
             if hadExistingFile {
+#if DEBUG
+                crewAccessFileMutationDiagnostics.logMutation(
+                    source: "canonical-persist",
+                    operation: "replace",
+                    url: finalURL,
+                    details: "incomingByteCount=\(data.count)"
+                )
+#endif
                 _ = try fm.replaceItemAt(finalURL, withItemAt: tempURL)
             } else {
+#if DEBUG
+                crewAccessFileMutationDiagnostics.logMutation(
+                    source: "canonical-persist",
+                    operation: "move-into-place",
+                    url: finalURL,
+                    details: "incomingByteCount=\(data.count)"
+                )
+#endif
                 try fm.moveItem(at: tempURL, to: finalURL)
             }
             return CrewAccessJSONWriteContext(
@@ -6852,14 +7271,35 @@ final class AppViewModel: ObservableObject {
             }
 
             if fm.fileExists(atPath: context.finalURL.path) {
+#if DEBUG
+                crewAccessFileMutationDiagnostics.logMutation(
+                    source: "canonical-rollback",
+                    operation: "replace-with-backup",
+                    url: context.finalURL
+                )
+#endif
                 _ = try fm.replaceItemAt(context.finalURL, withItemAt: backupURL)
             } else {
+#if DEBUG
+                crewAccessFileMutationDiagnostics.logMutation(
+                    source: "canonical-rollback",
+                    operation: "restore-missing-from-backup",
+                    url: context.finalURL
+                )
+#endif
                 try fm.moveItem(at: backupURL, to: context.finalURL)
             }
             return
         }
 
         if context.createdNewFile, fm.fileExists(atPath: context.finalURL.path) {
+#if DEBUG
+            crewAccessFileMutationDiagnostics.logMutation(
+                source: "canonical-rollback",
+                operation: "remove-new-file",
+                url: context.finalURL
+            )
+#endif
             try fm.removeItem(at: context.finalURL)
         }
     }
@@ -6888,16 +7328,28 @@ final class AppViewModel: ObservableObject {
 
     /// Moves stale same-trip JSON files aside instead of deleting them. Same hidden-dotfile naming
     /// as the `finalURL` backup, so the import-file scan skips them while they exist.
-    private func stashStaleCrewAccessJSONFilesBestEffort(_ urls: [URL]) -> [CrewAccessStaleJSONStash] {
+    private func stashStaleCrewAccessJSONFilesBestEffort(
+        _ urls: [URL],
+        excluding finalURL: URL
+    ) -> [CrewAccessStaleJSONStash] {
         guard !urls.isEmpty else { return [] }
         let fm = FileManager.default
+        let finalPathIdentity = crewAccessCanonicalPathIdentity(for: finalURL)
         var stashes: [CrewAccessStaleJSONStash] = []
         for url in urls {
-            guard fm.fileExists(atPath: url.path) else { continue }
+            guard crewAccessCanonicalPathIdentity(for: url) != finalPathIdentity,
+                  fm.fileExists(atPath: url.path) else { continue }
             let backupURL = url
                 .deletingLastPathComponent()
                 .appendingPathComponent(".\(url.lastPathComponent).stale-\(UUID().uuidString)")
             do {
+#if DEBUG
+                crewAccessFileMutationDiagnostics.logMutation(
+                    source: "stale-file-stash",
+                    operation: "move-aside",
+                    url: url
+                )
+#endif
                 try fm.moveItem(at: url, to: backupURL)
                 stashes.append(CrewAccessStaleJSONStash(originalURL: url, backupURL: backupURL))
                 logger.info("[Import] Stashed stale trip file: \(url.lastPathComponent, privacy: .private)")
@@ -6919,8 +7371,22 @@ final class AppViewModel: ObservableObject {
             guard fm.fileExists(atPath: stash.backupURL.path) else { continue }
             do {
                 if fm.fileExists(atPath: stash.originalURL.path) {
+#if DEBUG
+                    crewAccessFileMutationDiagnostics.logMutation(
+                        source: "stale-file-restore",
+                        operation: "replace",
+                        url: stash.originalURL
+                    )
+#endif
                     _ = try fm.replaceItemAt(stash.originalURL, withItemAt: stash.backupURL)
                 } else {
+#if DEBUG
+                    crewAccessFileMutationDiagnostics.logMutation(
+                        source: "stale-file-restore",
+                        operation: "move-into-place",
+                        url: stash.originalURL
+                    )
+#endif
                     try fm.moveItem(at: stash.backupURL, to: stash.originalURL)
                 }
                 logger.info("[Import] Restored stale trip file: \(stash.originalURL.lastPathComponent, privacy: .private)")
