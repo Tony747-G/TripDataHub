@@ -1655,6 +1655,31 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         XCTAssertEqual(requests.first?.notify12h, false)
     }
 
+#if DEBUG
+    func test_notificationDiagnosticSeamCapturesSchedulingOriginWithoutChangingThresholds() async {
+        let defaults = makeNotificationDefaults()
+        defaults.set(true, forKey: notification48hKey)
+        defaults.set(false, forKey: notification24hKey)
+        let notifications = RecordingNotificationService()
+        let vm = makeMinimalViewModel(
+            notificationService: notifications,
+            syncStateDefaults: defaults
+        )
+
+        await vm.updateNotificationPreferencesFromSettings(triggeredByEnablingToggle: false)
+
+        let requests = await notifications.requests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.notify48h, true)
+        XCTAssertEqual(requests.first?.notify24h, false)
+        XCTAssertEqual(requests.first?.notify12h, false)
+        XCTAssertEqual(
+            requests.first?.diagnosticOrigin,
+            "updateNotificationPreferencesFromSettings(triggeredByEnablingToggle:)"
+        )
+    }
+#endif
+
     /// 7. An actual reschedule driven by the legacy preference must not request a T-12h threshold.
     func test_rescheduleFromLegacy12hPreferenceRequestsNoTwelveHourThreshold() async {
         let defaults = makeNotificationDefaults()
@@ -1948,6 +1973,7 @@ private actor RecordingNotificationService: NextReportNotificationServiceProtoco
         let notify48h: Bool
         let notify24h: Bool
         let notify12h: Bool
+        let diagnosticOrigin: String?
     }
 
     private(set) var requests: [Request] = []
@@ -1962,10 +1988,37 @@ private actor RecordingNotificationService: NextReportNotificationServiceProtoco
         notify24h: Bool,
         notify12h: Bool
     ) async -> NotificationRescheduleResult {
-        requests.append(Request(notify48h: notify48h, notify24h: notify24h, notify12h: notify12h))
+        requests.append(Request(
+            notify48h: notify48h,
+            notify24h: notify24h,
+            notify12h: notify12h,
+            diagnosticOrigin: nil
+        ))
         return NotificationRescheduleResult(requested: 0, scheduled: 0, failed: 0)
     }
 }
+
+#if DEBUG
+extension RecordingNotificationService: NextReportNotificationDiagnosticScheduling {
+    func invalidateNextReportNotifications(diagnosticOrigin: String) async {}
+
+    func reschedule(
+        schedules: [PayPeriodSchedule],
+        notify48h: Bool,
+        notify24h: Bool,
+        notify12h: Bool,
+        diagnosticOrigin: String
+    ) async -> NotificationRescheduleResult {
+        requests.append(Request(
+            notify48h: notify48h,
+            notify24h: notify24h,
+            notify12h: notify12h,
+            diagnosticOrigin: diagnosticOrigin
+        ))
+        return NotificationRescheduleResult(requested: 0, scheduled: 0, failed: 0)
+    }
+}
+#endif
 
 private struct NoopImportService: CrewAccessPDFImportServiceProtocol {
     func analyzeTrip(pdfData: Data, sourceFileName: String?) -> CrewAccessImportDraft {

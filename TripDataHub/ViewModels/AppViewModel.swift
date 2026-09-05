@@ -2137,7 +2137,7 @@ final class AppViewModel: ObservableObject {
     }
 
     private func invalidateReplacementDerivedState() async {
-        await notificationService.invalidateNextReportNotifications()
+        await invalidateNextReportNotifications(diagnosticOrigin: #function)
         let nowUTC = Date()
         let snapshot = homeWidgetScheduleSnapshot(nowUTC: nowUTC)
         await flightCountdownCoordinator.refreshHomeWidget(
@@ -5007,7 +5007,7 @@ final class AppViewModel: ObservableObject {
         operationalCountdownOutput = nil
         debugFlightCountdownFixtureSchedules = nil
         isDebugFlightCountdownFixtureActive = false
-        await notificationService.invalidateNextReportNotifications()
+        await invalidateNextReportNotifications(diagnosticOrigin: #function)
     }
 #endif
 
@@ -8292,11 +8292,12 @@ final class AppViewModel: ObservableObject {
 
         let prefs = notificationPreferences
         if !prefs.anyEnabled {
-            _ = await notificationService.reschedule(
+            _ = await rescheduleNextReportNotificationService(
                 schedules: schedules,
                 notify48h: false,
                 notify24h: false,
-                notify12h: false
+                notify12h: false,
+                diagnosticOrigin: #function
             )
             return
         }
@@ -8476,23 +8477,60 @@ final class AppViewModel: ObservableObject {
         return (n48, n24, n12, n48 || n24)
     }
 
-    private func rescheduleNotificationsIfAuthorized() async {
+    private func rescheduleNotificationsIfAuthorized(diagnosticOrigin: String = #function) async {
         let status = await notificationService.authorizationStatus()
         notificationAuthorizationStatus = status
         guard isNotificationAuthorized(status) else { return }
 
         let prefs = notificationPreferences
-        let result = await notificationService.reschedule(
+        let result = await rescheduleNextReportNotificationService(
             schedules: crewAccessSchedules,
             notify48h: prefs.notify48h,
             notify24h: prefs.notify24h,
-            notify12h: prefs.notify12h
+            notify12h: prefs.notify12h,
+            diagnosticOrigin: diagnosticOrigin
         )
         if result.failed > 0 {
             notificationScheduleMessage = "Some reminders could not be scheduled (\(result.failed)/\(result.requested))."
         } else {
             notificationScheduleMessage = nil
         }
+    }
+
+    private func rescheduleNextReportNotificationService(
+        schedules: [PayPeriodSchedule],
+        notify48h: Bool,
+        notify24h: Bool,
+        notify12h: Bool,
+        diagnosticOrigin: String
+    ) async -> NotificationRescheduleResult {
+#if DEBUG
+        if let diagnosticService = notificationService as? NextReportNotificationDiagnosticScheduling {
+            return await diagnosticService.reschedule(
+                schedules: schedules,
+                notify48h: notify48h,
+                notify24h: notify24h,
+                notify12h: notify12h,
+                diagnosticOrigin: diagnosticOrigin
+            )
+        }
+#endif
+        return await notificationService.reschedule(
+            schedules: schedules,
+            notify48h: notify48h,
+            notify24h: notify24h,
+            notify12h: notify12h
+        )
+    }
+
+    private func invalidateNextReportNotifications(diagnosticOrigin: String) async {
+#if DEBUG
+        if let diagnosticService = notificationService as? NextReportNotificationDiagnosticScheduling {
+            await diagnosticService.invalidateNextReportNotifications(diagnosticOrigin: diagnosticOrigin)
+            return
+        }
+#endif
+        await notificationService.invalidateNextReportNotifications()
     }
 
     private func isNotificationAuthorized(_ status: UNAuthorizationStatus) -> Bool {
