@@ -697,6 +697,207 @@ final class CrewAccessAutoPrintProbeTests: XCTestCase {
         return String(source[start..<end])
     }
 
+    private func isolatedUserDefaults() throws -> (name: String, defaults: UserDefaults) {
+        let name = "crew_access_auto_print_settings_\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defaults.removePersistentDomain(forName: name)
+        return (name, defaults)
+    }
+
+    func test_stageOneSettleDurationDefaultsToFiveSeconds() throws {
+        let context = try isolatedUserDefaults()
+        defer { context.defaults.removePersistentDomain(forName: context.name) }
+
+        XCTAssertEqual(
+            CrewAccessAutoPrintSettings.stageOneSettleDurationMilliseconds(
+                userDefaults: context.defaults
+            ),
+            5_000
+        )
+        XCTAssertEqual(
+            CrewAccessAutoPrintSettings.stageOneSettleDelayNanoseconds(
+                userDefaults: context.defaults
+            ),
+            5_000_000_000
+        )
+    }
+
+    func test_stageOneSettleDurationPersistsInUserDefaults() throws {
+        let context = try isolatedUserDefaults()
+        defer { context.defaults.removePersistentDomain(forName: context.name) }
+
+        CrewAccessAutoPrintSettings.persistStageOneSettleDurationMilliseconds(
+            4_000,
+            userDefaults: context.defaults
+        )
+
+        let reloadedDefaults = try XCTUnwrap(UserDefaults(suiteName: context.name))
+        XCTAssertEqual(
+            reloadedDefaults.object(
+                forKey: CrewAccessAutoPrintSettings.stageOneSettleDurationMillisecondsKey
+            ) as? Int,
+            4_000
+        )
+        XCTAssertEqual(
+            CrewAccessAutoPrintSettings.stageOneSettleDurationMilliseconds(
+                userDefaults: reloadedDefaults
+            ),
+            4_000
+        )
+    }
+
+    func test_eachAllowedStageOneSettleDurationRoundTripsAndMapsToNanoseconds() throws {
+        let context = try isolatedUserDefaults()
+        defer { context.defaults.removePersistentDomain(forName: context.name) }
+        let expected: [(milliseconds: Int, nanoseconds: UInt64)] = [
+            (5_000, 5_000_000_000),
+            (4_500, 4_500_000_000),
+            (4_000, 4_000_000_000),
+            (3_500, 3_500_000_000),
+            (3_000, 3_000_000_000)
+        ]
+
+        XCTAssertEqual(
+            CrewAccessAutoPrintSettings.allowedStageOneSettleDurationMilliseconds,
+            expected.map { $0.milliseconds }
+        )
+        for value in expected {
+            CrewAccessAutoPrintSettings.persistStageOneSettleDurationMilliseconds(
+                value.milliseconds,
+                userDefaults: context.defaults
+            )
+            XCTAssertEqual(
+                context.defaults.object(
+                    forKey: CrewAccessAutoPrintSettings.stageOneSettleDurationMillisecondsKey
+                ) as? Int,
+                value.milliseconds,
+                "each supported value must round-trip through UserDefaults"
+            )
+            XCTAssertEqual(
+                CrewAccessAutoPrintSettings.stageOneSettleDurationMilliseconds(
+                    userDefaults: context.defaults
+                ),
+                value.milliseconds
+            )
+            XCTAssertEqual(
+                CrewAccessAutoPrintSettings.stageOneSettleDelayNanoseconds(
+                    userDefaults: context.defaults
+                ),
+                value.nanoseconds
+            )
+        }
+    }
+
+    @MainActor
+    func test_eachAllowedStageOneSettleDurationIsReadByANewProductionRun() {
+        let defaults = UserDefaults.standard
+        let key = CrewAccessAutoPrintSettings.stageOneSettleDurationMillisecondsKey
+        let previousValue = defaults.object(forKey: key)
+        defer {
+            if let previousValue {
+                defaults.set(previousValue, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
+        }
+
+        for milliseconds in CrewAccessAutoPrintSettings.allowedStageOneSettleDurationMilliseconds {
+            CrewAccessAutoPrintSettings.persistStageOneSettleDurationMilliseconds(
+                milliseconds,
+                userDefaults: defaults
+            )
+            let coordinator = BrowserWebView.Coordinator(
+                viewModel: BrowserViewModel(),
+                javaScriptEvaluator: { _, _, completion in completion(nil) }
+            )
+            let runDelay = coordinator.autoPrintStageOneSettleDelayNanoseconds
+
+            XCTAssertEqual(runDelay, UInt64(milliseconds) * 1_000_000)
+            XCTAssertEqual(
+                runDelay / 1_000_000,
+                UInt64(milliseconds),
+                "the value reported as configuredMilliseconds must match the run's timer"
+            )
+        }
+    }
+
+    func test_invalidOrMissingStageOneSettleDurationFallsBackToFiveSeconds() throws {
+        let context = try isolatedUserDefaults()
+        defer { context.defaults.removePersistentDomain(forName: context.name) }
+        let key = CrewAccessAutoPrintSettings.stageOneSettleDurationMillisecondsKey
+
+        XCTAssertEqual(
+            CrewAccessAutoPrintSettings.stageOneSettleDurationMilliseconds(
+                userDefaults: context.defaults
+            ),
+            5_000,
+            "a missing value must use the default"
+        )
+
+        for invalidValue in [2_999, 3_001, 5_001, -1, "4500"] as [Any] {
+            context.defaults.set(invalidValue, forKey: key)
+            XCTAssertEqual(
+                CrewAccessAutoPrintSettings.stageOneSettleDurationMilliseconds(
+                    userDefaults: context.defaults
+                ),
+                5_000,
+                "invalid persisted value \(invalidValue) must use the default"
+            )
+        }
+    }
+
+    func test_stageOneSettleDurationControlIsReleaseVisibleAndClearlyForTesting() throws {
+        let source = try projectFile("TripDataHub/Views/SettingsTabView.swift")
+        let lines = source.components(separatedBy: "\n")
+        let flags = debugRegionFlags(for: source)
+        let requiredReleaseLabels = [
+            "Stage 1 Settle Duration",
+            "CrewAccess Testing",
+            "Developer testing control. Changes only the delay before automatic toolbar Print."
+        ]
+
+        for label in requiredReleaseLabels {
+            let index = try XCTUnwrap(lines.firstIndex(where: { $0.contains(label) }))
+            XCTAssertFalse(flags[index], "\(label) must be visible in TestFlight/Release")
+        }
+    }
+
+    func test_stageOneTimerAndStartLogUseTheSameCapturedPerRunDelay() throws {
+        let source = try browserWebViewSource()
+        let start = try XCTUnwrap(
+            source.range(of: "private func startAutoPrintStageOneSettleDelay(")?.lowerBound
+        )
+        let end = try XCTUnwrap(
+            source.range(
+                of: "private func runAutoPrintStageOneSettleDelayCheck(",
+                range: start..<source.endIndex
+            )?.lowerBound
+        )
+        let settleFunction = String(source[start..<end])
+
+        XCTAssertEqual(
+            settleFunction.components(
+                separatedBy: "let delay = autoPrintStageOneSettleDelayNanoseconds"
+            ).count - 1,
+            1,
+            "each run must snapshot the configured delay exactly once"
+        )
+        XCTAssertTrue(
+            settleFunction.contains(
+                "configuredMilliseconds=\\(delay / 1_000_000, privacy: .public)"
+            ),
+            "the start log must report the same captured delay used by the run"
+        )
+        XCTAssertTrue(
+            settleFunction.contains("Task.sleep(nanoseconds: delay)"),
+            "the settle timer must use that same captured delay"
+        )
+        XCTAssertFalse(
+            settleFunction.contains("CrewAccessAutoPrintSettings.stageOneSettleDelayNanoseconds()"),
+            "the running task must not re-read Settings after its delay is captured"
+        )
+    }
+
     /// Requirement 14: the auto-print feature ships. Every part of the proven path must compile
     /// into Release, not just into DEBUG.
     func test_autoPrintProductionPathIsPresentInReleaseBuilds() throws {
@@ -1867,7 +2068,7 @@ final class CrewAccessAutoPrintProbeTests: XCTestCase {
         let source = try browserWebViewSource()
 
         // Stage 1 owns the settle delay and logs its whole lifecycle.
-        XCTAssertTrue(source.contains("stage=1 settle-delay=started milliseconds="))
+        XCTAssertTrue(source.contains("stage=1 settle-delay=started configuredMilliseconds="))
         XCTAssertTrue(source.contains("stage=1 settle-delay=elapsed"))
         XCTAssertTrue(source.contains("stage=1 settle-delay=cancelled reason="))
         XCTAssertTrue(source.contains("stage=1 gate=accepted"))
@@ -2228,6 +2429,99 @@ final class CrewAccessAutoPrintProbeTests: XCTestCase {
             context.coordinator.autoPrintStageOneAttemptedPopupIDs.contains(ObjectIdentifier(context.popup))
         )
         XCTAssertFalse(context.coordinator.hasPendingAutoPrintStageOneSettleWork)
+    }
+
+    @MainActor
+    func test_settingsChangeAffectsTheNextRunButNotAnAlreadyRunningSettleTimer() async {
+        let defaults = UserDefaults.standard
+        let key = CrewAccessAutoPrintSettings.stageOneSettleDurationMillisecondsKey
+        let previousValue = defaults.object(forKey: key)
+        defer {
+            if let previousValue {
+                defaults.set(previousValue, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
+        }
+
+        CrewAccessAutoPrintSettings.persistStageOneSettleDurationMilliseconds(
+            5_000,
+            userDefaults: defaults
+        )
+        let viewModel = BrowserViewModel()
+        let coordinator = BrowserWebView.Coordinator(
+            viewModel: viewModel,
+            javaScriptEvaluator: { _, _, completion in completion(nil) }
+        )
+        let sessionURL = URL(
+            string: "https://4d8e06f5.isolation.zscaler.com/profile/00000000-0000-4000-8000-000000000000/zpa-session"
+        )!
+        let probe = settledStageOneProbe()
+        coordinator.autoPrintStageOneReadinessEvaluator = { _, script, completion in
+            XCTAssertEqual(script, CrewAccessPageProbe.probeExpression)
+            completion(probe, nil)
+        }
+        var invocationCount = 0
+        coordinator.autoPrintStageOneJavaScriptEvaluator = { _, script, completion in
+            XCTAssertEqual(script, CrewAccessAutoPrint.invocationScript)
+            invocationCount += 1
+            completion(["result": "rejected", "reason": "none", "count": 1], nil)
+        }
+
+        func installPopup() -> FixedURLWebView {
+            let popup = FixedURLWebView()
+            popup.fixedURL = sessionURL
+            coordinator.popupWebViews = [popup]
+            viewModel.popupWebView = popup
+            return popup
+        }
+
+        let firstPopup = installPopup()
+        XCTAssertEqual(coordinator.autoPrintStageOneSettleDelayNanoseconds, 5_000_000_000)
+        coordinator.evaluateAutoPrintStageOneEligibility(
+            probe,
+            webView: firstPopup,
+            completedURL: sessionURL,
+            attempt: 0,
+            sequence: 1
+        )
+        XCTAssertTrue(coordinator.hasPendingAutoPrintStageOneSettleWork)
+
+        CrewAccessAutoPrintSettings.persistStageOneSettleDurationMilliseconds(
+            3_000,
+            userDefaults: defaults
+        )
+        XCTAssertEqual(
+            coordinator.autoPrintStageOneSettleDelayNanoseconds,
+            3_000_000_000,
+            "the next run should see the newly persisted duration"
+        )
+        try? await Task.sleep(nanoseconds: 3_300_000_000)
+        XCTAssertEqual(
+            invocationCount,
+            0,
+            "changing Settings must not shorten the already-running five-second timer"
+        )
+
+        await waitUntil(timeout: 2.5) { invocationCount == 1 }
+        XCTAssertEqual(invocationCount, 1)
+        XCTAssertFalse(coordinator.hasPendingAutoPrintStageOneSettleWork)
+
+        let secondPopup = installPopup()
+        coordinator.evaluateAutoPrintStageOneEligibility(
+            probe,
+            webView: secondPopup,
+            completedURL: sessionURL,
+            attempt: 0,
+            sequence: 2
+        )
+        XCTAssertTrue(coordinator.hasPendingAutoPrintStageOneSettleWork)
+        try? await Task.sleep(nanoseconds: 2_300_000_000)
+        XCTAssertEqual(invocationCount, 1, "the next run must still wait its configured three seconds")
+
+        await waitUntil(timeout: 1.5) { invocationCount == 2 }
+        XCTAssertEqual(invocationCount, 2, "the next run must observe the new three-second duration")
+        XCTAssertFalse(coordinator.hasPendingAutoPrintStageOneSettleWork)
     }
 
     /// The physical-device regression. During the settle wait the Zscaler isolation client

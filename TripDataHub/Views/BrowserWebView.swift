@@ -371,6 +371,44 @@ enum CrewAccessPageProbe {
 
 /// Production, fail-closed execution path for the Zscaler Print control observed by
 /// `CrewAccessPageProbe`.
+enum CrewAccessAutoPrintSettings {
+    static let stageOneSettleDurationMillisecondsKey =
+        "crew_access_auto_print_stage_one_settle_duration_milliseconds"
+    static let defaultStageOneSettleDurationMilliseconds = 5_000
+    static let allowedStageOneSettleDurationMilliseconds = [5_000, 4_500, 4_000, 3_500, 3_000]
+
+    static func validatedStageOneSettleDurationMilliseconds(_ value: Int?) -> Int {
+        guard let value, allowedStageOneSettleDurationMilliseconds.contains(value) else {
+            return defaultStageOneSettleDurationMilliseconds
+        }
+        return value
+    }
+
+    static func stageOneSettleDurationMilliseconds(
+        userDefaults: UserDefaults = .standard
+    ) -> Int {
+        validatedStageOneSettleDurationMilliseconds(
+            userDefaults.object(forKey: stageOneSettleDurationMillisecondsKey) as? Int
+        )
+    }
+
+    static func persistStageOneSettleDurationMilliseconds(
+        _ value: Int,
+        userDefaults: UserDefaults = .standard
+    ) {
+        userDefaults.set(
+            validatedStageOneSettleDurationMilliseconds(value),
+            forKey: stageOneSettleDurationMillisecondsKey
+        )
+    }
+
+    static func stageOneSettleDelayNanoseconds(
+        userDefaults: UserDefaults = .standard
+    ) -> UInt64 {
+        UInt64(stageOneSettleDurationMilliseconds(userDefaults: userDefaults)) * 1_000_000
+    }
+}
+
 enum CrewAccessAutoPrint {
     /// Same isolation session, allowing only an in-place query change.
     ///
@@ -397,10 +435,12 @@ enum CrewAccessAutoPrint {
     /// Bounded settle time taken BEFORE Stage 1. Taking it before the toolbar Print button is
     /// invoked means the user watches Trip Details for the whole wait instead of the Print dialog.
     ///
-    /// Five seconds is the accepted physical-device settle period. It remains fail closed: a
-    /// document that does not present exactly one qualifying Print button is rejected with the
-    /// Stage 1 one-shot unconsumed.
-    static let stageOneSettleDelayNanoseconds: UInt64 = 5_000_000_000
+    /// Five seconds remains the default accepted physical-device settle period. Settings may
+    /// select one of the bounded developer-testing values without changing any Stage 1 guard. A
+    /// document that does not present exactly one qualifying Print button is still rejected with
+    /// the Stage 1 one-shot unconsumed.
+    static let stageOneSettleDelayNanoseconds: UInt64 =
+        UInt64(CrewAccessAutoPrintSettings.defaultStageOneSettleDurationMilliseconds) * 1_000_000
 
     /// Stage 2 no longer waits a fixed six seconds. Once Stage 1 has physically opened the Print
     /// dialog, the only thing left to wait for is that dialog's DOM becoming structurally ready,
@@ -1155,10 +1195,18 @@ extension BrowserWebView {
         private var autoPrintStageOneSettleTasks: [ObjectIdentifier: Task<Void, Never>] = [:]
         private var autoPrintStageOneSettleSequences: [ObjectIdentifier: UInt] = [:]
         private var nextAutoPrintStageOneSettleSequence: UInt = 0
-        /// Mutable only as a test seam; production runs use the single bounded delay declared on
-        /// `CrewAccessAutoPrint`.
-        var autoPrintStageOneSettleDelayNanoseconds =
-            CrewAccessAutoPrint.stageOneSettleDelayNanoseconds
+        /// Mutable only as a test seam. Without an override, production reads the validated
+        /// persisted duration when each Stage 1 settle task starts.
+        private var autoPrintStageOneSettleDelayOverrideNanoseconds: UInt64?
+        var autoPrintStageOneSettleDelayNanoseconds: UInt64 {
+            get {
+                autoPrintStageOneSettleDelayOverrideNanoseconds
+                    ?? CrewAccessAutoPrintSettings.stageOneSettleDelayNanoseconds()
+            }
+            set {
+                autoPrintStageOneSettleDelayOverrideNanoseconds = newValue
+            }
+        }
         /// Stage 2 readiness is deliberately independent of the older page-probe schedule. Each
         /// popup has at most one cancellable sleeping task, keyed without retaining the WebView.
         private var autoPrintStageTwoReadinessTasks: [ObjectIdentifier: Task<Void, Never>] = [:]
@@ -2164,7 +2212,7 @@ extension BrowserWebView {
             autoPrintStageOneSettleSequences[key] = settleSequence
             let delay = autoPrintStageOneSettleDelayNanoseconds
             browserAutoPrintLogger.info(
-                "[AutoPrint] stage=1 settle-delay=started milliseconds=\(delay / 1_000_000, privacy: .public) settleSequence=\(settleSequence, privacy: .public) probeSequence=\(probeSequence, privacy: .public) popupGeneration=\(settleGeneration, privacy: .public) webView=\(self.navigationTraceIdentity(webView), privacy: .public) sessionURL=\(CrewAccessPageProbe.urlShape(for: settleSessionURL), privacy: .public) oneShotState=available"
+                "[AutoPrint] stage=1 settle-delay=started configuredMilliseconds=\(delay / 1_000_000, privacy: .public) settleSequence=\(settleSequence, privacy: .public) probeSequence=\(probeSequence, privacy: .public) popupGeneration=\(settleGeneration, privacy: .public) webView=\(self.navigationTraceIdentity(webView), privacy: .public) sessionURL=\(CrewAccessPageProbe.urlShape(for: settleSessionURL), privacy: .public) oneShotState=available"
             )
             autoPrintStageOneSettleTasks.removeValue(forKey: key)?.cancel()
             // The WebView is deliberately NOT captured, not even weakly: after the wait the popup
