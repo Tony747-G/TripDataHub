@@ -369,46 +369,6 @@ enum CrewAccessPageProbe {
     """#
 }
 
-/// Production, fail-closed execution path for the Zscaler Print control observed by
-/// `CrewAccessPageProbe`.
-enum CrewAccessAutoPrintSettings {
-    static let stageOneSettleDurationMillisecondsKey =
-        "crew_access_auto_print_stage_one_settle_duration_milliseconds"
-    static let defaultStageOneSettleDurationMilliseconds = 5_000
-    static let allowedStageOneSettleDurationMilliseconds = [5_000, 4_500, 4_000, 3_500, 3_000]
-
-    static func validatedStageOneSettleDurationMilliseconds(_ value: Int?) -> Int {
-        guard let value, allowedStageOneSettleDurationMilliseconds.contains(value) else {
-            return defaultStageOneSettleDurationMilliseconds
-        }
-        return value
-    }
-
-    static func stageOneSettleDurationMilliseconds(
-        userDefaults: UserDefaults = .standard
-    ) -> Int {
-        validatedStageOneSettleDurationMilliseconds(
-            userDefaults.object(forKey: stageOneSettleDurationMillisecondsKey) as? Int
-        )
-    }
-
-    static func persistStageOneSettleDurationMilliseconds(
-        _ value: Int,
-        userDefaults: UserDefaults = .standard
-    ) {
-        userDefaults.set(
-            validatedStageOneSettleDurationMilliseconds(value),
-            forKey: stageOneSettleDurationMillisecondsKey
-        )
-    }
-
-    static func stageOneSettleDelayNanoseconds(
-        userDefaults: UserDefaults = .standard
-    ) -> UInt64 {
-        UInt64(stageOneSettleDurationMilliseconds(userDefaults: userDefaults)) * 1_000_000
-    }
-}
-
 enum CrewAccessAutoPrint {
     /// Same isolation session, allowing only an in-place query change.
     ///
@@ -435,12 +395,10 @@ enum CrewAccessAutoPrint {
     /// Bounded settle time taken BEFORE Stage 1. Taking it before the toolbar Print button is
     /// invoked means the user watches Trip Details for the whole wait instead of the Print dialog.
     ///
-    /// Five seconds remains the default accepted physical-device settle period. Settings may
-    /// select one of the bounded developer-testing values without changing any Stage 1 guard. A
-    /// document that does not present exactly one qualifying Print button is still rejected with
-    /// the Stage 1 one-shot unconsumed.
-    static let stageOneSettleDelayNanoseconds: UInt64 =
-        UInt64(CrewAccessAutoPrintSettings.defaultStageOneSettleDurationMilliseconds) * 1_000_000
+    /// Four seconds is the accepted physical-device settle period. A document that does not
+    /// present exactly one qualifying Print button is still rejected with the Stage 1 one-shot
+    /// unconsumed.
+    static let stageOneSettleDelayNanoseconds: UInt64 = 4_000_000_000
 
     /// Stage 2 no longer waits a fixed six seconds. Once Stage 1 has physically opened the Print
     /// dialog, the only thing left to wait for is that dialog's DOM becoming structurally ready,
@@ -452,6 +410,80 @@ enum CrewAccessAutoPrint {
         250_000_000,
         500_000_000
     ]
+
+    /// The single explicit deadline for the event-driven half of Stage 2 readiness.
+    ///
+    /// The three offsets above are a fast path for a dialog that is already mounted. They are not a
+    /// budget: the isolation client mounts its print dialog only after asking the remote browser to
+    /// render the report to PDF, which is a network round trip whose duration depends on the link
+    /// and on the report. Half a second is routinely too short on a physical device, and polling
+    /// harder is the wrong answer — dialog insertion is an observable DOM event, so after the fast
+    /// path the run waits for that event and for nothing else, under this one bound.
+    static let stageTwoObserverDeadlineMilliseconds: UInt64 = 8_000
+
+    /// Read-only. Resolves as soon as a print dialog carrying a submit button is inserted, or when
+    /// the deadline expires. It observes and reports; it never qualifies and never clicks. The
+    /// decision stays with `stageTwoReadinessScript` and the Swift-side gates, which run again the
+    /// moment this reports an insertion. The two selectors are the ones Stage 2 already uses.
+    static func stageTwoDialogObserverScript(deadlineMilliseconds: UInt64) -> String {
+        let template = #"""
+        const deadlineMilliseconds = __DEADLINE__;
+        const isExactURL = () => {
+            try {
+                const value = new URL(location.href);
+                const host = value.hostname.toLowerCase();
+                const hostMatches = host === 'isolation.zscaler.com'
+                    || host.endsWith('.isolation.zscaler.com');
+                const pathMatches = /^\/profile\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/zpa-session\/?$/.test(value.pathname);
+                return value.protocol === 'https:'
+                    && value.port === ''
+                    && value.username === ''
+                    && value.password === ''
+                    && value.hash === ''
+                    && hostMatches
+                    && pathMatches;
+            } catch (error) {
+                return false;
+            }
+        };
+        const hasTarget = () => Boolean(
+            document.querySelector('[role="dialog"] button[type="submit"]')
+        );
+
+        if (!isExactURL()) {
+            return { result: 'url-mismatch', elapsedMilliseconds: 0 };
+        }
+        if (hasTarget()) {
+            return { result: 'dialog-present', elapsedMilliseconds: 0 };
+        }
+        return await new Promise(resolve => {
+            const start = Date.now();
+            let settled = false;
+            const finish = outcome => {
+                if (settled) { return; }
+                settled = true;
+                try { observer.disconnect(); } catch (error) {}
+                try { clearTimeout(timer); } catch (error) {}
+                resolve({ result: outcome, elapsedMilliseconds: Date.now() - start });
+            };
+            const observer = new MutationObserver(() => {
+                if (hasTarget()) { finish('dialog-inserted'); }
+            });
+            const timer = setTimeout(() => finish('deadline-expired'), deadlineMilliseconds);
+            observer.observe(document.documentElement, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['role', 'type']
+            });
+            if (hasTarget()) { finish('dialog-present'); }
+        });
+        """#
+        return template.replacingOccurrences(
+            of: "__DEADLINE__",
+            with: String(deadlineMilliseconds)
+        )
+    }
 
     static func isExactZscalerSessionURL(_ url: URL?) -> Bool {
         guard let url,
@@ -493,8 +525,14 @@ enum CrewAccessAutoPrint {
         guard isVisiblePopup else { return "not-visible-popup" }
         guard livePopupCount == 1 else { return "live-popup-count-\(livePopupCount)" }
         guard !teardownInProgress else { return "teardown-in-progress" }
-        guard completedURL == currentURL else { return "stale-probe" }
+        // Order and rule match `settledRejectionReason`, deliberately. "The live URL is not a
+        // session URL at all" is the more specific finding, so it is reported first and stays
+        // reachable. Full-URL equality used to sit here: the isolation client mutates its own query
+        // in place while one Trip Details document stays open, so once it did, every remaining
+        // sample of that chain reported a permanent `stale-probe` and the first attempt could never
+        // become eligible — only a retry, which re-baselines the captured URL, could.
         guard isExactZscalerSessionURL(currentURL) else { return "url-mismatch" }
+        guard isSameZscalerSession(completedURL, currentURL) else { return "session-changed" }
         guard !oneShotConsumed else { return "one-shot-already-consumed" }
         guard readyState == "complete" else { return "document-not-complete" }
 
@@ -506,7 +544,7 @@ enum CrewAccessAutoPrint {
     /// Stage 1's gate *after* the pre-Stage-1 settle delay has elapsed.
     ///
     /// Identical to `rejectionReason` in every safety guard except the staleness rule. The probe
-    /// snapshot that started the delay is five seconds old by the time this runs, and the Zscaler
+    /// snapshot that started the delay is four seconds old by the time this runs, and the Zscaler
     /// isolation client evolves its own URL in place while the same Trip Details document stays
     /// open — so `completedURL == currentURL` reported `stale-probe` on every settled run and
     /// nothing could ever invoke. The delay is therefore tied to the tracked popup and its session
@@ -1122,7 +1160,11 @@ struct BrowserWebView: UIViewRepresentable {
 
 extension BrowserWebView {
     class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
-        typealias PDFDataHandler = @MainActor (Data, String?) -> Void
+        typealias PDFDataHandler = @MainActor (
+            Data,
+            String?,
+            @escaping @MainActor (CrewAccessPDFImportResult) -> Void
+        ) -> Void
         typealias JavaScriptEvaluator = @MainActor (
             WKWebView,
             String,
@@ -1166,6 +1208,9 @@ extension BrowserWebView {
         private var activePopupTeardownGeneration: UInt?
         private var activePopupTeardownTargets: [WKWebView] = []
         private var pendingWindowCloseCallbacks = 0
+        private var isPDFImportInFlight = false
+        private(set) var isAutoPrintRetryInFlight = false
+        private var isAwaitingIncompleteImportDecision = false
         private var popupFocusAcquisitionStates: [ObjectIdentifier: PopupFocusAcquisitionState] = [:]
 
         /// Popup identity that survives the Stage 1 settle delay. An `ObjectIdentifier` alone can
@@ -1183,25 +1228,59 @@ extension BrowserWebView {
         /// retains a WebView. The Coordinator owns these tasks; every task body captures the
         /// Coordinator and the WebView weakly, so the ownership only ever points this way.
         private var crewAccessProbeTasks: [ObjectIdentifier: Task<Void, Never>] = [:]
+        /// Mutable only as a test seam, in the same shape as the Stage 2 offsets below. Without an
+        /// override, production uses the canonical bounded schedule declared on
+        /// `CrewAccessPageProbe`; the production timing is unchanged by this property existing.
+        var crewAccessProbeResampleIntervals: [TimeInterval] = CrewAccessPageProbe.resampleIntervals
         /// Optimistically consumed immediately before JavaScript evaluation. A failed invocation is
         /// deliberately never retried for the same popup identity.
         var autoPrintStageOneAttemptedPopupIDs: Set<ObjectIdentifier> = []
         /// Stage 2 keeps its own one-shot. Stage 1's is never reused, so neither stage can consume
         /// or unblock the other.
         var autoPrintStageTwoAttemptedPopupIDs: Set<ObjectIdentifier> = []
+        /// Popups whose terminal auto-print outcome has already been converted into the
+        /// user-facing recoverable failure. It stops a second conversion for the same popup and
+        /// lets the user-directed retry path accept a popup whose one-shots were never consumed,
+        /// which is exactly the shape of a Stage 1 schedule exhaustion.
+        private var autoPrintTerminalFailurePopupIDs: Set<ObjectIdentifier> = []
+        /// Stage 1's invocation JavaScript is in flight for this popup. Between one-shot
+        /// consumption and the completion handler no schedule holds the popup, so without this the
+        /// terminal funnel would read an idle popup and fail a run that is still working.
+        private var autoPrintStageOneInvocationsInFlightPopupIDs: Set<ObjectIdentifier> = []
+        /// Stage 2 consumed its one-shot for this popup, so the print pipeline may still deliver a
+        /// PDF callback. Removed only when Stage 2's own result proves no print was submitted.
+        private var autoPrintPrintOutputExpectedPopupIDs: Set<ObjectIdentifier> = []
+        /// The event-driven half of Stage 2 readiness is in flight for this popup. It is a single
+        /// self-bounding JavaScript call rather than a task, so the mark — not a registry — is what
+        /// keeps the run visibly pending, and the readiness sequence is what makes a late result
+        /// inert after teardown, retry or cancellation.
+        private var autoPrintStageTwoObserverPopupIDs: Set<ObjectIdentifier> = []
+        /// A retry's read-only dialog census is in flight for this popup.
+        private var autoPrintRetryCensusPopupIDs: Set<ObjectIdentifier> = []
+
+        /// What the last terminal conversion decided. The stage recorded here is the stage that
+        /// diagnosed the failure, which is the thing the device log made impossible to trust before
+        /// ownership transfer, so it is kept as state rather than only as a log line.
+        struct TerminalFailureRecord: Equatable {
+            let stage: Int
+            let reason: String
+            let retryAvailable: Bool
+        }
+        private(set) var lastTerminalFailure: TerminalFailureRecord?
+        private(set) var terminalFailureCount = 0
         /// Stage 1's settle delay runs BEFORE the toolbar Print button is invoked. Each popup has
         /// at most one cancellable sleeping task, keyed without retaining the WebView, and the
         /// Stage 1 one-shot stays available for the whole wait.
         private var autoPrintStageOneSettleTasks: [ObjectIdentifier: Task<Void, Never>] = [:]
         private var autoPrintStageOneSettleSequences: [ObjectIdentifier: UInt] = [:]
         private var nextAutoPrintStageOneSettleSequence: UInt = 0
-        /// Mutable only as a test seam. Without an override, production reads the validated
-        /// persisted duration when each Stage 1 settle task starts.
+        /// Mutable only as a test seam. Without an override, production uses the canonical delay
+        /// declared on `CrewAccessAutoPrint`.
         private var autoPrintStageOneSettleDelayOverrideNanoseconds: UInt64?
         var autoPrintStageOneSettleDelayNanoseconds: UInt64 {
             get {
                 autoPrintStageOneSettleDelayOverrideNanoseconds
-                    ?? CrewAccessAutoPrintSettings.stageOneSettleDelayNanoseconds()
+                    ?? CrewAccessAutoPrint.stageOneSettleDelayNanoseconds
             }
             set {
                 autoPrintStageOneSettleDelayOverrideNanoseconds = newValue
@@ -1226,6 +1305,34 @@ extension BrowserWebView {
                 }
             }
         }
+        /// Production Stage 2 dialog observation. `callAsyncJavaScript` is what lets the page world
+        /// resolve on its own DOM event instead of being polled; the script bounds itself, so this
+        /// always calls back.
+        var autoPrintStageTwoObserverEvaluator: AutoPrintStageTwoReadinessEvaluator = {
+            webView, script, completion in
+            webView.callAsyncJavaScript(
+                script,
+                in: nil,
+                in: .page
+            ) { (result: Result<Any, Error>) in
+                let value: Any?
+                let failure: Error?
+                switch result {
+                case .success(let success):
+                    value = success
+                    failure = nil
+                case .failure(let error):
+                    value = nil
+                    failure = error
+                }
+                DispatchQueue.main.async {
+                    completion(value, failure)
+                }
+            }
+        }
+        /// Mutable only as a test seam; production uses the canonical bound.
+        var autoPrintStageTwoObserverDeadlineMilliseconds =
+            CrewAccessAutoPrint.stageTwoObserverDeadlineMilliseconds
         var autoPrintStageTwoJavaScriptEvaluator: AutoPrintStageTwoJavaScriptEvaluator = {
             webView, script, completion in
             webView.evaluateJavaScript(script) { result, error in
@@ -1244,7 +1351,7 @@ extension BrowserWebView {
             }
         }
         /// Stage 1 re-reads the document once, after its settle delay has elapsed, so the gates
-        /// decide on the page as it is at invocation time rather than as it was five seconds
+        /// decide on the page as it is at invocation time rather than as it was four seconds
         /// earlier. Read-only: this seam only ever runs `CrewAccessPageProbe.probeExpression`.
         var autoPrintStageOneReadinessEvaluator: AutoPrintStageOneReadinessEvaluator = {
             webView, script, completion in
@@ -1273,8 +1380,16 @@ extension BrowserWebView {
             popupAttachmentChecker: PopupAttachmentChecker? = nil
         ) {
             self.viewModel = viewModel
-            self.pdfDataHandler = pdfDataHandler ?? { [weak viewModel] data, sourceFileName in
-                viewModel?.handlePDFData(data, sourceFileName: sourceFileName)
+            self.pdfDataHandler = pdfDataHandler ?? { [weak viewModel] data, sourceFileName, completion in
+                guard let viewModel else {
+                    completion(.rejected)
+                    return
+                }
+                viewModel.handlePDFData(
+                    data,
+                    sourceFileName: sourceFileName,
+                    completion: completion
+                )
             }
             self.javaScriptEvaluator = javaScriptEvaluator ?? { webView, script, completion in
                 webView.evaluateJavaScript(script) { _, error in
@@ -1292,6 +1407,12 @@ extension BrowserWebView {
             super.init()
             viewModel.requestPopupTeardown = { [weak self] in
                 self?.closePopups()
+            }
+            viewModel.requestAutoPrintRetry = { [weak self] in
+                self?.retryCrewAccessAutoPrintIfPossible() ?? false
+            }
+            viewModel.requestAutoPrintCancel = { [weak self] in
+                self?.cancelCrewAccessAutoPrint()
             }
         }
 
@@ -1335,15 +1456,23 @@ extension BrowserWebView {
             popupWebViews.append(popup)
             popupParents[ObjectIdentifier(popup)] = webView   // blob取得のために親を記録
             popupFocusAcquisitionStates[ObjectIdentifier(popup)] = PopupFocusAcquisitionState()
-            // Ships: the Stage 1 settle delay re-resolves its popup by identity after five
+            // Ships: the Stage 1 settle delay re-resolves its popup by identity after four
             // seconds, and a bare ObjectIdentifier can be recycled by a later allocation at the
             // same address. The generation is what makes that re-resolution sound.
             nextPopupGeneration &+= 1
             popupGenerations[ObjectIdentifier(popup)] = nextPopupGeneration
+            let isCrewAccessSessionPopup = CrewAccessAutoPrint.isExactZscalerSessionURL(
+                navigationAction.request.url
+            )
 
             DispatchQueue.main.async {
                 self.viewModel.popupWebView = popup
-                self.viewModel.statusMessage = "📄 Processing popup..."
+                if isCrewAccessSessionPopup {
+                    self.viewModel.beginCrewAccessImportingPresentation()
+                } else {
+                    self.viewModel.endCrewAccessImportingPresentation()
+                    self.viewModel.statusMessage = "Processing popup..."
+                }
             }
             return popup
         }
@@ -1397,6 +1526,8 @@ extension BrowserWebView {
                   activePopupTeardownGeneration == nil,
                   CrewAccessAutoPrint.isExactZscalerSessionURL(completedURL)
             else { return }
+
+            viewModel.beginCrewAccessImportingPresentation()
 
             // Weak: a queued hop must never hold the Coordinator or a popup WebView alive past
             // the point the normal lifecycle would release them.
@@ -1551,6 +1682,13 @@ extension BrowserWebView {
                   activePopupTeardownGeneration == nil,
                   ownsCrewAccessProbeTarget(webView) else {
                 crewAccessProbeSequences.removeValue(forKey: ObjectIdentifier(webView))
+                failCrewAccessAutoPrintIfTerminal(
+                    stage: 1,
+                    key: ObjectIdentifier(webView),
+                    identity: navigationTraceIdentity(webView),
+                    sequence: sequence,
+                    reason: "probe-not-schedulable"
+                )
                 return
             }
             scheduleCrewAccessProbeResample(
@@ -1593,6 +1731,21 @@ extension BrowserWebView {
             browserAutoPrintLogger.info(
                 "[AutoPrint] stage=1 sampling=ended reason=\(reason, privacy: .public) sequence=\(sequence, privacy: .public) popupGeneration=\(self.popupGeneration(for: webView), privacy: .public) webView=\(self.navigationTraceIdentity(webView), privacy: .public) completedSession=\(CrewAccessPageProbe.urlShape(for: webView.url), privacy: .public)"
             )
+            // Stage ownership invariant: once Stage 1's one-shot is consumed, Stage 1 sampling may
+            // never author the run's terminus. Ownership has moved to Stage 2, which diagnoses its
+            // own failures; a sampler that can only ever answer `one-shot-already-consumed` has
+            // nothing to say about why the run ended.
+            guard !autoPrintStageOneAttemptedPopupIDs.contains(key) else { return }
+            // Otherwise `schedule-exhausted` and every other chain-ending reason are terminal for
+            // Stage 1's own sampling. Whether they are terminal for the whole run is decided by the
+            // funnel, which stands down while a settle delay or an invocation is still pending.
+            failCrewAccessAutoPrintIfTerminal(
+                stage: 1,
+                key: key,
+                identity: navigationTraceIdentity(webView),
+                sequence: sequence,
+                reason: "sampling-" + reason
+            )
         }
 
         /// Names the first failed guard of a sampling chain, so a chain that ends before its bound
@@ -1623,13 +1776,14 @@ extension BrowserWebView {
             nextAttempt: Int,
             sequence: UInt
         ) {
+            let intervals = crewAccessProbeResampleIntervals
             let intervalIndex = nextAttempt - 1
             guard intervalIndex >= 0,
-                  intervalIndex < CrewAccessPageProbe.resampleIntervals.count else {
+                  intervalIndex < intervals.count else {
                 endCrewAccessProbe(for: webView, sequence: sequence, reason: "schedule-exhausted")
                 return
             }
-            let interval = CrewAccessPageProbe.resampleIntervals[intervalIndex]
+            let interval = intervals[intervalIndex]
 
             // Registered so teardown can cancel it. The task captures nothing strongly: it holds a
             // weak Coordinator and a weak WebView, and exits the moment either has gone.
@@ -1713,6 +1867,16 @@ extension BrowserWebView {
             completedURL: URL?
         ) {
             guard result == "invoked" else { return }
+            // Stage ownership transfer. Stage 1's bounded sampling has nothing left to contribute
+            // once the toolbar Print button has actually been invoked — its own gate would reject
+            // every remaining sample with `one-shot-already-consumed`. While it stayed registered it
+            // kept `hasPendingCrewAccessAutoPrintWork` true, which muted Stage 2's terminal report,
+            // and then, being the last thing to finish, stamped its own stage on the failure. From
+            // here Stage 2 solely owns forward progress.
+            cancelCrewAccessProbe(for: webView)
+            browserAutoPrintLogger.info(
+                "[AutoPrint] stage=1 sampling=retired reason=stage-two-owns-progress popupGeneration=\(self.popupGeneration(for: webView), privacy: .public) webView=\(self.navigationTraceIdentity(webView), privacy: .public)"
+            )
             startAutoPrintStageTwoReadinessSchedule(
                 webView: webView,
                 completedURL: completedURL
@@ -1741,6 +1905,15 @@ extension BrowserWebView {
                 )
                 browserAutoPrintLogger.info(
                     "[AutoPrint] stage=2 readiness-schedule=cancelled reason=start-\(reason, privacy: .public) webView=\(self.navigationTraceIdentity(webView), privacy: .public)"
+                )
+                // Stage 1 has already consumed its one-shot and retired its sampling, so nothing
+                // else can end this run. Before ownership transfer the probe chain masked this.
+                failCrewAccessAutoPrintIfTerminal(
+                    stage: 2,
+                    key: key,
+                    identity: navigationTraceIdentity(webView),
+                    sequence: 0,
+                    reason: "readiness-start-" + reason
                 )
                 return
             }
@@ -1782,9 +1955,12 @@ extension BrowserWebView {
                 browserAutoPrintLogger.info(
                     "[AutoPrint] stage=2 readiness=schedule-exhausted samples=\(offsets.count, privacy: .public) sequence=\(sequence, privacy: .public) webView=\(self.navigationTraceIdentity(webView), privacy: .public) oneShotState=available retry=false"
                 )
-                cancelAutoPrintStageTwoReadinessSchedule(
-                    for: webView,
-                    reason: "schedule-exhausted"
+                // The fixed offsets are the fast path, not the budget. A dialog that has not been
+                // mounted yet is waited for by event, under one deadline, rather than polled harder.
+                startAutoPrintStageTwoDialogObserver(
+                    webView: webView,
+                    completedURL: completedURL,
+                    sequence: sequence
                 )
                 return
             }
@@ -1815,6 +1991,78 @@ extension BrowserWebView {
                         completedURL: completedURL,
                         index: index + 1,
                         sequence: sequence
+                    )
+                }
+            }
+        }
+
+        /// The event-driven half of Stage 2 readiness, entered only after the fixed offsets have
+        /// all reported no dialog. It waits for the one DOM event that matters — a print dialog
+        /// carrying a submit button being inserted — and is bounded by a single deadline inside the
+        /// page world, so it always resolves.
+        ///
+        /// It only wakes the pipeline. Every Swift-side gate and the structural readiness script
+        /// run again on the result, so an observed insertion still has to qualify before anything
+        /// is invoked.
+        @MainActor
+        private func startAutoPrintStageTwoDialogObserver(
+            webView: WKWebView,
+            completedURL: URL?,
+            sequence: UInt
+        ) {
+            let key = ObjectIdentifier(webView)
+            guard autoPrintStageTwoReadinessSequences[key] == sequence,
+                  !autoPrintStageTwoObserverPopupIDs.contains(key)
+            else { return }
+            let deadline = autoPrintStageTwoObserverDeadlineMilliseconds
+            autoPrintStageTwoObserverPopupIDs.insert(key)
+            browserAutoPrintLogger.info(
+                "[AutoPrint] stage=2 observer=started deadlineMilliseconds=\(deadline, privacy: .public) sequence=\(sequence, privacy: .public) webView=\(self.navigationTraceIdentity(webView), privacy: .public)"
+            )
+            autoPrintStageTwoObserverEvaluator(
+                webView,
+                CrewAccessAutoPrint.stageTwoDialogObserverScript(deadlineMilliseconds: deadline)
+            ) { [weak self, weak webView] result, error in
+                guard let self else { return }
+                self.autoPrintStageTwoObserverPopupIDs.remove(key)
+                guard let webView else { return }
+                let values = result as? [String: Any]
+                let outcome = values?["result"] as? String
+                    ?? (error == nil ? "invalid-result" : "evaluation-error")
+                let elapsed = (values?["elapsedMilliseconds"] as? NSNumber)?.intValue ?? -1
+                let nsError = error as NSError?
+                browserAutoPrintLogger.info(
+                    "[AutoPrint] stage=2 observer=ended outcome=\(outcome, privacy: .public) elapsedMilliseconds=\(elapsed, privacy: .public) sequence=\(sequence, privacy: .public) webView=\(self.navigationTraceIdentity(webView), privacy: .public) errorDomain=\(nsError?.domain ?? "none", privacy: .public) errorCode=\(nsError?.code ?? 0, privacy: .public)"
+                )
+                // Teardown, a retry or a cancellation retires the sequence; a result that arrives
+                // afterwards is inert and must not restart anything.
+                guard self.autoPrintStageTwoReadinessSequences[key] == sequence else {
+                    browserAutoPrintLogger.info(
+                        "[AutoPrint] stage=2 observer=ignored reason=superseded sequence=\(sequence, privacy: .public) webView=\(self.navigationTraceIdentity(webView), privacy: .public)"
+                    )
+                    return
+                }
+                guard outcome == "dialog-present" || outcome == "dialog-inserted" else {
+                    self.cancelAutoPrintStageTwoReadinessSchedule(
+                        for: webView,
+                        reason: "observer-" + outcome
+                    )
+                    return
+                }
+                self.evaluateAutoPrintStageTwoReadiness(
+                    ["readyState": "complete"],
+                    webView: webView,
+                    completedURL: completedURL,
+                    attempt: 0,
+                    sequence: sequence
+                ) { [weak self, weak webView] readiness in
+                    guard let self, let webView else { return }
+                    guard case .notReady = readiness else { return }
+                    // The observed dialog did not qualify. The deadline is spent and nothing else
+                    // is scheduled, so this is where the run ends.
+                    self.cancelAutoPrintStageTwoReadinessSchedule(
+                        for: webView,
+                        reason: "observer-dialog-not-qualifying"
                     )
                 }
             }
@@ -1871,12 +2119,24 @@ extension BrowserWebView {
             browserAutoPrintLogger.info(
                 "[AutoPrint] stage=2 readiness-schedule=cancelled reason=\(reason, privacy: .public) webView=\(self.navigationTraceIdentity(webView), privacy: .public)"
             )
+            // Two cancellations mean the run continues rather than ends: a schedule being replaced
+            // by a newer one, and the cancellation taken immediately before Stage 2's invocation.
+            guard reason != "replaced-by-new-readiness-schedule",
+                  reason != "invocation-attempted" else { return }
+            failCrewAccessAutoPrintIfTerminal(
+                stage: 2,
+                key: key,
+                identity: navigationTraceIdentity(webView),
+                sequence: 0,
+                reason: "readiness-" + reason
+            )
         }
 
         @MainActor
         var hasPendingAutoPrintStageTwoReadinessWork: Bool {
             !autoPrintStageTwoReadinessSequences.isEmpty
                 || !autoPrintStageTwoReadinessTasks.isEmpty
+                || !autoPrintStageTwoObserverPopupIDs.isEmpty
         }
 
         /// Stage 2 structural preflight, called exactly once after the minimum settle delay. Only
@@ -2049,6 +2309,10 @@ extension BrowserWebView {
                 )
                 return
             }
+            // From this point a print may actually be submitted, so the run is waiting on the PDF
+            // callback rather than on a schedule. Released only if Stage 2's own result proves
+            // nothing was submitted.
+            autoPrintPrintOutputExpectedPopupIDs.insert(key)
             cancelAutoPrintStageTwoReadinessSchedule(
                 for: webView,
                 reason: "invocation-attempted"
@@ -2074,6 +2338,17 @@ extension BrowserWebView {
 
                 browserAutoPrintLogger.info(
                     "[AutoPrint] stage=2 executionResult=\(jsResult, privacy: .public) reason=\(jsReason, privacy: .public) qualifyingCount=\(count, privacy: .public) dialogCount=\(self.probeInt(diagnostic, "dialogCount"), privacy: .public) qualifyingDialogCount=\(self.probeInt(diagnostic, "qualifyingDialogCount"), privacy: .public) submitButtonCount=\(self.probeInt(diagnostic, "submitButtonCount"), privacy: .public) visibleSubmitButtonCount=\(self.probeInt(diagnostic, "visibleSubmitButtonCount"), privacy: .public) webView=\(self.navigationTraceIdentity(webView), privacy: .public) errorDomain=\(nsError?.domain ?? "none", privacy: .public) errorCode=\(nsError?.code ?? 0, privacy: .public) retry=false"
+                )
+                guard jsResult != "invoked" else { return }
+                // Stage 2 attempted and the page world reported no submission, so no print output
+                // can follow. The one-shot stays consumed; recovery is the user's decision.
+                self.autoPrintPrintOutputExpectedPopupIDs.remove(key)
+                self.failCrewAccessAutoPrintIfTerminal(
+                    stage: 2,
+                    key: key,
+                    identity: self.navigationTraceIdentity(webView),
+                    sequence: sequence,
+                    reason: "invocation-" + jsResult
                 )
             }
         }
@@ -2325,6 +2600,16 @@ extension BrowserWebView {
             browserAutoPrintLogger.info(
                 "[AutoPrint] stage=1 settle-delay=cancelled reason=\(reason, privacy: .public) webView=\(identity, privacy: .public)"
             )
+            // `invocation-attempted` is the one cancellation that means the run continues: the
+            // Stage 1 JavaScript is about to be scheduled on the very next statement.
+            guard reason != "invocation-attempted" else { return }
+            failCrewAccessAutoPrintIfTerminal(
+                stage: 1,
+                key: key,
+                identity: identity,
+                sequence: 0,
+                reason: "settle-delay-" + reason
+            )
         }
 
         /// Test introspection: whether a pre-Stage-1 settle delay is still pending.
@@ -2400,6 +2685,11 @@ extension BrowserWebView {
                 )
                 return
             }
+            // Held from here until the JavaScript completion handler runs. Between the settle
+            // delay being cancelled and Stage 2's readiness schedule being registered, no other
+            // registry holds this popup, and an auto-print run that is mid-invocation is not a
+            // terminal one.
+            autoPrintStageOneInvocationsInFlightPopupIDs.insert(key)
             cancelAutoPrintStageOneSettleDelay(
                 for: webView,
                 reason: "invocation-attempted"
@@ -2423,6 +2713,7 @@ extension BrowserWebView {
                 CrewAccessAutoPrint.invocationScript
             ) { [weak self] result, error in
                 guard let self else { return }
+                self.autoPrintStageOneInvocationsInFlightPopupIDs.remove(key)
                 // Resolve the already-consumed popup identity from Coordinator ownership. The
                 // earlier weak capture could silently become nil after logging Stage 1 `invoked`,
                 // dropping the Stage 2 handoff without a scheduler rejection event.
@@ -2473,6 +2764,23 @@ extension BrowserWebView {
                     browserAutoPrintLogger.info(
                         "[AutoPrint] stage=2 schedule=cancelled reason=stage-one-popup-untracked webView=\(String(describing: key), privacy: .public)"
                     )
+                    self.failCrewAccessAutoPrintIfTerminal(
+                        stage: 1,
+                        key: key,
+                        identity: String(describing: key),
+                        sequence: settleSequence,
+                        reason: "invocation-popup-untracked"
+                    )
+                } else {
+                    // The one-shot is spent and Stage 2 is never reached, so nothing else in the
+                    // run can produce print output for this popup.
+                    self.failCrewAccessAutoPrintIfTerminal(
+                        stage: 1,
+                        key: key,
+                        identity: self.navigationTraceIdentity(stageOneWebView),
+                        sequence: settleSequence,
+                        reason: "invocation-" + jsResult
+                    )
                 }
             }
         }
@@ -2504,7 +2812,7 @@ extension BrowserWebView {
             let scheme = responseURL?.scheme ?? "(nil)"
 
             DispatchQueue.main.async {
-                self.viewModel.statusMessage = "✈️ PDF detected (scheme: \(scheme))"
+                self.viewModel.beginCrewAccessImportingPresentation()
             }
 
             switch scheme {
@@ -2530,7 +2838,7 @@ extension BrowserWebView {
                 }
                 let parentWV = popupParents[ObjectIdentifier(webView)] ?? webView
                 DispatchQueue.main.async {
-                    self.viewModel.statusMessage = "📄 Fetching blob PDF..."
+                    self.viewModel.beginCrewAccessImportingPresentation()
                 }
                 extractBlobFromURL(urlStr, from: parentWV)
 
@@ -2552,7 +2860,7 @@ extension BrowserWebView {
 
         private func downloadPDF(from url: URL, cookies: [HTTPCookie]) {
             DispatchQueue.main.async {
-                self.viewModel.statusMessage = "📥 Fetching PDF..."
+                self.viewModel.beginCrewAccessImportingPresentation()
             }
             let cookieHeader = cookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
             var request = URLRequest(url: url,
@@ -2653,10 +2961,229 @@ extension BrowserWebView {
 
         @MainActor
         private func finishPDFProcessing(_ data: Data, sourceFileName: String?) {
-            // Blob extraction no longer needs popupParents once Data has been materialized.
-            // Hand the value to the importer first, then tear down every live popup.
-            pdfDataHandler(data, sourceFileName)
-            closePopups()
+            guard !isPDFImportInFlight, !isAwaitingIncompleteImportDecision else {
+                let reason = isPDFImportInFlight ? "import-in-flight" : "awaiting-user-decision"
+                browserAutoPrintLogger.info("[AutoPrint] PDF callback ignored reason=\(reason, privacy: .public)")
+                return
+            }
+            isPDFImportInFlight = true
+            pdfDataHandler(data, sourceFileName) { [weak self] result in
+                guard let self else { return }
+                self.isPDFImportInFlight = false
+                self.isAutoPrintRetryInFlight = false
+                switch result {
+                case .incompleteTrip:
+                    self.isAwaitingIncompleteImportDecision = true
+                    browserAutoPrintLogger.info(
+                        "[AutoPrint] incomplete import retained current popup for user-directed retry"
+                    )
+                case .previewReady, .rejected:
+                    self.isAwaitingIncompleteImportDecision = false
+                    self.closePopups()
+                }
+            }
+        }
+
+        /// Whether anything can still advance the auto-print run for this popup: a bounded probe
+        /// chain, a Stage 1 settle delay, a Stage 1 invocation, a Stage 2 readiness schedule, or a
+        /// Stage 2 invocation whose print output may still arrive. The terminal funnel below only
+        /// converts a run into a failure once this answers `false`, so a run that is merely between
+        /// two scheduled steps is never mistaken for a dead one.
+        @MainActor
+        private func hasPendingCrewAccessAutoPrintWork(forKey key: ObjectIdentifier) -> Bool {
+            crewAccessProbeSequences[key] != nil
+                || crewAccessProbeTasks[key] != nil
+                || autoPrintStageOneSettleSequences[key] != nil
+                || autoPrintStageOneSettleTasks[key] != nil
+                || autoPrintStageOneInvocationsInFlightPopupIDs.contains(key)
+                || autoPrintStageTwoReadinessSequences[key] != nil
+                || autoPrintStageTwoReadinessTasks[key] != nil
+                || autoPrintStageTwoObserverPopupIDs.contains(key)
+                || autoPrintPrintOutputExpectedPopupIDs.contains(key)
+                || autoPrintRetryCensusPopupIDs.contains(key)
+        }
+
+        /// Test introspection: whether any auto-print work is still pending for the tracked popup.
+        @MainActor
+        var hasPendingCrewAccessAutoPrintWorkForTrackedPopup: Bool {
+            popupWebViews.contains { hasPendingCrewAccessAutoPrintWork(forKey: ObjectIdentifier($0)) }
+        }
+
+        /// The popup a user-directed retry would act on, or `nil` when no popup can be retried.
+        /// Split out of `retryCrewAccessAutoPrintIfPossible()` so the terminal funnel can report
+        /// whether `Try Again` is actually available without duplicating the ownership rules.
+        @MainActor
+        private func crewAccessAutoPrintRetryTarget() -> WKWebView? {
+            guard !isPDFImportInFlight,
+                  activePopupTeardownGeneration == nil,
+                  popupWebViews.count == 1,
+                  let popup = popupWebViews.first,
+                  viewModel.popupWebView === popup,
+                  CrewAccessAutoPrint.isExactZscalerSessionURL(popup.url)
+            else { return nil }
+            return popup
+        }
+
+        /// The single conversion of a terminal auto-print outcome into the recoverable failure the
+        /// user can act on.
+        ///
+        /// Every path that ends an auto-print run without producing print output funnels here, so
+        /// `Importing Trip…` can never outlive the work that put it on screen. It deliberately does
+        /// nothing while any step of the run is still pending: the Stage 1 probe chain keeps
+        /// sampling in parallel with the settle delay and with Stage 2, so an individual step
+        /// ending is not by itself evidence that the run is over.
+        @MainActor
+        private func failCrewAccessAutoPrintIfTerminal(
+            stage: Int,
+            key: ObjectIdentifier,
+            identity: String,
+            sequence: UInt,
+            reason: String
+        ) {
+            guard viewModel.isImportingCrewAccessTrip,
+                  activePopupTeardownGeneration == nil,
+                  !isPDFImportInFlight,
+                  !isAwaitingIncompleteImportDecision,
+                  !autoPrintTerminalFailurePopupIDs.contains(key),
+                  !hasPendingCrewAccessAutoPrintWork(forKey: key)
+            else { return }
+
+            autoPrintTerminalFailurePopupIDs.insert(key)
+            isAutoPrintRetryInFlight = false
+            // The import attempt is over and the decision is now the user's. This also makes a late
+            // PDF callback inert, which is correct: no print was submitted on any path that
+            // reaches here.
+            isAwaitingIncompleteImportDecision = true
+            let retryAvailable = crewAccessAutoPrintRetryTarget() != nil
+            lastTerminalFailure = TerminalFailureRecord(
+                stage: stage,
+                reason: reason,
+                retryAvailable: retryAvailable
+            )
+            terminalFailureCount += 1
+            browserAutoPrintLogger.info(
+                "[AutoPrint] stage=\(stage, privacy: .public) terminal=failure reason=\(reason, privacy: .public) sequence=\(sequence, privacy: .public) popupGeneration=\(self.popupGeneration(forKey: key), privacy: .public) webView=\(identity, privacy: .public) loadingState=cleared retryAvailable=\(retryAvailable, privacy: .public)"
+            )
+            viewModel.endCrewAccessImportingPresentation()
+            viewModel.presentIncompleteImportFailure()
+        }
+
+        /// `Cancel` on the failure alert. Stops every remaining sampling task for the tracked
+        /// popups, imports nothing, and leaves the popup attached and usable.
+        @MainActor
+        func cancelCrewAccessAutoPrint() {
+            for popup in popupWebViews {
+                let key = ObjectIdentifier(popup)
+                cancelCrewAccessProbe(for: popup)
+                cancelAutoPrintStageOneSettleDelay(for: popup, reason: "user-requested-cancel")
+                cancelAutoPrintStageTwoReadinessSchedule(for: popup, reason: "user-requested-cancel")
+                autoPrintTerminalFailurePopupIDs.remove(key)
+                autoPrintStageOneInvocationsInFlightPopupIDs.remove(key)
+                autoPrintPrintOutputExpectedPopupIDs.remove(key)
+                autoPrintStageTwoObserverPopupIDs.remove(key)
+                autoPrintRetryCensusPopupIDs.remove(key)
+                browserAutoPrintLogger.info(
+                    "[AutoPrint] cancel=user-requested popupGeneration=\(self.popupGeneration(forKey: key), privacy: .public) webView=\(self.navigationTraceIdentity(popup), privacy: .public) samplingStopped=true"
+                )
+            }
+            isAwaitingIncompleteImportDecision = false
+            isAutoPrintRetryInFlight = false
+        }
+
+        @MainActor
+        func retryCrewAccessAutoPrintIfPossible() -> Bool {
+            guard !isAutoPrintRetryInFlight,
+                  isAwaitingIncompleteImportDecision,
+                  let popup = crewAccessAutoPrintRetryTarget()
+            else { return false }
+
+            let key = ObjectIdentifier(popup)
+            // Two recoverable shapes reach the same alert: an import that completed with too few
+            // legs (both one-shots consumed), and a run that ended terminally before any print was
+            // submitted (one-shots possibly untouched).
+            let consumedBothStages = autoPrintStageOneAttemptedPopupIDs.contains(key)
+                && autoPrintStageTwoAttemptedPopupIDs.contains(key)
+            guard consumedBothStages || autoPrintTerminalFailurePopupIDs.contains(key)
+            else { return false }
+
+            // Cancelling first is what keeps the retry from ever running a second sampling chain
+            // alongside the first: `beginCrewAccessAutoPrintSamplingIfNeeded` below registers a new
+            // probe sequence only after every earlier schedule for this popup is gone.
+            cancelCrewAccessProbe(for: popup)
+            cancelAutoPrintStageOneSettleDelay(for: popup, reason: "user-requested-retry")
+            cancelAutoPrintStageTwoReadinessSchedule(for: popup, reason: "user-requested-retry")
+            autoPrintStageOneAttemptedPopupIDs.remove(key)
+            autoPrintStageTwoAttemptedPopupIDs.remove(key)
+            autoPrintStageOneInvocationsInFlightPopupIDs.remove(key)
+            autoPrintPrintOutputExpectedPopupIDs.remove(key)
+            autoPrintStageTwoObserverPopupIDs.remove(key)
+            autoPrintRetryCensusPopupIDs.remove(key)
+            autoPrintTerminalFailurePopupIDs.remove(key)
+            isAwaitingIncompleteImportDecision = false
+            isAutoPrintRetryInFlight = true
+            browserAutoPrintLogger.info(
+                "[AutoPrint] retry=started path=existing-production-flow recovery=\(consumedBothStages ? "incomplete-trip" : "terminal-failure", privacy: .public) webView=\(self.navigationTraceIdentity(popup), privacy: .public)"
+            )
+            // The cover belongs to the retry from here, whatever the census decides, so a census
+            // that resolves immediately cannot be overwritten by state the caller sets afterwards.
+            viewModel.beginCrewAccessImportingPresentation()
+            beginRetryDialogCensus(popup: popup)
+            return true
+        }
+
+        /// Read-only census taken before a retry is allowed to click Print again.
+        ///
+        /// It runs the Stage 2 readiness script unchanged — the same selectors, no mutation — and
+        /// reads only its dialog counts. A retry that starts on top of the previous attempt's
+        /// dialog is not a clean retry: Stage 2 would find that dialog immediately and submit it,
+        /// importing a PDF this attempt never asked the isolation client to render. There is no
+        /// safe way to dismiss the inherited dialog from here without introducing a second
+        /// invocation surface, so such a retry fails safely instead.
+        @MainActor
+        private func beginRetryDialogCensus(popup: WKWebView) {
+            let key = ObjectIdentifier(popup)
+            let identity = navigationTraceIdentity(popup)
+            autoPrintRetryCensusPopupIDs.insert(key)
+            autoPrintStageTwoReadinessEvaluator(
+                popup,
+                CrewAccessAutoPrint.stageTwoReadinessScript
+            ) { [weak self, weak popup] result, error in
+                guard let self else { return }
+                self.autoPrintRetryCensusPopupIDs.remove(key)
+                guard let popup,
+                      self.popupWebViews.contains(where: { $0 === popup }),
+                      self.isAutoPrintRetryInFlight
+                else { return }
+                let diagnostic = (result as? [String: Any])?["diagnostic"] as? [String: Any] ?? [:]
+                let dialogCount = self.probeInt(diagnostic, "dialogCount")
+                let qualifyingDialogCount = self.probeInt(diagnostic, "qualifyingDialogCount")
+                let nsError = error as NSError?
+                browserAutoPrintLogger.info(
+                    "[AutoPrint] retry=census dialogCount=\(dialogCount, privacy: .public) qualifyingDialogCount=\(qualifyingDialogCount, privacy: .public) webView=\(identity, privacy: .public) errorDomain=\(nsError?.domain ?? "none", privacy: .public) errorCode=\(nsError?.code ?? 0, privacy: .public)"
+                )
+                guard dialogCount <= 0 else {
+                    browserAutoPrintLogger.info(
+                        "[AutoPrint] retry=refused reason=inherited-dialog dialogCount=\(dialogCount, privacy: .public) webView=\(identity, privacy: .public)"
+                    )
+                    self.isAutoPrintRetryInFlight = false
+                    self.failCrewAccessAutoPrintIfTerminal(
+                        stage: 1,
+                        key: key,
+                        identity: identity,
+                        sequence: 0,
+                        reason: "retry-inherited-dialog"
+                    )
+                    return
+                }
+                // `-1` means the census itself could not be read. That is not evidence of a dirty
+                // page, so the retry proceeds and says so rather than becoming unrecoverable.
+                if dialogCount < 0 {
+                    browserAutoPrintLogger.info(
+                        "[AutoPrint] retry=census-unavailable webView=\(identity, privacy: .public)"
+                    )
+                }
+                self.beginCrewAccessAutoPrintSamplingIfNeeded(popup, completedURL: popup.url)
+            }
         }
 
         @MainActor
@@ -2675,6 +3202,9 @@ extension BrowserWebView {
             }
 
             var popups = popupWebViews
+            isAutoPrintRetryInFlight = false
+            isAwaitingIncompleteImportDecision = false
+            viewModel.endCrewAccessImportingPresentation()
             if let visiblePopup = viewModel.popupWebView,
                !popups.contains(where: { $0 === visiblePopup }) {
                 popups.append(visiblePopup)
@@ -2776,6 +3306,11 @@ extension BrowserWebView {
                 )
                 let removedStageOneOneShot = autoPrintStageOneAttemptedPopupIDs.remove(popupKey) != nil
                 let removedStageTwoOneShot = autoPrintStageTwoAttemptedPopupIDs.remove(popupKey) != nil
+                autoPrintTerminalFailurePopupIDs.remove(popupKey)
+                autoPrintStageOneInvocationsInFlightPopupIDs.remove(popupKey)
+                autoPrintPrintOutputExpectedPopupIDs.remove(popupKey)
+                autoPrintStageTwoObserverPopupIDs.remove(popupKey)
+                autoPrintRetryCensusPopupIDs.remove(popupKey)
                 // The generation is retired with the popup, so a recycled address cannot inherit
                 // the identity a pending settle delay captured.
                 popupGenerations.removeValue(forKey: popupKey)

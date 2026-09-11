@@ -113,7 +113,8 @@ struct FriendMatchPresentationView: View {
 /// Shared flight row used by TimelineTabView and ScheduleTimelineRendererView.
 ///
 /// All computed values (timeRangeText, dayDiff, blockConnectionDisplay) are pre-computed by the caller,
-/// keeping UTC/LCL logic and friend-match state entirely in the owning view.
+/// keeping UTC/LCL logic and friend-match state entirely in the owning view. Pass nil for
+/// blockConnectionDisplay when a compact route-and-time-only presentation is needed.
 /// `iconColor` defaults to `.primary`; pass `friendMatchAmber` for friend highlights.
 /// `onFriendMatchTap` is nil in ScheduleTimelineRendererView (Friends Timeline, no tap needed).
 struct TimelineFlightRow: View {
@@ -122,7 +123,7 @@ struct TimelineFlightRow: View {
     let fontScale: CGFloat
     let timeRangeText: String
     let dayDiff: Int
-    let blockConnectionDisplay: BlockConnectionDisplay
+    let blockConnectionDisplay: BlockConnectionDisplay?
     var iconColor: Color = .primary
     /// Transient UI state (selection, highlight) that must take precedence over the
     /// schedule-state tint. Rendered in the same layer as `rowBackground` so it cannot be
@@ -189,11 +190,13 @@ struct TimelineFlightRow: View {
                         .appScaledFont(.footnote, scale: fontScale)
                         .foregroundStyle(isPast ? .gray : .primary)
                     Spacer()
-                    BlockConnectionDisplayView(
-                        display: blockConnectionDisplay,
-                        fontScale: fontScale,
-                        foregroundColor: isPast ? .gray : .primary
-                    )
+                    if let blockConnectionDisplay {
+                        BlockConnectionDisplayView(
+                            display: blockConnectionDisplay,
+                            fontScale: fontScale,
+                            foregroundColor: isPast ? .gray : .primary
+                        )
+                    }
                 }
             }
         }

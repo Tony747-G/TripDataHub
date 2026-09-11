@@ -297,3 +297,13 @@ Timeline visibility MUST NOT cancel, hide, or alter report notifications or the 
 **Enforced by:** the absence of an ActivityKit dependency in production Flight Countdown sources, removal of `NSSupportsLiveActivities`, a snapshot-only coordinator, and the production runtime-path regression guard.
 
 **See also:** `docs/ADR/ADR-004-flight-operational-state-model.md`.
+
+---
+
+## INV-022: CrewAccess Trips Require At Least Two Parsed Flight Legs
+
+**Rule:** A CrewAccess PDF import is valid only when its parsed schedule contains at least two flight legs. A parsed result with zero or one flight leg MUST be rejected before `PendingImport` is created and MUST NOT present Import Preview.
+
+**Why:** A TripDataHub trip represents a sequence that leaves base and eventually returns to base. Zero- and one-leg results are incomplete imports, not valid trips.
+
+**Enforced by:** `CrewAccessTripLegCountValidator`, `AppViewModel.importCrewAccessPDFDataWithResult`, and focused import/retry tests covering zero, one, two, and more-than-two legs.

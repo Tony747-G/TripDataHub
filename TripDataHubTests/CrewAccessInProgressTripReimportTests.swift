@@ -500,25 +500,28 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
             .appendingPathComponent("TripDataHub/Views/ImportPreviewView.swift")
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
 
-        XCTAssertTrue(source.contains("Button(\"Confirm Import\")"))
+        XCTAssertTrue(source.contains("primaryTitle: replacements.isEmpty ? \"Import\" : \"Replace and Import\""))
         XCTAssertTrue(source.contains("if replacements.isEmpty"))
         XCTAssertTrue(source.contains(".alert(item: $replacementConfirmation)"))
         XCTAssertFalse(source.contains(".confirmationDialog"))
 
         let previewButtonStart = try XCTUnwrap(
-            source.range(of: "Button(\"Replace and Import\", role: .destructive)")
+            source.range(of: "primaryTitle: replacements.isEmpty ? \"Import\" : \"Replace and Import\"")
         ).lowerBound
         let previewButtonEnd = try XCTUnwrap(
-            source.range(of: ".disabled(!pending.canConfirm)", range: previewButtonStart..<source.endIndex)
-        ).upperBound
+            source.range(of: "onCancel:", range: previewButtonStart..<source.endIndex)
+        ).lowerBound
         let previewButtonSource = source[previewButtonStart..<previewButtonEnd]
-        XCTAssertFalse(previewButtonSource.contains("confirmPendingImport"))
+        XCTAssertEqual(previewButtonSource.components(separatedBy: "confirmPendingImport").count - 1, 1)
         XCTAssertTrue(previewButtonSource.contains("replacementConfirmation ="))
 
         let alertStart = try XCTUnwrap(
             source.range(of: ".alert(item: $replacementConfirmation)")
         ).lowerBound
-        let alertSource = source[alertStart...]
+        let alertEnd = try XCTUnwrap(
+            source.range(of: "private func preview", range: alertStart..<source.endIndex)
+        ).lowerBound
+        let alertSource = source[alertStart..<alertEnd]
         XCTAssertEqual(alertSource.components(separatedBy: "confirmPendingImport").count - 1, 1)
         XCTAssertTrue(alertSource.contains("expectedReplacementIDs: confirmation.expectedReplacementIDs"))
     }
@@ -536,7 +539,8 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(previewSource.contains("Section(\"Import Status\")"))
+        XCTAssertTrue(previewSource.contains("Section(\"Import Issue\")"))
+        XCTAssertTrue(previewSource.contains("ImportPreviewStatusPolicy.actionableMessage"))
         XCTAssertTrue(previewSource.contains("viewModel.crewAccessImportMessage"))
         for reason in [
             "reason=invalid_preview",
@@ -1706,6 +1710,14 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
                     flight: "70",
                     startUtc: "2025-12-05T06:00:00Z",
                     endUtc: "2025-12-05T12:00:00Z"
+                ),
+                item(
+                    sequence: 2,
+                    from: "SDF",
+                    to: "ANC",
+                    flight: "71",
+                    startUtc: "2025-12-06T06:00:00Z",
+                    endUtc: "2025-12-06T12:00:00Z"
                 )
             ]
         )

@@ -19,6 +19,20 @@ struct CrewAccessImportDraft {
     let rawExtractStats: RawExtractStats
 }
 
+enum CrewAccessTripLegCountValidator {
+    static let minimumValidLegCount = 2
+
+    static func isValid(legCount: Int) -> Bool {
+        legCount >= minimumValidLegCount
+    }
+}
+
+enum CrewAccessPDFImportResult: Equatable {
+    case previewReady
+    case incompleteTrip
+    case rejected
+}
+
 struct PendingImport: Identifiable {
     let id: UUID
     let source: PendingImportSource

@@ -13,7 +13,7 @@ struct CrewAccessImportHelpView: View {
                 Text("7. Tap the hamburger menu (≡) at the top-right of the Zscaler sheet.")
                 Text("8. Tap Print.")
                 Text("9. Tap the Print button, then share the generated PDF to TripData if you are in Safari.")
-                Text("10. When Import Preview appears, verify the Trip Id and legs, then tap Confirm Import.")
+                Text("10. When Import Preview appears, verify the trip and legs, then tap Import.")
             }
             Section("Reset the In-App Browser") {
                 Text("Use the reset button when CrewAccess or Zscaler gets stuck on Bad Request, HTTP 500, or a blank Print action.")

@@ -15,9 +15,6 @@ struct SettingsTabView: View {
     @AppStorage(ProfileStorageKeys.faaMedicalExpiryDate) private var faaMedicalExpiryDate = ""
     @AppStorage(ProfileStorageKeys.passportExpiryDate) private var passportExpiryDate = ""
     @AppStorage(ProfileStorageKeys.chinaVisaExpiryDate) private var chinaVisaExpiryDate = ""
-    @AppStorage(CrewAccessAutoPrintSettings.stageOneSettleDurationMillisecondsKey)
-    private var crewAccessStageOneSettleDurationMilliseconds =
-        CrewAccessAutoPrintSettings.defaultStageOneSettleDurationMilliseconds
     @State private var showNotificationDeniedAlert = false
 
     private var appearanceModeBinding: Binding<AppearanceMode> {
@@ -31,20 +28,6 @@ struct SettingsTabView: View {
         Binding(
             get: { AppFontSizeOption(rawValue: appFontSizeOptionRawValue) ?? .medium },
             set: { appFontSizeOptionRawValue = $0.rawValue }
-        )
-    }
-
-    private var crewAccessStageOneSettleDurationBinding: Binding<Int> {
-        Binding(
-            get: {
-                CrewAccessAutoPrintSettings.validatedStageOneSettleDurationMilliseconds(
-                    crewAccessStageOneSettleDurationMilliseconds
-                )
-            },
-            set: {
-                crewAccessStageOneSettleDurationMilliseconds =
-                    CrewAccessAutoPrintSettings.validatedStageOneSettleDurationMilliseconds($0)
-            }
         )
     }
 
@@ -75,26 +58,6 @@ struct SettingsTabView: View {
                 }
             } header: {
                 sectionHeader("CrewAccess")
-            }
-
-            Section {
-                Picker(
-                    "Stage 1 Settle Duration",
-                    selection: crewAccessStageOneSettleDurationBinding
-                ) {
-                    ForEach(
-                        CrewAccessAutoPrintSettings.allowedStageOneSettleDurationMilliseconds,
-                        id: \.self
-                    ) { milliseconds in
-                        Text(String(format: "%.1f seconds", Double(milliseconds) / 1_000))
-                            .tag(milliseconds)
-                    }
-                }
-                .pickerStyle(.menu)
-            } header: {
-                sectionHeader("CrewAccess Testing")
-            } footer: {
-                Text("Developer testing control. Changes only the delay before automatic toolbar Print.")
             }
 
             if AppEnvironment.isTripBoardFetchVisible {

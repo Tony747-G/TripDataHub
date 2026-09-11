@@ -16,6 +16,10 @@ enum BrowserStatusText {
     static let unableToLoadReport = "Unable to load report. Please reset the browser using the eraser icon in the top-right corner."
 }
 
+struct CrewAccessIncompleteImportFailure: Identifiable, Equatable {
+    let id = UUID()
+}
+
 enum BrowserPageStatusClassifier {
     static func status(
         url: URL?,
@@ -55,6 +59,10 @@ final class BrowserViewModel {
     var isLoading: Bool = false
     var statusMessage: String = "Open CrewAccess and import a trip"
     var errorMessage: String? = nil
+    private(set) var isImportingCrewAccessTrip = false
+    private(set) var incompleteImportFailure: CrewAccessIncompleteImportFailure?
+    private(set) var isPDFImportInProgress = false
+    private(set) var isAutoPrintRetryInProgress = false
 
     var statusIsError: Bool {
         statusMessage == BrowserStatusText.networkError
@@ -64,6 +72,11 @@ final class BrowserViewModel {
     /// Coordinator-owned popup teardown. Views may request cleanup, but only the
     /// BrowserWebView coordinator owns and mutates the popup lifecycle collections.
     @ObservationIgnored var requestPopupTeardown: (@MainActor () -> Void)?
+    @ObservationIgnored var requestAutoPrintRetry: (@MainActor () -> Bool)?
+    /// Cancelling the failure alert has to reach the Coordinator as well as this view model: the
+    /// bounded sampling schedules are Coordinator-owned, and a cancelled import must not leave one
+    /// of them running behind a dismissed alert.
+    @ObservationIgnored var requestAutoPrintCancel: (@MainActor () -> Void)?
 
     // MARK: - AppViewModel への参照
 
@@ -71,21 +84,95 @@ final class BrowserViewModel {
 
     // MARK: - PDF取り込み（WebView.Coordinator から呼び出す）
 
-    func handlePDFData(_ data: Data, sourceFileName: String?) {
-        statusMessage = "✈️ Importing PDF..."
-        guard let appViewModel else {
-            errorMessage = "AppViewModel not found"
+    func handlePDFData(
+        _ data: Data,
+        sourceFileName: String?,
+        completion: @escaping @MainActor (CrewAccessPDFImportResult) -> Void
+    ) {
+        guard !isPDFImportInProgress else {
+            completion(.rejected)
             return
         }
+        beginCrewAccessImportingPresentation()
+        guard let appViewModel else {
+            errorMessage = "AppViewModel not found"
+            completion(.rejected)
+            return
+        }
+        isPDFImportInProgress = true
         Task { [weak self] in
-            let success = await appViewModel.importCrewAccessPDFData(data, sourceFileName: sourceFileName)
-            guard let self else { return }
-            if success {
+            let result = await appViewModel.importCrewAccessPDFDataWithResult(
+                data,
+                sourceFileName: sourceFileName
+            )
+            guard let self else {
+                completion(result)
+                return
+            }
+            self.isPDFImportInProgress = false
+            self.isAutoPrintRetryInProgress = false
+            switch result {
+            case .previewReady:
+                self.incompleteImportFailure = nil
                 self.statusMessage = "✅ PDF imported — please review the content"
-            } else {
+            case .incompleteTrip:
+                self.presentIncompleteImportFailure()
+            case .rejected:
                 self.statusMessage = "⚠️ Import skipped (already processing)"
             }
+            completion(result)
         }
+    }
+
+    @discardableResult
+    func tryAgainIncompleteImport() -> Bool {
+        guard incompleteImportFailure != nil,
+              !isPDFImportInProgress,
+              !isAutoPrintRetryInProgress
+        else { return false }
+
+        // The retry's presentation state is established BEFORE the coordinator is asked, because
+        // the coordinator's retry can conclude synchronously — a refused dialog census, an
+        // immediately terminal re-entry — and anything set after it returns would overwrite the
+        // failure it just presented.
+        incompleteImportFailure = nil
+        isAutoPrintRetryInProgress = true
+        beginCrewAccessImportingPresentation()
+
+        // A popup that can no longer be retried must not leave the user tapping `Try Again` at an
+        // alert that re-presents itself. Failing safely here means falling back to cancellation.
+        guard let requestAutoPrintRetry, requestAutoPrintRetry() else {
+            isAutoPrintRetryInProgress = false
+            cancelIncompleteImport()
+            return false
+        }
+        return true
+    }
+
+    func cancelIncompleteImport() {
+        incompleteImportFailure = nil
+        isAutoPrintRetryInProgress = false
+        endCrewAccessImportingPresentation()
+        requestAutoPrintCancel?()
+        statusMessage = "CrewAccess import canceled."
+    }
+
+    func presentIncompleteImportFailure() {
+        // A retry that itself failed hands the decision back to the user, so the in-progress mark
+        // has to be released here as well as on the PDF import path — otherwise the second
+        // `Try Again` would be refused by its own concurrency guard.
+        isAutoPrintRetryInProgress = false
+        incompleteImportFailure = CrewAccessIncompleteImportFailure()
+        statusMessage = "⚠️ Unable to import trip"
+    }
+
+    func beginCrewAccessImportingPresentation() {
+        isImportingCrewAccessTrip = true
+        statusMessage = "Importing Trip…"
+    }
+
+    func endCrewAccessImportingPresentation() {
+        isImportingCrewAccessTrip = false
     }
 
     func teardownPopups() {

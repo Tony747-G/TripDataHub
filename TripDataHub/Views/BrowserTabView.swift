@@ -214,16 +214,46 @@ struct BrowserPopupSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                ExistingWebViewWrapper(webView: webView)
+                ZStack {
+                    // Keep the popup attached so its existing WebKit/DOM callbacks continue to
+                    // run, but treat its generated print/PDF content as an implementation detail.
+                    ExistingWebViewWrapper(webView: webView)
+                    if viewModel.isImportingCrewAccessTrip {
+                        Color(.systemBackground)
+                            .overlay {
+                                VStack(spacing: 12) {
+                                    ProgressView()
+                                    Text("Importing Trip…")
+                                        .font(.headline)
+                                }
+                            }
+                    }
+                }
                 BrowserStatusBar(viewModel: viewModel)
             }
-            .navigationTitle("Print Preview")
+            .navigationTitle(viewModel.isImportingCrewAccessTrip ? "Importing Trip" : "Print Preview")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { onDismiss() }
                 }
             }
+        }
+        .alert(
+            "Unable to Import Trip",
+            isPresented: Binding(
+                get: { viewModel.incompleteImportFailure != nil },
+                set: { _ in }
+            )
+        ) {
+            Button("Try Again") {
+                _ = viewModel.tryAgainIncompleteImport()
+            }
+            Button("Cancel", role: .cancel) {
+                viewModel.cancelIncompleteImport()
+            }
+        } message: {
+            Text("The trip data could not be loaded completely. Please try again with a stable network connection.")
         }
     }
 }

@@ -3195,6 +3195,13 @@ final class AppViewModel: ObservableObject {
 
     @discardableResult
     func importCrewAccessPDFData(_ data: Data, sourceFileName: String?) async -> Bool {
+        await importCrewAccessPDFDataWithResult(data, sourceFileName: sourceFileName) == .previewReady
+    }
+
+    func importCrewAccessPDFDataWithResult(
+        _ data: Data,
+        sourceFileName: String?
+    ) async -> CrewAccessPDFImportResult {
         let fingerprint = importPayloadFingerprint(data: data)
 
         if importInProgress || pendingImport != nil {
@@ -3205,7 +3212,7 @@ final class AppViewModel: ObservableObject {
                 logger.info("[Import] direct delivery rejected while another preview is active file=\(sourceFileName ?? "unknown", privacy: .private)")
                 crewAccessImportMessage = "Another import is waiting for review. Confirm or dismiss the current import first."
             }
-            return false
+            return .rejected
         }
         importInProgress = true
 
@@ -3213,7 +3220,7 @@ final class AppViewModel: ObservableObject {
         guard claimResult == .accepted else {
             logger.info("[Import] importCrewAccessPDFData suppressed by content ledger state=\(String(describing: claimResult), privacy: .public) file=\(sourceFileName ?? "unknown", privacy: .private)")
             importInProgress = false
-            return false
+            return .rejected
         }
         logger.info("[Import] importCrewAccessPDFData called file=\(sourceFileName ?? "unknown", privacy: .private) bytes=\(data.count, privacy: .public)")
         // PDF parsing is CPU-heavy (PDFKit text extraction + regex passes).
@@ -3222,6 +3229,16 @@ final class AppViewModel: ObservableObject {
         let draft = await Task.detached(priority: .utility) {
             service.analyzeTrip(pdfData: data, sourceFileName: sourceFileName)
         }.value
+        let parsedLegCount = draft.parsedSchedule?.legs.count ?? 0
+        guard CrewAccessTripLegCountValidator.isValid(legCount: parsedLegCount) else {
+            importFingerprintLedger.releaseActiveClaim(fingerprint)
+            importInProgress = false
+            crewAccessImportMessage = "The trip data could not be loaded completely. Please try again with a stable network connection."
+            logger.error(
+                "[Import] rejected before preview reason=incomplete-trip parsedLegCount=\(parsedLegCount, privacy: .public) file=\(sourceFileName ?? "unknown", privacy: .private)"
+            )
+            return .incompleteTrip
+        }
         pendingImport = PendingImport(
             id: UUID(),
             source: .crewAccessPDF,
@@ -3244,7 +3261,7 @@ final class AppViewModel: ObservableObject {
         } else {
             crewAccessImportMessage = "CrewAccess preview has errors. Fix and retry."
         }
-        return true
+        return .previewReady
     }
 
     func queueExternalOpenURL(_ url: URL) {

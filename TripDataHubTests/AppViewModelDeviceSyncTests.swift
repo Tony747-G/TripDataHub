@@ -719,7 +719,8 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             tripId: "A70606",
             tripInformationDate: "15Jul2026",
             startUtc: "2026-07-15T07:13:00Z",
-            endUtc: "2026-07-18T19:32:00Z"
+            endUtc: "2026-07-18T19:32:00Z",
+            itemCount: 2
         )
         try writeCrewAccessJSON(existingJSON, fileName: "2026-07-12_40303.json")
 
@@ -727,7 +728,8 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             id: "CA26-05-A70606",
             pairing: "A70606",
             depUTC: "2026-07-15T07:13:00Z",
-            arrUTC: "2026-07-18T19:32:00Z"
+            arrUTC: "2026-07-18T19:32:00Z",
+            legCount: 2
         )
         let vm = makeImportViewModel(
             schedule: incomingSchedule,
@@ -771,13 +773,15 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             tripInformationDate: "20Jul2026",
             // 12:00 in Anchorage (AKDT). Report begins at 10:30 local.
             startUtc: "2026-07-20T20:00:00Z",
-            endUtc: "2026-07-20T22:00:00Z"
+            endUtc: "2026-07-20T22:00:00Z",
+            itemCount: 2
         )
         let incomingSchedule = makeSchedule(
             id: "CA26-05-NOON02",
             pairing: "NOON02",
             depUTC: "2026-07-20T20:00:00Z",
-            arrUTC: "2026-07-20T22:00:00Z"
+            arrUTC: "2026-07-20T22:00:00Z",
+            legCount: 2
         )
         let vm = makeImportViewModel(
             schedule: incomingSchedule,
@@ -816,13 +820,15 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             // Flight times do not overlap, but the 17:30Z report is before the
             // existing trip's 18:30Z post-flight release.
             startUtc: "2026-07-20T19:00:00Z",
-            endUtc: "2026-07-20T21:00:00Z"
+            endUtc: "2026-07-20T21:00:00Z",
+            itemCount: 2
         )
         let incomingSchedule = makeSchedule(
             id: "CA26-05-NEXT02",
             pairing: "NEXT02",
             depUTC: "2026-07-20T19:00:00Z",
-            arrUTC: "2026-07-20T21:00:00Z"
+            arrUTC: "2026-07-20T21:00:00Z",
+            legCount: 2
         )
         let vm = makeImportViewModel(
             schedule: incomingSchedule,
@@ -858,13 +864,15 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             tripId: "NO-UTC",
             tripInformationDate: "20Jul2026",
             startUtc: "",
-            endUtc: ""
+            endUtc: "",
+            itemCount: 2
         )
         let incomingSchedule = makeSchedule(
             id: "CA26-05-NO-UTC",
             pairing: "NO-UTC",
             depUTC: "",
-            arrUTC: ""
+            arrUTC: "",
+            legCount: 2
         )
         let vm = makeImportViewModel(
             schedule: incomingSchedule,
@@ -907,7 +915,8 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             tripId: "BACKUP1",
             tripInformationDate: "20Jul2026",
             startUtc: "2026-07-20T13:00:00Z",
-            endUtc: "2026-07-20T19:00:00Z"
+            endUtc: "2026-07-20T19:00:00Z",
+            itemCount: 2
         )
         try writeCrewAccessJSON(existingJSON, fileName: "2026-07-20_BACKUP1.json")
 
@@ -915,7 +924,8 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             id: "CA26-05-BACKUP1",
             pairing: "BACKUP1",
             depUTC: "2026-07-20T13:00:00Z",
-            arrUTC: "2026-07-20T19:00:00Z"
+            arrUTC: "2026-07-20T19:00:00Z",
+            legCount: 2
         )
         let vm = makeImportViewModel(
             schedule: incomingSchedule,
@@ -967,7 +977,8 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             tripId: "B00001",
             tripInformationDate: "02Jun2026",
             startUtc: "2026-06-02T08:00:00Z",
-            endUtc: "2026-06-02T10:00:00Z"
+            endUtc: "2026-06-02T10:00:00Z",
+            itemCount: 2
         )
         try writeCrewAccessJSON(previousBPJSON, fileName: "2025-12-01_B00001.json")
         try writeCrewAccessJSON(existingSameBPJSON, fileName: "2026-06-01_B00001.json")
@@ -976,7 +987,8 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             id: "CA26-06-B00001",
             pairing: "B00001",
             depUTC: "2026-06-02T08:00:00Z",
-            arrUTC: "2026-06-02T10:00:00Z"
+            arrUTC: "2026-06-02T10:00:00Z",
+            legCount: 2
         )
         let importService = FixedImportService(draft: CrewAccessImportDraft(
             sourceFileName: "B00001.pdf",
@@ -1036,13 +1048,15 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             id: "CA26-06-T50001",
             pairing: "T50001",
             depUTC: "2026-06-02T08:00:00Z",
-            arrUTC: "2026-06-02T10:00:00Z"
+            arrUTC: "2026-06-02T10:00:00Z",
+            legCount: 2
         )
         let json = makeCrewAccessJSON(
             tripId: "T50001",
             tripInformationDate: "02Jun2026",
             startUtc: "2026-06-02T08:00:00Z",
-            endUtc: "2026-06-02T10:00:00Z"
+            endUtc: "2026-06-02T10:00:00Z",
+            itemCount: 2
         )
         let suite = "AppViewModelDeviceSyncTests.T5.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -1181,18 +1195,117 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         )
     }
 
+    func test_incompleteTripLegCountValidationRejectsZeroAndOneAndAcceptsTwoOrMore() async {
+        XCTAssertFalse(CrewAccessTripLegCountValidator.isValid(legCount: 0))
+        XCTAssertFalse(CrewAccessTripLegCountValidator.isValid(legCount: 1))
+        XCTAssertTrue(CrewAccessTripLegCountValidator.isValid(legCount: 2))
+        XCTAssertTrue(CrewAccessTripLegCountValidator.isValid(legCount: 4))
+
+        for (legCount, expectedResult) in [
+            (0, CrewAccessPDFImportResult.incompleteTrip),
+            (1, .incompleteTrip),
+            (2, .previewReady),
+            (4, .previewReady)
+        ] {
+            let service = SequencedDraftImportService(drafts: [makeImportDraft(legCount: legCount)])
+            let vm = makeViewModel(importService: service)
+            let result = await vm.importCrewAccessPDFDataWithResult(
+                Data("%PDF leg-count-\(legCount)".utf8),
+                sourceFileName: "leg-count-\(legCount).pdf"
+            )
+
+            XCTAssertEqual(result, expectedResult)
+            XCTAssertEqual(vm.pendingImport != nil, expectedResult == .previewReady)
+        }
+    }
+
+    func test_incompleteTripDoesNotCreateImportPreview() async {
+        for legCount in [0, 1] {
+            let service = SequencedDraftImportService(drafts: [makeImportDraft(legCount: legCount)])
+            let vm = makeViewModel(importService: service)
+            let result = await vm.importCrewAccessPDFDataWithResult(
+                Data("%PDF incomplete-\(legCount)".utf8),
+                sourceFileName: "incomplete-\(legCount).pdf"
+            )
+
+            XCTAssertEqual(result, .incompleteTrip)
+            XCTAssertNil(vm.pendingImport)
+            XCTAssertFalse(vm.isCrewAccessImportInProgress)
+            XCTAssertFalse(
+                ImportPreviewPresentationPolicy.browserPreviewIsPresented(
+                    pendingImportID: vm.pendingImport?.id,
+                    presentsImportPreview: true
+                )
+            )
+        }
+    }
+
+    func test_successfulRetryCreatesOnePreviewAndCannotStartDuplicateRetry() async {
+        let data = Data("%PDF retry-same-trip".utf8)
+        let service = SequencedDraftImportService(drafts: [
+            makeImportDraft(legCount: 1),
+            makeImportDraft(legCount: 2)
+        ])
+        let appViewModel = makeViewModel(importService: service)
+        let browserViewModel = BrowserViewModel()
+        browserViewModel.appViewModel = appViewModel
+
+        let firstResult = await importResult(
+            browserViewModel: browserViewModel,
+            data: data,
+            sourceFileName: "trip.pdf"
+        )
+        XCTAssertEqual(firstResult, .incompleteTrip)
+        XCTAssertNotNil(browserViewModel.incompleteImportFailure)
+        XCTAssertTrue(browserViewModel.isImportingCrewAccessTrip)
+        XCTAssertNil(appViewModel.pendingImport)
+
+        browserViewModel.requestAutoPrintRetry = {
+            browserViewModel.handlePDFData(
+                data,
+                sourceFileName: "trip-retry.pdf",
+                completion: { _ in }
+            )
+            return true
+        }
+
+        XCTAssertTrue(browserViewModel.tryAgainIncompleteImport())
+        XCTAssertTrue(browserViewModel.isImportingCrewAccessTrip)
+        XCTAssertFalse(
+            browserViewModel.tryAgainIncompleteImport(),
+            "the same failure decision cannot start a second concurrent retry"
+        )
+
+        for _ in 0..<500 where appViewModel.pendingImport == nil {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(service.callCount, 2)
+        XCTAssertEqual(appViewModel.pendingImport?.parsedSchedule?.legs.count, 2)
+        XCTAssertTrue(
+            ImportPreviewPresentationPolicy.browserPreviewIsPresented(
+                pendingImportID: appViewModel.pendingImport?.id,
+                presentsImportPreview: true
+            )
+        )
+        XCTAssertFalse(browserViewModel.isPDFImportInProgress)
+        XCTAssertFalse(browserViewModel.isAutoPrintRetryInProgress)
+    }
+
     func test_distinctPDFIsParkedFIFOWhilePreviewIsActive() async throws {
         let schedule = makeSchedule(
             id: "CA26-06-Q00001",
             pairing: "Q00001",
             depUTC: "2026-06-02T08:00:00Z",
-            arrUTC: "2026-06-02T10:00:00Z"
+            arrUTC: "2026-06-02T10:00:00Z",
+            legCount: 2
         )
         let json = makeCrewAccessJSON(
             tripId: "Q00001",
             tripInformationDate: "02Jun2026",
             startUtc: "2026-06-02T08:00:00Z",
-            endUtc: "2026-06-02T10:00:00Z"
+            endUtc: "2026-06-02T10:00:00Z",
+            itemCount: 2
         )
         let suite = "AppViewModelDeviceSyncTests.Queue.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -1264,6 +1377,120 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             deviceScheduleCloudKitService: deviceService,
             crewAccessImportCloudKitService: importCloudKitService,
             keychainService: EmptyKeychainService()
+        )
+    }
+
+    private func makeViewModel(
+        importService: CrewAccessPDFImportServiceProtocol
+    ) -> AppViewModel {
+        AppViewModel(
+            syncService: NoopSyncService(),
+            authService: NoopAuthService(),
+            cacheService: InMemoryCacheService(),
+            notificationService: NoopNotificationService(),
+            crewAccessImportService: importService,
+            friendScheduleCloudKitService: NoopFriendCloudKitService(),
+            gemsVerificationCloudKitService: NoopGEMSVerificationService(),
+            deviceScheduleCloudKitService: FakeDeviceScheduleCloudKitService(),
+            crewAccessImportCloudKitService: NoopCrewAccessImportCloudKitService(),
+            keychainService: EmptyKeychainService(),
+            syncStateDefaults: UserDefaults(
+                suiteName: "AppViewModelDeviceSyncTests.Incomplete.\(UUID().uuidString)"
+            )!,
+            externalOpenCoordinator: ExternalOpenImportCoordinator(dedupTTL: 30)
+        )
+    }
+
+    private func importResult(
+        browserViewModel: BrowserViewModel,
+        data: Data,
+        sourceFileName: String
+    ) async -> CrewAccessPDFImportResult {
+        await withCheckedContinuation { continuation in
+            browserViewModel.handlePDFData(
+                data,
+                sourceFileName: sourceFileName,
+                completion: { continuation.resume(returning: $0) }
+            )
+        }
+    }
+
+    private func makeImportDraft(legCount: Int) -> CrewAccessImportDraft {
+        let legs = (0..<legCount).map { index in
+            TripLeg(
+                id: UUID(),
+                payPeriod: "CA26-06-RETRY1",
+                pairing: "RETRY1",
+                leg: index + 1,
+                flight: "10\(index)",
+                depAirport: index.isMultiple(of: 2) ? "ANC" : "SDF",
+                depLocal: "2026-06-02 00:00",
+                arrAirport: index.isMultiple(of: 2) ? "SDF" : "ANC",
+                arrLocal: "2026-06-02 02:00",
+                depUTC: "2026-06-02T08:00:00Z",
+                arrUTC: "2026-06-02T10:00:00Z",
+                status: "SCH",
+                block: "2:00"
+            )
+        }
+        let items = legs.map { leg in
+            CrewAccessTripItemJSON(
+                sequence: leg.leg,
+                depAirport: leg.depAirport,
+                arrAirport: leg.arrAirport,
+                deadhead: false,
+                flight: leg.flight,
+                startUtc: leg.depUTC ?? "",
+                endUtc: leg.arrUTC ?? "",
+                startLocalDisplay: leg.depLocal,
+                endLocalDisplay: leg.arrLocal,
+                originTz: "America/Anchorage",
+                destinationTz: "America/Kentucky/Louisville",
+                timeDerivation: "test",
+                aircraft: "747",
+                block: leg.block,
+                stdUtc: leg.depUTC,
+                staUtc: leg.arrUTC,
+                atdUtc: nil,
+                ataUtc: nil,
+                tailNumber: nil
+            )
+        }
+        let schedule = legCount == 0 ? nil : PayPeriodSchedule(
+            id: "CA26-06-RETRY1",
+            label: "CA26-06-RETRY1",
+            tripCount: 1,
+            legCount: legs.count,
+            openTimeCount: 0,
+            updatedAt: Date(),
+            legs: legs,
+            openTimeTrips: []
+        )
+        let json = legCount == 0 ? nil : CrewAccessTripJSON(
+            schemaVersion: 2,
+            source: "crewaccess-pdf",
+            sourceVersion: "test",
+            mappingVersion: "test",
+            generatedAt: "2026-06-02T00:00:00Z",
+            tripId: "RETRY1",
+            tripInformationDate: "02Jun2026",
+            creditTime: nil,
+            tripDays: nil,
+            tafb: nil,
+            dutyTotals: [],
+            hotelDetails: [],
+            crew: [],
+            items: items
+        )
+        return CrewAccessImportDraft(
+            sourceFileName: "trip.pdf",
+            tripId: "RETRY1",
+            tripDate: "02Jun2026",
+            parsedSchedule: schedule,
+            jsonPayload: json,
+            warnings: [],
+            errors: [],
+            rawExtractStats: RawExtractStats(pageCount: 1, characterCount: 500, lineCount: 20)
         )
     }
 
@@ -1359,13 +1586,15 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             id: "CA26-06-\(tripID)",
             pairing: tripID,
             depUTC: startUTC,
-            arrUTC: endUTC
+            arrUTC: endUTC,
+            legCount: 2
         )
         let json = makeCrewAccessJSON(
             tripId: tripID,
             tripInformationDate: tripInformationDate,
             startUtc: startUTC,
-            endUtc: endUTC
+            endUtc: endUTC,
+            itemCount: 2
         )
         return CrewAccessImportDraft(
             sourceFileName: "\(tripID).pdf",
@@ -1418,37 +1647,45 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         )
     }
 
-    private func makeSchedule(id: String, pairing: String, depUTC: String, arrUTC: String) -> PayPeriodSchedule {
-        let leg = TripLeg(
-            id: UUID(),
-            payPeriod: "PP26-01",
-            pairing: pairing,
-            leg: 1,
-            flight: "100",
-            depAirport: "ANC",
-            depLocal: "2026-03-21T22:00:00",
-            arrAirport: "SDF",
-            arrLocal: "2026-03-22T06:00:00",
-            depUTC: depUTC,
-            arrUTC: arrUTC,
-            status: "SCH",
-            block: "4:00",
-            layoverStation: nil,
-            layoverHotelName: nil,
-            layoverDuration: nil,
-            stdUTC: nil,
-            staUTC: nil,
-            atdUTC: nil,
-            ataUTC: nil
-        )
+    private func makeSchedule(
+        id: String,
+        pairing: String,
+        depUTC: String,
+        arrUTC: String,
+        legCount: Int = 1
+    ) -> PayPeriodSchedule {
+        let legs = (0..<legCount).map { index in
+            TripLeg(
+                id: UUID(),
+                payPeriod: "PP26-01",
+                pairing: pairing,
+                leg: index + 1,
+                flight: "\(100 + index)",
+                depAirport: index.isMultiple(of: 2) ? "ANC" : "SDF",
+                depLocal: "2026-03-21T22:00:00",
+                arrAirport: index.isMultiple(of: 2) ? "SDF" : "ANC",
+                arrLocal: "2026-03-22T06:00:00",
+                depUTC: depUTC,
+                arrUTC: arrUTC,
+                status: "SCH",
+                block: "4:00",
+                layoverStation: nil,
+                layoverHotelName: nil,
+                layoverDuration: nil,
+                stdUTC: nil,
+                staUTC: nil,
+                atdUTC: nil,
+                ataUTC: nil
+            )
+        }
         return PayPeriodSchedule(
             id: id,
             label: id,
             tripCount: 1,
-            legCount: 1,
+            legCount: legs.count,
             openTimeCount: 0,
             updatedAt: Date(),
-            legs: [leg],
+            legs: legs,
             openTimeTrips: []
         )
     }
@@ -1457,7 +1694,8 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
         tripId: String,
         tripInformationDate: String,
         startUtc: String,
-        endUtc: String
+        endUtc: String,
+        itemCount: Int = 1
     ) -> CrewAccessTripJSON {
         CrewAccessTripJSON(
             schemaVersion: 1,
@@ -1473,13 +1711,13 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
             dutyTotals: [],
             hotelDetails: [],
             crew: [],
-            items: [
+            items: (0..<itemCount).map { index in
                 CrewAccessTripItemJSON(
-                    sequence: 1,
-                    depAirport: "ANC",
-                    arrAirport: "SDF",
+                    sequence: index + 1,
+                    depAirport: index.isMultiple(of: 2) ? "ANC" : "SDF",
+                    arrAirport: index.isMultiple(of: 2) ? "SDF" : "ANC",
                     deadhead: false,
-                    flight: "100",
+                    flight: "\(100 + index)",
                     startUtc: startUtc,
                     endUtc: endUtc,
                     startLocalDisplay: "2026-06-01 00:00",
@@ -1495,7 +1733,7 @@ final class AppViewModelDeviceSyncTests: XCTestCase {
                     ataUtc: nil,
                     tailNumber: nil
                 )
-            ]
+            }
         )
     }
 
@@ -2064,6 +2302,31 @@ private struct RoutedImportService: CrewAccessPDFImportServiceProtocol {
             )
         }
         return draft
+    }
+}
+
+private final class SequencedDraftImportService: CrewAccessPDFImportServiceProtocol, @unchecked Sendable {
+    private let lock = NSLock()
+    private let drafts: [CrewAccessImportDraft]
+    private var nextIndex = 0
+
+    init(drafts: [CrewAccessImportDraft]) {
+        precondition(!drafts.isEmpty)
+        self.drafts = drafts
+    }
+
+    var callCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return nextIndex
+    }
+
+    func analyzeTrip(pdfData: Data, sourceFileName: String?) -> CrewAccessImportDraft {
+        lock.lock()
+        defer { lock.unlock() }
+        let index = min(nextIndex, drafts.count - 1)
+        nextIndex += 1
+        return drafts[index]
     }
 }
 

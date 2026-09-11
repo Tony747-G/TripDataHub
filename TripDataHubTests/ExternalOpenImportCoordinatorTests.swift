@@ -103,6 +103,140 @@ final class ExternalOpenImportCoordinatorTests: XCTestCase {
 
 @MainActor
 final class ImportPreviewPresentationPolicyTests: XCTestCase {
+    func test_validTwoLegTripPresentationIncludesSummaryAndEveryLeg() {
+        let legs = [
+            previewLeg(
+                sequence: 1,
+                from: "ANC",
+                to: "NRT",
+                departure: "2026-09-12 08:00",
+                arrival: "2026-09-13 11:30"
+            ),
+            previewLeg(
+                sequence: 2,
+                from: "NRT",
+                to: "ANC",
+                departure: "2026-09-15 16:00",
+                arrival: "2026-09-15 08:30"
+            )
+        ]
+
+        let presentation = ImportPreviewTripPresentation(
+            tripID: "12345",
+            fallbackTripDate: "12Sep2026",
+            legs: legs
+        )
+
+        XCTAssertEqual(presentation.tripID, "12345")
+        XCTAssertEqual(presentation.dateRangeText, "Sep 12 – Sep 15, 2026")
+        XCTAssertEqual(presentation.legCountText, "2 legs")
+        XCTAssertEqual(presentation.legs.map(\.id), legs.map(\.id))
+        XCTAssertEqual(
+            presentation.daySections.flatMap(\.legs).map(\.id),
+            legs.map(\.id),
+            "the two-leg validity boundary must render both legs"
+        )
+    }
+
+    func test_longTripPresentationDoesNotTruncateOrDeduplicateLegs() {
+        let legs = (1...12).map { sequence in
+            previewLeg(
+                sequence: sequence,
+                from: "A\(sequence)",
+                to: "B\(sequence)",
+                departure: String(format: "2026-09-%02d 08:00", 10 + sequence),
+                arrival: String(format: "2026-09-%02d 10:00", 10 + sequence)
+            )
+        }
+
+        let presentation = ImportPreviewTripPresentation(
+            tripID: "LONG01",
+            fallbackTripDate: "11Sep2026",
+            legs: legs
+        )
+
+        XCTAssertEqual(presentation.legCountText, "12 legs")
+        XCTAssertEqual(presentation.legs.count, 12)
+        XCTAssertEqual(presentation.daySections.flatMap(\.legs).map(\.id), legs.map(\.id))
+    }
+
+    func test_previewHidesRoutinePDFStatusButKeepsImportFailureVisible() {
+        XCTAssertNil(
+            ImportPreviewStatusPolicy.actionableMessage(
+                "Parsed CrewAccess PDF. Review and confirm import."
+            )
+        )
+        XCTAssertEqual(
+            ImportPreviewStatusPolicy.actionableMessage("Import failed: storage unavailable."),
+            "Import failed: storage unavailable."
+        )
+    }
+
+    func test_previewActionsStillCallExistingImportAndCancelPaths() throws {
+        let projectRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(
+            contentsOf: projectRoot.appendingPathComponent("TripDataHub/Views/ImportPreviewView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("confirmPendingImport(expectedReplacementIDs: [])"))
+        XCTAssertTrue(source.contains("await viewModel.discardPendingImport()"))
+        XCTAssertTrue(source.contains("primaryTitle: replacements.isEmpty ? \"Import\" : \"Replace and Import\""))
+        XCTAssertTrue(source.contains("Button(\"Cancel\", action: onCancel)"))
+    }
+
+    func test_incompleteImportCancelDismissesAlertWithoutRequestingRetry() {
+        let viewModel = BrowserViewModel()
+        var retryRequestCount = 0
+        viewModel.requestAutoPrintRetry = {
+            retryRequestCount += 1
+            return true
+        }
+        viewModel.presentIncompleteImportFailure()
+
+        viewModel.cancelIncompleteImport()
+
+        XCTAssertNil(viewModel.incompleteImportFailure)
+        XCTAssertFalse(viewModel.isAutoPrintRetryInProgress)
+        XCTAssertFalse(viewModel.isImportingCrewAccessTrip)
+        XCTAssertEqual(retryRequestCount, 0)
+        XCTAssertEqual(viewModel.statusMessage, "CrewAccess import canceled.")
+    }
+
+    func test_importingPresentationObscuresPDFContentWithoutReleasingPopup() throws {
+        let viewModel = BrowserViewModel()
+        let popup = WKWebView()
+        viewModel.popupWebView = popup
+
+        viewModel.beginCrewAccessImportingPresentation()
+
+        XCTAssertTrue(viewModel.isImportingCrewAccessTrip)
+        XCTAssertTrue(viewModel.popupWebView === popup)
+        XCTAssertEqual(viewModel.statusMessage, "Importing Trip…")
+
+        let projectRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let browserSource = try String(
+            contentsOf: projectRoot.appendingPathComponent("TripDataHub/Views/BrowserTabView.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(browserSource.contains("ExistingWebViewWrapper(webView: webView)"))
+        XCTAssertTrue(browserSource.contains("if viewModel.isImportingCrewAccessTrip"))
+        XCTAssertTrue(browserSource.contains("Text(\"Importing Trip…\")"))
+    }
+
+    func test_incompleteImportAlertUsesProductionCopyAndActions() throws {
+        let projectRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let browserSource = try String(
+            contentsOf: projectRoot.appendingPathComponent("TripDataHub/Views/BrowserTabView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(browserSource.contains("Unable to Import Trip"))
+        XCTAssertTrue(browserSource.contains("The trip data could not be loaded completely. Please try again with a stable network connection."))
+        XCTAssertTrue(browserSource.contains("Button(\"Try Again\")"))
+        XCTAssertTrue(browserSource.contains("Button(\"Cancel\", role: .cancel)"))
+    }
+
     func test_browserBottomStatusBarClassifiesRequiredStatesAndSharesPopupSurface() throws {
         XCTAssertEqual(
             BrowserPageStatusClassifier.status(
@@ -249,10 +383,39 @@ final class ImportPreviewPresentationPolicyTests: XCTestCase {
             "root and iPad external presenters must stand down while BrowserTabView owns Preview"
         )
     }
+
+    private func previewLeg(
+        sequence: Int,
+        from departureAirport: String,
+        to arrivalAirport: String,
+        departure: String,
+        arrival: String
+    ) -> TripLeg {
+        TripLeg(
+            payPeriod: "CA26-09-PREVIEW",
+            pairing: "PREVIEW",
+            leg: sequence,
+            flight: String(100 + sequence),
+            depAirport: departureAirport,
+            depLocal: departure,
+            arrAirport: arrivalAirport,
+            arrLocal: arrival,
+            status: "",
+            block: "2:00"
+        )
+    }
 }
 
 @MainActor
 final class BrowserPopupLifecycleTests: XCTestCase {
+    private final class FixedURLWebView: WKWebView {
+        var fixedURL: URL?
+
+        override var url: URL? {
+            fixedURL ?? super.url
+        }
+    }
+
     func test_T41_productionFocusAcquisitionRunsOnceAfterNavigationAndAttachment() {
         let viewModel = BrowserViewModel()
         let attachment = PopupAttachmentState()
@@ -375,6 +538,145 @@ final class BrowserPopupLifecycleTests: XCTestCase {
         XCTAssertEqual(context.recorder.receivedData, [data])
         XCTAssertEqual(context.recorder.sourceFileNames, ["trip-a.pdf"])
         assertPopupStateIsClean(context)
+    }
+
+    func test_incompleteImportRetainsCurrentPopupForUserDecision() {
+        let viewModel = BrowserViewModel()
+        let popup = WKWebView()
+        var importAttemptCount = 0
+        let coordinator = BrowserWebView.Coordinator(
+            viewModel: viewModel,
+            pdfDataHandler: { _, _, completion in
+                importAttemptCount += 1
+                completion(.incompleteTrip)
+            },
+            javaScriptEvaluator: { _, _, completion in completion(nil) }
+        )
+        coordinator.popupWebViews = [popup]
+        viewModel.popupWebView = popup
+        viewModel.beginCrewAccessImportingPresentation()
+
+        coordinator.handleDownloadedPDFResult(
+            data: Data("%PDF incomplete".utf8),
+            response: nil,
+            error: nil,
+            sourceFileName: "incomplete.pdf"
+        )
+        coordinator.handleDownloadedPDFResult(
+            data: Data("%PDF duplicate-callback".utf8),
+            response: nil,
+            error: nil,
+            sourceFileName: "duplicate.pdf"
+        )
+
+        XCTAssertEqual(importAttemptCount, 1)
+        XCTAssertTrue(viewModel.isImportingCrewAccessTrip)
+        XCTAssertEqual(coordinator.popupWebViews.count, 1)
+        XCTAssertTrue(coordinator.popupWebViews.first === popup)
+        XCTAssertTrue(viewModel.popupWebView === popup)
+    }
+
+    func test_retryReentersExistingAutoPrintPathAndRejectsConcurrentRetry() {
+        let viewModel = BrowserViewModel()
+        let popup = FixedURLWebView()
+        popup.fixedURL = URL(
+            string: "https://4d8e06f5.isolation.zscaler.com/profile/00000000-0000-4000-8000-000000000000/zpa-session"
+        )
+        var readinessEvaluationCount = 0
+        let coordinator = BrowserWebView.Coordinator(
+            viewModel: viewModel,
+            pdfDataHandler: { _, _, completion in completion(.incompleteTrip) },
+            javaScriptEvaluator: { _, _, completion in completion(nil) }
+        )
+        coordinator.autoPrintStageOneReadinessEvaluator = { _, script, completion in
+            XCTAssertEqual(script, CrewAccessPageProbe.probeExpression)
+            readinessEvaluationCount += 1
+            completion(nil, nil)
+        }
+        // A retry now takes a read-only dialog census before it may click Print again.
+        coordinator.autoPrintStageTwoReadinessEvaluator = { _, _, completion in
+            completion(["diagnostic": ["dialogCount": 0, "qualifyingDialogCount": 0]], nil)
+        }
+        coordinator.popupWebViews = [popup]
+        viewModel.popupWebView = popup
+        viewModel.beginCrewAccessImportingPresentation()
+        coordinator.handleDownloadedPDFResult(
+            data: Data("%PDF incomplete".utf8),
+            response: nil,
+            error: nil,
+            sourceFileName: "attempt-1.pdf"
+        )
+        let key = ObjectIdentifier(popup)
+        coordinator.autoPrintStageOneAttemptedPopupIDs.insert(key)
+        coordinator.autoPrintStageTwoAttemptedPopupIDs.insert(key)
+
+        XCTAssertTrue(coordinator.retryCrewAccessAutoPrintIfPossible())
+        XCTAssertFalse(coordinator.retryCrewAccessAutoPrintIfPossible())
+        XCTAssertTrue(viewModel.isImportingCrewAccessTrip)
+        XCTAssertEqual(readinessEvaluationCount, 1)
+        XCTAssertTrue(coordinator.isAutoPrintRetryInFlight)
+        XCTAssertFalse(coordinator.autoPrintStageOneAttemptedPopupIDs.contains(key))
+        XCTAssertFalse(coordinator.autoPrintStageTwoAttemptedPopupIDs.contains(key))
+        XCTAssertEqual(
+            coordinator.autoPrintStageOneSettleDelayNanoseconds,
+            CrewAccessAutoPrint.stageOneSettleDelayNanoseconds
+        )
+
+        coordinator.closePopups()
+    }
+
+    func test_successfulRetryCompletesNormallyAndCleansUpPopup() {
+        let viewModel = BrowserViewModel()
+        let popup = FixedURLWebView()
+        popup.fixedURL = URL(
+            string: "https://4d8e06f5.isolation.zscaler.com/profile/00000000-0000-4000-8000-000000000000/zpa-session"
+        )
+        var importResults = [CrewAccessPDFImportResult.incompleteTrip, .previewReady]
+        var importAttemptCount = 0
+        let coordinator = BrowserWebView.Coordinator(
+            viewModel: viewModel,
+            pdfDataHandler: { _, _, completion in
+                importAttemptCount += 1
+                completion(importResults.removeFirst())
+            },
+            javaScriptEvaluator: { _, _, completion in completion(nil) }
+        )
+        coordinator.autoPrintStageOneReadinessEvaluator = { _, _, completion in
+            completion(nil, nil)
+        }
+        // A retry now takes a read-only dialog census before it may click Print again.
+        coordinator.autoPrintStageTwoReadinessEvaluator = { _, _, completion in
+            completion(["diagnostic": ["dialogCount": 0, "qualifyingDialogCount": 0]], nil)
+        }
+        coordinator.popupWebViews = [popup]
+        viewModel.popupWebView = popup
+        viewModel.beginCrewAccessImportingPresentation()
+
+        coordinator.handleDownloadedPDFResult(
+            data: Data("%PDF incomplete".utf8),
+            response: nil,
+            error: nil,
+            sourceFileName: "attempt-1.pdf"
+        )
+        XCTAssertTrue(viewModel.popupWebView === popup)
+
+        let key = ObjectIdentifier(popup)
+        coordinator.autoPrintStageOneAttemptedPopupIDs.insert(key)
+        coordinator.autoPrintStageTwoAttemptedPopupIDs.insert(key)
+        XCTAssertTrue(coordinator.retryCrewAccessAutoPrintIfPossible())
+
+        coordinator.handleDownloadedPDFResult(
+            data: Data("%PDF complete".utf8),
+            response: nil,
+            error: nil,
+            sourceFileName: "attempt-2.pdf"
+        )
+
+        XCTAssertEqual(importAttemptCount, 2)
+        XCTAssertFalse(coordinator.isAutoPrintRetryInFlight)
+        XCTAssertFalse(viewModel.isImportingCrewAccessTrip)
+        XCTAssertTrue(coordinator.popupWebViews.isEmpty)
+        XCTAssertNil(viewModel.popupWebView)
     }
 
     func test_T28_fetchErrorClearsEveryPopupReference() {
@@ -534,9 +836,10 @@ final class BrowserPopupLifecycleTests: XCTestCase {
         let javaScriptRecorder = PopupJavaScriptRecorder()
         let coordinator = BrowserWebView.Coordinator(
             viewModel: viewModel,
-            pdfDataHandler: { data, sourceFileName in
+            pdfDataHandler: { data, sourceFileName, completion in
                 recorder.receivedData.append(data)
                 recorder.sourceFileNames.append(sourceFileName)
+                completion(.previewReady)
             },
             javaScriptEvaluator: { webView, script, completion in
                 javaScriptRecorder.scripts.append(
@@ -697,169 +1000,18 @@ final class CrewAccessAutoPrintProbeTests: XCTestCase {
         return String(source[start..<end])
     }
 
-    private func isolatedUserDefaults() throws -> (name: String, defaults: UserDefaults) {
-        let name = "crew_access_auto_print_settings_\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
-        defaults.removePersistentDomain(forName: name)
-        return (name, defaults)
-    }
-
-    func test_stageOneSettleDurationDefaultsToFiveSeconds() throws {
-        let context = try isolatedUserDefaults()
-        defer { context.defaults.removePersistentDomain(forName: context.name) }
-
-        XCTAssertEqual(
-            CrewAccessAutoPrintSettings.stageOneSettleDurationMilliseconds(
-                userDefaults: context.defaults
-            ),
-            5_000
-        )
-        XCTAssertEqual(
-            CrewAccessAutoPrintSettings.stageOneSettleDelayNanoseconds(
-                userDefaults: context.defaults
-            ),
-            5_000_000_000
-        )
-    }
-
-    func test_stageOneSettleDurationPersistsInUserDefaults() throws {
-        let context = try isolatedUserDefaults()
-        defer { context.defaults.removePersistentDomain(forName: context.name) }
-
-        CrewAccessAutoPrintSettings.persistStageOneSettleDurationMilliseconds(
-            4_000,
-            userDefaults: context.defaults
-        )
-
-        let reloadedDefaults = try XCTUnwrap(UserDefaults(suiteName: context.name))
-        XCTAssertEqual(
-            reloadedDefaults.object(
-                forKey: CrewAccessAutoPrintSettings.stageOneSettleDurationMillisecondsKey
-            ) as? Int,
-            4_000
-        )
-        XCTAssertEqual(
-            CrewAccessAutoPrintSettings.stageOneSettleDurationMilliseconds(
-                userDefaults: reloadedDefaults
-            ),
-            4_000
-        )
-    }
-
-    func test_eachAllowedStageOneSettleDurationRoundTripsAndMapsToNanoseconds() throws {
-        let context = try isolatedUserDefaults()
-        defer { context.defaults.removePersistentDomain(forName: context.name) }
-        let expected: [(milliseconds: Int, nanoseconds: UInt64)] = [
-            (5_000, 5_000_000_000),
-            (4_500, 4_500_000_000),
-            (4_000, 4_000_000_000),
-            (3_500, 3_500_000_000),
-            (3_000, 3_000_000_000)
-        ]
-
-        XCTAssertEqual(
-            CrewAccessAutoPrintSettings.allowedStageOneSettleDurationMilliseconds,
-            expected.map { $0.milliseconds }
-        )
-        for value in expected {
-            CrewAccessAutoPrintSettings.persistStageOneSettleDurationMilliseconds(
-                value.milliseconds,
-                userDefaults: context.defaults
-            )
-            XCTAssertEqual(
-                context.defaults.object(
-                    forKey: CrewAccessAutoPrintSettings.stageOneSettleDurationMillisecondsKey
-                ) as? Int,
-                value.milliseconds,
-                "each supported value must round-trip through UserDefaults"
-            )
-            XCTAssertEqual(
-                CrewAccessAutoPrintSettings.stageOneSettleDurationMilliseconds(
-                    userDefaults: context.defaults
-                ),
-                value.milliseconds
-            )
-            XCTAssertEqual(
-                CrewAccessAutoPrintSettings.stageOneSettleDelayNanoseconds(
-                    userDefaults: context.defaults
-                ),
-                value.nanoseconds
-            )
-        }
-    }
-
     @MainActor
-    func test_eachAllowedStageOneSettleDurationIsReadByANewProductionRun() {
-        let defaults = UserDefaults.standard
-        let key = CrewAccessAutoPrintSettings.stageOneSettleDurationMillisecondsKey
-        let previousValue = defaults.object(forKey: key)
-        defer {
-            if let previousValue {
-                defaults.set(previousValue, forKey: key)
-            } else {
-                defaults.removeObject(forKey: key)
-            }
-        }
-
-        for milliseconds in CrewAccessAutoPrintSettings.allowedStageOneSettleDurationMilliseconds {
-            CrewAccessAutoPrintSettings.persistStageOneSettleDurationMilliseconds(
-                milliseconds,
-                userDefaults: defaults
-            )
-            let coordinator = BrowserWebView.Coordinator(
-                viewModel: BrowserViewModel(),
-                javaScriptEvaluator: { _, _, completion in completion(nil) }
-            )
-            let runDelay = coordinator.autoPrintStageOneSettleDelayNanoseconds
-
-            XCTAssertEqual(runDelay, UInt64(milliseconds) * 1_000_000)
-            XCTAssertEqual(
-                runDelay / 1_000_000,
-                UInt64(milliseconds),
-                "the value reported as configuredMilliseconds must match the run's timer"
-            )
-        }
-    }
-
-    func test_invalidOrMissingStageOneSettleDurationFallsBackToFiveSeconds() throws {
-        let context = try isolatedUserDefaults()
-        defer { context.defaults.removePersistentDomain(forName: context.name) }
-        let key = CrewAccessAutoPrintSettings.stageOneSettleDurationMillisecondsKey
-
-        XCTAssertEqual(
-            CrewAccessAutoPrintSettings.stageOneSettleDurationMilliseconds(
-                userDefaults: context.defaults
-            ),
-            5_000,
-            "a missing value must use the default"
+    func test_productionStageOneSettleDelayResolvesToFourSeconds() {
+        let coordinator = BrowserWebView.Coordinator(
+            viewModel: BrowserViewModel(),
+            javaScriptEvaluator: { _, _, completion in completion(nil) }
         )
 
-        for invalidValue in [2_999, 3_001, 5_001, -1, "4500"] as [Any] {
-            context.defaults.set(invalidValue, forKey: key)
-            XCTAssertEqual(
-                CrewAccessAutoPrintSettings.stageOneSettleDurationMilliseconds(
-                    userDefaults: context.defaults
-                ),
-                5_000,
-                "invalid persisted value \(invalidValue) must use the default"
-            )
-        }
-    }
-
-    func test_stageOneSettleDurationControlIsReleaseVisibleAndClearlyForTesting() throws {
-        let source = try projectFile("TripDataHub/Views/SettingsTabView.swift")
-        let lines = source.components(separatedBy: "\n")
-        let flags = debugRegionFlags(for: source)
-        let requiredReleaseLabels = [
-            "Stage 1 Settle Duration",
-            "CrewAccess Testing",
-            "Developer testing control. Changes only the delay before automatic toolbar Print."
-        ]
-
-        for label in requiredReleaseLabels {
-            let index = try XCTUnwrap(lines.firstIndex(where: { $0.contains(label) }))
-            XCTAssertFalse(flags[index], "\(label) must be visible in TestFlight/Release")
-        }
+        XCTAssertEqual(CrewAccessAutoPrint.stageOneSettleDelayNanoseconds, 4_000_000_000)
+        XCTAssertEqual(
+            coordinator.autoPrintStageOneSettleDelayNanoseconds,
+            CrewAccessAutoPrint.stageOneSettleDelayNanoseconds
+        )
     }
 
     func test_stageOneTimerAndStartLogUseTheSameCapturedPerRunDelay() throws {
@@ -892,9 +1044,12 @@ final class CrewAccessAutoPrintProbeTests: XCTestCase {
             settleFunction.contains("Task.sleep(nanoseconds: delay)"),
             "the settle timer must use that same captured delay"
         )
-        XCTAssertFalse(
-            settleFunction.contains("CrewAccessAutoPrintSettings.stageOneSettleDelayNanoseconds()"),
-            "the running task must not re-read Settings after its delay is captured"
+        XCTAssertEqual(
+            settleFunction.components(
+                separatedBy: "CrewAccessAutoPrint.stageOneSettleDelayNanoseconds"
+            ).count - 1,
+            0,
+            "the running task must not re-read the canonical delay after it is captured"
         )
     }
 
@@ -1245,10 +1400,19 @@ final class CrewAccessAutoPrintProbeTests: XCTestCase {
         XCTAssertEqual(reason(popupCount: 0), "live-popup-count-0")
         XCTAssertEqual(reason(popupCount: 2), "live-popup-count-2")
         XCTAssertEqual(reason(tearingDown: true), "teardown-in-progress")
-        XCTAssertEqual(reason(currentURL: URL(string: "https://example.invalid")), "stale-probe")
+        XCTAssertEqual(reason(currentURL: URL(string: "https://example.invalid")), "url-mismatch")
         XCTAssertEqual(
             reason(completedURL: URL(string: "https://example.invalid"), currentURL: URL(string: "https://example.invalid")),
             "url-mismatch"
+        )
+        XCTAssertEqual(
+            reason(
+                completedURL: URL(
+                    string: "https://4d8e06f5.isolation.zscaler.com/profile/11111111-1111-4111-8111-111111111111/zpa-session"
+                )
+            ),
+            "session-changed",
+            "a genuinely different session is still rejected, by the same name the settled gate uses"
         )
         XCTAssertEqual(reason(readyState: "interactive"), "document-not-complete")
         XCTAssertEqual(reason(elements: []), "qualifying-print-button-count-0")
@@ -1353,8 +1517,10 @@ final class CrewAccessAutoPrintProbeTests: XCTestCase {
         XCTAssertEqual(reason(elements: [printButton, printButton]), "qualifying-print-button-count-2")
         XCTAssertEqual(reason(consumed: true), "one-shot-already-consumed")
 
-        // The old rule would have rejected the query evolution outright.
-        XCTAssertEqual(
+        // Both gates now apply the same staleness rule. The pre-settle gate used to reject the
+        // isolation client's in-place query evolution outright, which permanently stranded the
+        // first attempt's sampling chain on `stale-probe`.
+        XCTAssertNil(
             CrewAccessAutoPrint.rejectionReason(
                 isTrackedPopup: true,
                 isVisiblePopup: true,
@@ -1366,8 +1532,7 @@ final class CrewAccessAutoPrintProbeTests: XCTestCase {
                 printElements: [printButton],
                 oneShotConsumed: false
             ),
-            "stale-probe",
-            "this is the pre-settle rule, and applying it after the settle delay is the bug"
+            "the pre-settle gate must tolerate the same in-place query evolution as the settled gate"
         )
     }
 
@@ -2057,11 +2222,6 @@ final class CrewAccessAutoPrintProbeTests: XCTestCase {
     /// dialog DOM. Requirement: the settle delay is the pre-Stage-1 one and nothing else.
     func test_settleDelayMovedBeforeStageOneAndStageTwoUsesBoundedReadinessOffsets() throws {
         XCTAssertEqual(
-            CrewAccessAutoPrint.stageOneSettleDelayNanoseconds,
-            5_000_000_000,
-            "the pre-Stage-1 settle is tuned to five seconds"
-        )
-        XCTAssertEqual(
             CrewAccessAutoPrint.stageTwoReadinessOffsetsNanoseconds,
             [100_000_000, 250_000_000, 500_000_000]
         )
@@ -2429,99 +2589,6 @@ final class CrewAccessAutoPrintProbeTests: XCTestCase {
             context.coordinator.autoPrintStageOneAttemptedPopupIDs.contains(ObjectIdentifier(context.popup))
         )
         XCTAssertFalse(context.coordinator.hasPendingAutoPrintStageOneSettleWork)
-    }
-
-    @MainActor
-    func test_settingsChangeAffectsTheNextRunButNotAnAlreadyRunningSettleTimer() async {
-        let defaults = UserDefaults.standard
-        let key = CrewAccessAutoPrintSettings.stageOneSettleDurationMillisecondsKey
-        let previousValue = defaults.object(forKey: key)
-        defer {
-            if let previousValue {
-                defaults.set(previousValue, forKey: key)
-            } else {
-                defaults.removeObject(forKey: key)
-            }
-        }
-
-        CrewAccessAutoPrintSettings.persistStageOneSettleDurationMilliseconds(
-            5_000,
-            userDefaults: defaults
-        )
-        let viewModel = BrowserViewModel()
-        let coordinator = BrowserWebView.Coordinator(
-            viewModel: viewModel,
-            javaScriptEvaluator: { _, _, completion in completion(nil) }
-        )
-        let sessionURL = URL(
-            string: "https://4d8e06f5.isolation.zscaler.com/profile/00000000-0000-4000-8000-000000000000/zpa-session"
-        )!
-        let probe = settledStageOneProbe()
-        coordinator.autoPrintStageOneReadinessEvaluator = { _, script, completion in
-            XCTAssertEqual(script, CrewAccessPageProbe.probeExpression)
-            completion(probe, nil)
-        }
-        var invocationCount = 0
-        coordinator.autoPrintStageOneJavaScriptEvaluator = { _, script, completion in
-            XCTAssertEqual(script, CrewAccessAutoPrint.invocationScript)
-            invocationCount += 1
-            completion(["result": "rejected", "reason": "none", "count": 1], nil)
-        }
-
-        func installPopup() -> FixedURLWebView {
-            let popup = FixedURLWebView()
-            popup.fixedURL = sessionURL
-            coordinator.popupWebViews = [popup]
-            viewModel.popupWebView = popup
-            return popup
-        }
-
-        let firstPopup = installPopup()
-        XCTAssertEqual(coordinator.autoPrintStageOneSettleDelayNanoseconds, 5_000_000_000)
-        coordinator.evaluateAutoPrintStageOneEligibility(
-            probe,
-            webView: firstPopup,
-            completedURL: sessionURL,
-            attempt: 0,
-            sequence: 1
-        )
-        XCTAssertTrue(coordinator.hasPendingAutoPrintStageOneSettleWork)
-
-        CrewAccessAutoPrintSettings.persistStageOneSettleDurationMilliseconds(
-            3_000,
-            userDefaults: defaults
-        )
-        XCTAssertEqual(
-            coordinator.autoPrintStageOneSettleDelayNanoseconds,
-            3_000_000_000,
-            "the next run should see the newly persisted duration"
-        )
-        try? await Task.sleep(nanoseconds: 3_300_000_000)
-        XCTAssertEqual(
-            invocationCount,
-            0,
-            "changing Settings must not shorten the already-running five-second timer"
-        )
-
-        await waitUntil(timeout: 2.5) { invocationCount == 1 }
-        XCTAssertEqual(invocationCount, 1)
-        XCTAssertFalse(coordinator.hasPendingAutoPrintStageOneSettleWork)
-
-        let secondPopup = installPopup()
-        coordinator.evaluateAutoPrintStageOneEligibility(
-            probe,
-            webView: secondPopup,
-            completedURL: sessionURL,
-            attempt: 0,
-            sequence: 2
-        )
-        XCTAssertTrue(coordinator.hasPendingAutoPrintStageOneSettleWork)
-        try? await Task.sleep(nanoseconds: 2_300_000_000)
-        XCTAssertEqual(invocationCount, 1, "the next run must still wait its configured three seconds")
-
-        await waitUntil(timeout: 1.5) { invocationCount == 2 }
-        XCTAssertEqual(invocationCount, 2, "the next run must observe the new three-second duration")
-        XCTAssertFalse(coordinator.hasPendingAutoPrintStageOneSettleWork)
     }
 
     /// The physical-device regression. During the settle wait the Zscaler isolation client
@@ -2915,6 +2982,10 @@ final class CrewAccessAutoPrintProbeTests: XCTestCase {
         coordinator.autoPrintStageTwoJavaScriptEvaluator = { _, _, completion in
             invocationCount += 1
             completion(nil, nil)
+        }
+        // The bounded offsets are now the fast path; the event-driven half is what ends the run.
+        coordinator.autoPrintStageTwoObserverEvaluator = { _, _, completion in
+            completion(["result": "deadline-expired", "elapsedMilliseconds": 8000], nil)
         }
 
         coordinator.handleAutoPrintStageOneExecutionResult(
@@ -3410,4 +3481,857 @@ final class CrewAccessAutoPrintProbeTests: XCTestCase {
         XCTAssertTrue(source.contains("guard !Task.isCancelled, let self, let webView else { return }"))
     }
     #endif
+}
+
+
+// MARK: - Terminal auto-print state
+
+/// Every terminal auto-import path has to end in exactly one of three places: Import Preview, the
+/// recoverable failure alert, or an explicit cancellation. A path that simply stops — Stage 1's
+/// bounded sampling reaching `schedule-exhausted` is the one seen on a physical device — used to
+/// leave `Importing Trip…` on screen forever, waiting for a PDF callback that could never arrive.
+@MainActor
+final class CrewAccessAutoPrintTerminalStateTests: XCTestCase {
+
+    private final class FixedURLWebView: WKWebView {
+        var fixedURL: URL?
+
+        override var url: URL? {
+            fixedURL ?? super.url
+        }
+    }
+
+    private static let sessionURLString =
+        "https://4d8e06f5.isolation.zscaler.com/profile/00000000-0000-4000-8000-000000000000/zpa-session"
+
+    private struct Fixture {
+        let viewModel: BrowserViewModel
+        let coordinator: BrowserWebView.Coordinator
+        let popup: FixedURLWebView
+        let importAttempts: @MainActor () -> Int
+        let readinessEvaluations: @MainActor () -> Int
+    }
+
+    @MainActor
+    private final class Counter {
+        var value = 0
+    }
+
+    /// A tracked Zscaler session popup with the loading cover already on screen, exactly as
+    /// `beginCrewAccessAutoPrintSamplingIfNeeded` leaves it.
+    private func makeImportingFixture() -> Fixture {
+        let viewModel = BrowserViewModel()
+        let imports = Counter()
+        let readiness = Counter()
+        let coordinator = BrowserWebView.Coordinator(
+            viewModel: viewModel,
+            pdfDataHandler: { _, _, completion in
+                imports.value += 1
+                completion(.incompleteTrip)
+            },
+            javaScriptEvaluator: { _, _, completion in completion(nil) }
+        )
+        coordinator.autoPrintStageOneReadinessEvaluator = { _, _, completion in
+            readiness.value += 1
+            completion(nil, nil)
+        }
+        // Default fixture posture: a clean page (no inherited dialog) and an event-driven Stage 2
+        // half that reaches its deadline. Individual tests override either.
+        coordinator.autoPrintStageTwoReadinessEvaluator = { _, _, completion in
+            completion(["diagnostic": ["dialogCount": 0, "qualifyingDialogCount": 0]], nil)
+        }
+        coordinator.autoPrintStageTwoObserverEvaluator = { _, _, completion in
+            completion(["result": "deadline-expired", "elapsedMilliseconds": 8000], nil)
+        }
+        let popup = FixedURLWebView()
+        popup.fixedURL = URL(string: Self.sessionURLString)
+        coordinator.popupWebViews = [popup]
+        viewModel.popupWebView = popup
+        viewModel.beginCrewAccessImportingPresentation()
+        return Fixture(
+            viewModel: viewModel,
+            coordinator: coordinator,
+            popup: popup,
+            importAttempts: { imports.value },
+            readinessEvaluations: { readiness.value }
+        )
+    }
+
+    /// A document that is still loading: eligible for sampling, never eligible for invocation.
+    private func incompleteProbe() -> [String: Any] {
+        ["readyState": "loading", "printElements": []]
+    }
+
+    private func settledStageOneProbe() -> [String: Any] {
+        let printButton: [String: Any] = [
+            "root": "document",
+            "tagName": "button",
+            "tagNameIsExactButton": true,
+            "type": "button",
+            "typeIsExactButton": true,
+            "ariaLabel": "Print",
+            "ariaLabelIsExactPrint": true,
+            "printMatch": "exact",
+            "isVisible": true,
+            "isDisabled": false,
+            "rect": [0, 0, 32, 32]
+        ]
+        return ["readyState": "complete", "printElements": [printButton]]
+    }
+
+    /// Drives the production Stage 1 chain to its `schedule-exhausted` terminus without waiting out
+    /// the real ten-second schedule: an empty interval list is the same terminal branch the last
+    /// real interval reaches, taken on the first resample decision.
+    private func exhaustStageOneSampling(_ fixture: Fixture) {
+        fixture.coordinator.crewAccessProbeResampleIntervals = []
+        fixture.coordinator.beginCrewAccessProbe(
+            incompleteProbe(),
+            webView: fixture.popup,
+            completedURL: fixture.popup.fixedURL
+        )
+    }
+
+    func test_productionResampleScheduleIsUnchangedByTheTestSeam() {
+        let coordinator = BrowserWebView.Coordinator(
+            viewModel: BrowserViewModel(),
+            javaScriptEvaluator: { _, _, completion in completion(nil) }
+        )
+
+        XCTAssertEqual(coordinator.crewAccessProbeResampleIntervals, CrewAccessPageProbe.resampleIntervals)
+        XCTAssertEqual(CrewAccessPageProbe.resampleIntervals, [1, 2, 3, 4])
+        XCTAssertEqual(
+            coordinator.autoPrintStageOneSettleDelayNanoseconds,
+            CrewAccessAutoPrint.stageOneSettleDelayNanoseconds,
+            "the terminal-state fix must not touch the canonical settle delay"
+        )
+        XCTAssertEqual(CrewAccessAutoPrint.stageOneSettleDelayNanoseconds, 4_000_000_000)
+    }
+
+    // 1. Stage 1 exhaustion clears the loading state.
+    func test_stageOneScheduleExhaustionClearsImportingLoadingState() {
+        let fixture = makeImportingFixture()
+        XCTAssertTrue(fixture.viewModel.isImportingCrewAccessTrip)
+
+        exhaustStageOneSampling(fixture)
+
+        XCTAssertFalse(
+            fixture.viewModel.isImportingCrewAccessTrip,
+            "a terminal Stage 1 exhaustion must take the Importing Trip… cover down"
+        )
+        XCTAssertFalse(fixture.coordinator.hasPendingCrewAccessProbeWork)
+        XCTAssertFalse(fixture.coordinator.hasPendingCrewAccessAutoPrintWorkForTrackedPopup)
+    }
+
+    // 2. Stage 1 exhaustion produces the recoverable failure state.
+    func test_stageOneScheduleExhaustionPresentsRecoverableFailure() {
+        let fixture = makeImportingFixture()
+
+        exhaustStageOneSampling(fixture)
+
+        XCTAssertNotNil(
+            fixture.viewModel.incompleteImportFailure,
+            "exhaustion is an import attempt failure, not silence"
+        )
+        XCTAssertEqual(fixture.viewModel.statusMessage, "⚠️ Unable to import trip")
+        XCTAssertFalse(fixture.viewModel.isAutoPrintRetryInProgress)
+        XCTAssertTrue(
+            fixture.coordinator.popupWebViews.first === fixture.popup,
+            "the tracked popup is retained so Try Again has something to act on"
+        )
+    }
+
+    // 3. Try Again re-enters the existing auto-print path.
+    func test_tryAgainAfterStageOneExhaustionReentersExistingAutoPrintPath() {
+        let fixture = makeImportingFixture()
+        exhaustStageOneSampling(fixture)
+        XCTAssertEqual(fixture.readinessEvaluations(), 0)
+        fixture.coordinator.crewAccessProbeResampleIntervals = CrewAccessPageProbe.resampleIntervals
+
+        XCTAssertTrue(fixture.viewModel.tryAgainIncompleteImport())
+
+        XCTAssertEqual(
+            fixture.readinessEvaluations(),
+            1,
+            "retry must run the existing beginCrewAccessAutoPrintSamplingIfNeeded path, not a parallel one"
+        )
+        XCTAssertTrue(fixture.viewModel.isImportingCrewAccessTrip)
+        XCTAssertNil(fixture.viewModel.incompleteImportFailure)
+        XCTAssertTrue(fixture.coordinator.isAutoPrintRetryInFlight)
+        XCTAssertEqual(
+            fixture.coordinator.autoPrintStageOneSettleDelayNanoseconds,
+            CrewAccessAutoPrint.stageOneSettleDelayNanoseconds,
+            "the retry reuses the canonical 4.0-second production delay"
+        )
+
+        fixture.coordinator.closePopups()
+    }
+
+    // 4. Retry cannot create concurrent sampling tasks.
+    func test_retryAfterStageOneExhaustionCannotCreateConcurrentSamplingTasks() {
+        let fixture = makeImportingFixture()
+        exhaustStageOneSampling(fixture)
+        fixture.coordinator.crewAccessProbeResampleIntervals = CrewAccessPageProbe.resampleIntervals
+
+        XCTAssertTrue(fixture.viewModel.tryAgainIncompleteImport())
+        XCTAssertFalse(
+            fixture.viewModel.tryAgainIncompleteImport(),
+            "a retry already in flight cannot start a second one"
+        )
+        XCTAssertFalse(
+            fixture.coordinator.retryCrewAccessAutoPrintIfPossible(),
+            "the coordinator refuses a second retry directly as well"
+        )
+        XCTAssertEqual(fixture.readinessEvaluations(), 1)
+        XCTAssertTrue(fixture.coordinator.isAutoPrintRetryInFlight)
+
+        fixture.coordinator.closePopups()
+    }
+
+    // 5. Cancel clears the loading state and starts no retry.
+    func test_cancelAfterStageOneExhaustionClearsLoadingStateAndStartsNoRetry() {
+        let fixture = makeImportingFixture()
+        exhaustStageOneSampling(fixture)
+        fixture.coordinator.crewAccessProbeResampleIntervals = CrewAccessPageProbe.resampleIntervals
+
+        fixture.viewModel.cancelIncompleteImport()
+
+        XCTAssertNil(fixture.viewModel.incompleteImportFailure)
+        XCTAssertFalse(fixture.viewModel.isImportingCrewAccessTrip)
+        XCTAssertEqual(fixture.viewModel.statusMessage, "CrewAccess import canceled.")
+        XCTAssertEqual(fixture.readinessEvaluations(), 0, "Cancel must not re-enter the auto-print path")
+        XCTAssertEqual(fixture.importAttempts(), 0, "Cancel imports nothing")
+        XCTAssertFalse(fixture.coordinator.isAutoPrintRetryInFlight)
+        XCTAssertFalse(
+            fixture.coordinator.hasPendingCrewAccessAutoPrintWorkForTrackedPopup,
+            "Cancel stops every remaining sampling task"
+        )
+        XCTAssertTrue(
+            fixture.coordinator.popupWebViews.first === fixture.popup,
+            "the browser is left usable rather than torn down underneath the user"
+        )
+    }
+
+    // 6. Successful Stage 1 behaviour is unchanged.
+    func test_successfulStageOneRunIsNotConvertedIntoAFailure() {
+        let fixture = makeImportingFixture()
+        fixture.coordinator.autoPrintStageOneSettleDelayNanoseconds = 5_000_000_000
+        fixture.coordinator.crewAccessProbeResampleIntervals = []
+
+        // The probe chain keeps sampling in parallel with the settle delay, so the chain reaching
+        // its bound while Stage 1 is still settling is the normal success path, not a failure.
+        fixture.coordinator.beginCrewAccessProbe(
+            settledStageOneProbe(),
+            webView: fixture.popup,
+            completedURL: fixture.popup.fixedURL
+        )
+
+        XCTAssertTrue(
+            fixture.coordinator.hasPendingAutoPrintStageOneSettleWork,
+            "an eligible sample must still start the settle delay"
+        )
+        XCTAssertTrue(
+            fixture.viewModel.isImportingCrewAccessTrip,
+            "a run that is still settling must keep its loading state"
+        )
+        XCTAssertNil(fixture.viewModel.incompleteImportFailure)
+        XCTAssertTrue(fixture.coordinator.autoPrintStageOneAttemptedPopupIDs.isEmpty)
+
+        fixture.coordinator.closePopups()
+    }
+
+    // 7. The existing incomplete-trip retry still works.
+    func test_existingIncompleteTripRetryStillWorks() {
+        let fixture = makeImportingFixture()
+
+        fixture.coordinator.handleDownloadedPDFResult(
+            data: Data("%PDF incomplete".utf8),
+            response: nil,
+            error: nil,
+            sourceFileName: "attempt-1.pdf"
+        )
+
+        XCTAssertEqual(fixture.importAttempts(), 1)
+        XCTAssertTrue(
+            fixture.viewModel.isImportingCrewAccessTrip,
+            "the incomplete-trip path keeps its cover behind the alert, as before"
+        )
+
+        let key = ObjectIdentifier(fixture.popup)
+        fixture.coordinator.autoPrintStageOneAttemptedPopupIDs.insert(key)
+        fixture.coordinator.autoPrintStageTwoAttemptedPopupIDs.insert(key)
+
+        XCTAssertTrue(fixture.coordinator.retryCrewAccessAutoPrintIfPossible())
+        XCTAssertEqual(fixture.readinessEvaluations(), 1)
+        XCTAssertTrue(fixture.coordinator.isAutoPrintRetryInFlight)
+        XCTAssertFalse(fixture.coordinator.autoPrintStageOneAttemptedPopupIDs.contains(key))
+        XCTAssertFalse(fixture.coordinator.autoPrintStageTwoAttemptedPopupIDs.contains(key))
+
+        fixture.coordinator.closePopups()
+    }
+
+    // 8. No PDF callback is required to escape the loading state.
+    func test_noPDFCallbackIsRequiredToEscapeLoadingAfterStageOneExhaustion() {
+        let fixture = makeImportingFixture()
+
+        exhaustStageOneSampling(fixture)
+
+        XCTAssertEqual(
+            fixture.importAttempts(),
+            0,
+            "the loading state was left without any PDF ever arriving"
+        )
+        XCTAssertFalse(fixture.viewModel.isImportingCrewAccessTrip)
+        XCTAssertNotNil(fixture.viewModel.incompleteImportFailure)
+
+        // A late callback for a run the user already owns is still ignored, as before.
+        fixture.coordinator.handleDownloadedPDFResult(
+            data: Data("%PDF late".utf8),
+            response: nil,
+            error: nil,
+            sourceFileName: "late.pdf"
+        )
+        XCTAssertEqual(fixture.importAttempts(), 0)
+    }
+
+    // 9. The equivalent terminal Stage 2 path is audited too.
+    func test_stageTwoReadinessScheduleExhaustionAlsoEndsTheImportingState() {
+        let fixture = makeImportingFixture()
+        let sessionURL = fixture.popup.fixedURL
+        fixture.coordinator.autoPrintStageTwoCurrentURLProvider = { _ in sessionURL }
+        fixture.coordinator.autoPrintStageTwoReadinessOffsetsNanoseconds = []
+        fixture.coordinator.autoPrintStageOneAttemptedPopupIDs.insert(ObjectIdentifier(fixture.popup))
+
+        fixture.coordinator.handleAutoPrintStageOneExecutionResult(
+            "invoked",
+            webView: fixture.popup,
+            completedURL: sessionURL
+        )
+
+        XCTAssertFalse(fixture.coordinator.hasPendingAutoPrintStageTwoReadinessWork)
+        XCTAssertEqual(fixture.coordinator.lastTerminalFailure?.stage, 2)
+        XCTAssertFalse(
+            fixture.viewModel.isImportingCrewAccessTrip,
+            "Stage 2 exhaustion must not leave Importing Trip… on screen either"
+        )
+        XCTAssertNotNil(fixture.viewModel.incompleteImportFailure)
+        XCTAssertTrue(
+            fixture.coordinator.autoPrintStageTwoAttemptedPopupIDs.isEmpty,
+            "exhaustion never consumes the Stage 2 one-shot"
+        )
+    }
+
+    /// Source guard: the terminal funnel is the only writer of the failure state on these paths, so
+    /// a future path that forgets to call it is visible here rather than on a device.
+    func test_everyTerminalAutoPrintPathFunnelsThroughTheSameConversion() throws {
+        let projectRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(
+            contentsOf: projectRoot.appendingPathComponent("TripDataHub/Views/BrowserWebView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("private func failCrewAccessAutoPrintIfTerminal("))
+        XCTAssertTrue(source.contains("private func hasPendingCrewAccessAutoPrintWork(forKey key: ObjectIdentifier) -> Bool"))
+        XCTAssertTrue(source.contains("terminal=failure"))
+        XCTAssertTrue(source.contains("retryAvailable="))
+        XCTAssertTrue(source.contains("func cancelCrewAccessAutoPrint()"))
+        XCTAssertEqual(
+            source.components(separatedBy: "viewModel.presentIncompleteImportFailure()").count - 1,
+            1,
+            "the coordinator presents the recoverable failure from exactly one place"
+        )
+        XCTAssertTrue(
+            source.contains("static let stageOneSettleDelayNanoseconds: UInt64 = 4_000_000_000")
+                || source.contains("stageOneSettleDelayNanoseconds: UInt64 = 4_000_000_000"),
+            "the canonical production delay is unchanged"
+        )
+        // The diagnostic must never carry page contents.
+        for line in source.components(separatedBy: "\n") where line.contains("terminal=failure") {
+            XCTAssertFalse(line.contains("pageText"))
+            XCTAssertFalse(line.contains("innerText"))
+        }
+    }
+}
+
+
+// MARK: - Stage ownership, event-driven Stage 2 readiness, retry independence
+
+/// The device sequence these cover: Stage 1 succeeded, Stage 2's three fixed samples all reported
+/// `dialogCount=0`, and the run was then reported as `stage=1 terminal=failure` — because Stage 1's
+/// sampling chain was still registered, muted Stage 2's own report, and was last to finish.
+@MainActor
+final class CrewAccessAutoPrintStageOwnershipTests: XCTestCase {
+
+    private final class FixedURLWebView: WKWebView {
+        var fixedURL: URL?
+
+        override var url: URL? {
+            fixedURL ?? super.url
+        }
+    }
+
+    @MainActor
+    private final class Counters {
+        var stageOneReadiness = 0
+        var stageTwoReadiness = 0
+        var stageTwoInvocations = 0
+        var observerStarts = 0
+        var census = 0
+    }
+
+    private static let sessionURLString =
+        "https://4d8e06f5.isolation.zscaler.com/profile/00000000-0000-4000-8000-000000000000/zpa-session"
+
+    private struct Fixture {
+        let viewModel: BrowserViewModel
+        let coordinator: BrowserWebView.Coordinator
+        let popup: FixedURLWebView
+        let counters: Counters
+    }
+
+    private func structurallyReadySnapshot() -> [String: Any] {
+        [
+            "ready": false,
+            "buttonReady": true,
+            "reason": "report-readiness-unproven",
+            "diagnostic": [
+                "dialogCount": 1,
+                "qualifyingDialogCount": 1,
+                "submitButtonCount": 1,
+                "visibleSubmitButtonCount": 1,
+                "qualifyingSubmitButtonCount": 1,
+                "submitButtons": []
+            ]
+        ]
+    }
+
+    private func noDialogSnapshot() -> [String: Any] {
+        [
+            "ready": false,
+            "buttonReady": false,
+            "reason": "qualifying-dialog-count",
+            "diagnostic": [
+                "dialogCount": 0,
+                "qualifyingDialogCount": 0,
+                "submitButtonCount": 0,
+                "visibleSubmitButtonCount": 0,
+                "qualifyingSubmitButtonCount": 0,
+                "submitButtons": []
+            ]
+        ]
+    }
+
+    private func settledStageOneProbe() -> [String: Any] {
+        let printButton: [String: Any] = [
+            "root": "document",
+            "tagName": "button",
+            "tagNameIsExactButton": true,
+            "type": "button",
+            "typeIsExactButton": true,
+            "ariaLabel": "Print",
+            "ariaLabelIsExactPrint": true,
+            "printMatch": "exact",
+            "isVisible": true,
+            "isDisabled": false,
+            "rect": [0, 0, 32, 32]
+        ]
+        return ["readyState": "complete", "printElements": [printButton]]
+    }
+
+    /// A tracked session popup with the cover raised, Stage 2's fixed offsets emptied so the fast
+    /// path falls straight through to the event-driven half, and every seam declared.
+    private func makeFixture(
+        observerOutcome: String = "deadline-expired",
+        readinessSnapshot: [String: Any]? = nil
+    ) -> Fixture {
+        let viewModel = BrowserViewModel()
+        let counters = Counters()
+        let coordinator = BrowserWebView.Coordinator(
+            viewModel: viewModel,
+            pdfDataHandler: { _, _, completion in completion(.incompleteTrip) },
+            javaScriptEvaluator: { _, _, completion in completion(nil) }
+        )
+        let popup = FixedURLWebView()
+        popup.fixedURL = URL(string: Self.sessionURLString)
+        let sessionURL = popup.fixedURL
+
+        coordinator.autoPrintStageOneReadinessEvaluator = { _, _, completion in
+            counters.stageOneReadiness += 1
+            completion(nil, nil)
+        }
+        coordinator.autoPrintStageTwoCurrentURLProvider = { _ in sessionURL }
+        coordinator.autoPrintStageTwoReadinessOffsetsNanoseconds = []
+        let snapshot = readinessSnapshot ?? noDialogSnapshot()
+        coordinator.autoPrintStageTwoReadinessEvaluator = { _, _, completion in
+            counters.stageTwoReadiness += 1
+            completion(snapshot, nil)
+        }
+        coordinator.autoPrintStageTwoObserverEvaluator = { _, script, completion in
+            counters.observerStarts += 1
+            XCTAssertTrue(script.contains("MutationObserver"), "the observer waits on a DOM event")
+            completion(["result": observerOutcome, "elapsedMilliseconds": 1200], nil)
+        }
+        coordinator.autoPrintStageTwoJavaScriptEvaluator = { _, _, completion in
+            counters.stageTwoInvocations += 1
+            completion(["result": "invoked", "reason": "none", "count": 1], nil)
+        }
+        coordinator.popupWebViews = [popup]
+        viewModel.popupWebView = popup
+        viewModel.beginCrewAccessImportingPresentation()
+        return Fixture(viewModel: viewModel, coordinator: coordinator, popup: popup, counters: counters)
+    }
+
+    // RCA 1. Stage 1 invoked -> probe chain is no longer registered.
+    func test_stageOneInvocationRetiresItsOwnSamplingChain() {
+        let fixture = makeFixture()
+        fixture.coordinator.crewAccessProbeResampleIntervals = [1, 2, 3, 4]
+        fixture.coordinator.beginCrewAccessProbe(
+            ["readyState": "loading", "printElements": []],
+            webView: fixture.popup,
+            completedURL: fixture.popup.fixedURL
+        )
+        XCTAssertTrue(fixture.coordinator.hasPendingCrewAccessProbeWork)
+
+        fixture.coordinator.autoPrintStageOneAttemptedPopupIDs.insert(ObjectIdentifier(fixture.popup))
+        fixture.coordinator.handleAutoPrintStageOneExecutionResult(
+            "invoked",
+            webView: fixture.popup,
+            completedURL: fixture.popup.fixedURL
+        )
+
+        XCTAssertFalse(
+            fixture.coordinator.hasPendingCrewAccessProbeWork,
+            "Stage 2 owns forward progress once Stage 1 has invoked"
+        )
+    }
+
+    // RCA 2. Stage 2 exhaustion authors a stage=2 failure, never stage=1.
+    func test_stageTwoExhaustionAuthorsStageTwoFailure() {
+        let fixture = makeFixture(observerOutcome: "deadline-expired")
+        fixture.coordinator.autoPrintStageOneAttemptedPopupIDs.insert(ObjectIdentifier(fixture.popup))
+
+        fixture.coordinator.handleAutoPrintStageOneExecutionResult(
+            "invoked",
+            webView: fixture.popup,
+            completedURL: fixture.popup.fixedURL
+        )
+
+        XCTAssertEqual(fixture.counters.observerStarts, 1)
+        let record = fixture.coordinator.lastTerminalFailure
+        XCTAssertEqual(record?.stage, 2, "the stage that diagnosed the failure is the one reported")
+        XCTAssertEqual(record?.reason, "readiness-observer-deadline-expired")
+        XCTAssertFalse(fixture.viewModel.isImportingCrewAccessTrip)
+        XCTAssertNotNil(fixture.viewModel.incompleteImportFailure)
+    }
+
+    // RCA 3. Stage 1 sampling exhaustion alone never authors a failure once its one-shot is spent.
+    func test_stageOneSamplingExhaustionCannotAuthorFailureAfterOneShotConsumed() {
+        let fixture = makeFixture()
+        fixture.coordinator.autoPrintStageOneAttemptedPopupIDs.insert(ObjectIdentifier(fixture.popup))
+        fixture.coordinator.crewAccessProbeResampleIntervals = []
+
+        fixture.coordinator.beginCrewAccessProbe(
+            ["readyState": "loading", "printElements": []],
+            webView: fixture.popup,
+            completedURL: fixture.popup.fixedURL
+        )
+
+        XCTAssertFalse(fixture.coordinator.hasPendingCrewAccessProbeWork)
+        XCTAssertEqual(
+            fixture.coordinator.terminalFailureCount,
+            0,
+            "a sampler that can only answer one-shot-already-consumed may not diagnose the run"
+        )
+        XCTAssertNil(fixture.coordinator.lastTerminalFailure)
+    }
+
+    // RCA 4. Regression guard: exactly one terminal failure, loading cleared, no hang.
+    func test_stageOneSucceedsStageTwoExhaustsExactlyOneTerminalFailure() {
+        let fixture = makeFixture(observerOutcome: "deadline-expired")
+        fixture.coordinator.crewAccessProbeResampleIntervals = []
+        fixture.coordinator.autoPrintStageOneAttemptedPopupIDs.insert(ObjectIdentifier(fixture.popup))
+
+        fixture.coordinator.handleAutoPrintStageOneExecutionResult(
+            "invoked",
+            webView: fixture.popup,
+            completedURL: fixture.popup.fixedURL
+        )
+        XCTAssertEqual(fixture.coordinator.terminalFailureCount, 1)
+
+        // A late sampling chain for the same popup must not add a second terminus.
+        fixture.coordinator.beginCrewAccessProbe(
+            ["readyState": "loading", "printElements": []],
+            webView: fixture.popup,
+            completedURL: fixture.popup.fixedURL
+        )
+
+        XCTAssertEqual(fixture.coordinator.terminalFailureCount, 1)
+        XCTAssertEqual(fixture.coordinator.lastTerminalFailure?.stage, 2)
+        XCTAssertFalse(fixture.viewModel.isImportingCrewAccessTrip)
+        XCTAssertFalse(fixture.coordinator.hasPendingCrewAccessAutoPrintWorkForTrackedPopup)
+    }
+
+    // RCA 5. A dialog inserted after the last fixed offset is still detected and invoked.
+    func test_dialogInsertedAfterTheFixedOffsetsIsStillDetectedAndInvoked() {
+        let fixture = makeFixture(
+            observerOutcome: "dialog-inserted",
+            readinessSnapshot: structurallyReadySnapshot()
+        )
+        fixture.coordinator.autoPrintStageOneAttemptedPopupIDs.insert(ObjectIdentifier(fixture.popup))
+
+        fixture.coordinator.handleAutoPrintStageOneExecutionResult(
+            "invoked",
+            webView: fixture.popup,
+            completedURL: fixture.popup.fixedURL
+        )
+
+        XCTAssertEqual(fixture.counters.observerStarts, 1)
+        XCTAssertEqual(
+            fixture.counters.stageTwoInvocations,
+            1,
+            "a late dialog is invoked, not abandoned at 500 ms"
+        )
+        XCTAssertEqual(fixture.counters.stageTwoReadiness, 1, "the observer wakes the existing gate")
+        XCTAssertTrue(
+            fixture.coordinator.autoPrintStageTwoAttemptedPopupIDs.contains(ObjectIdentifier(fixture.popup))
+        )
+        XCTAssertEqual(fixture.coordinator.terminalFailureCount, 0)
+        XCTAssertTrue(
+            fixture.viewModel.isImportingCrewAccessTrip,
+            "an invoked Stage 2 is still waiting on print output, so the cover stays up"
+        )
+    }
+
+    // RCA 6. The observer is bounded and a late result after teardown restarts nothing.
+    func test_observerResultArrivingAfterTeardownIsInert() {
+        let fixture = makeFixture()
+        var pendingCompletion: (@MainActor (Any?, Error?) -> Void)?
+        fixture.coordinator.autoPrintStageTwoObserverEvaluator = { _, _, completion in
+            pendingCompletion = completion
+        }
+        fixture.coordinator.autoPrintStageOneAttemptedPopupIDs.insert(ObjectIdentifier(fixture.popup))
+
+        fixture.coordinator.handleAutoPrintStageOneExecutionResult(
+            "invoked",
+            webView: fixture.popup,
+            completedURL: fixture.popup.fixedURL
+        )
+        XCTAssertTrue(fixture.coordinator.hasPendingAutoPrintStageTwoReadinessWork)
+        let readinessBefore = fixture.counters.stageTwoReadiness
+
+        fixture.coordinator.closePopups()
+        pendingCompletion?(["result": "dialog-inserted", "elapsedMilliseconds": 1200], nil)
+
+        XCTAssertEqual(
+            fixture.counters.stageTwoReadiness,
+            readinessBefore,
+            "a superseded observer result must not restart the Stage 2 gate"
+        )
+        XCTAssertEqual(fixture.counters.stageTwoInvocations, 0)
+        XCTAssertFalse(fixture.coordinator.hasPendingAutoPrintStageTwoReadinessWork)
+    }
+
+    // RCA 7. A retry that finds a prior attempt's dialog cannot succeed by inheriting it.
+    func test_retryWithPreexistingDialogIsRefusedAndInheritsNothing() {
+        let fixture = makeFixture()
+        let key = ObjectIdentifier(fixture.popup)
+        fixture.coordinator.autoPrintStageOneAttemptedPopupIDs.insert(key)
+        fixture.coordinator.autoPrintStageTwoAttemptedPopupIDs.insert(key)
+        fixture.coordinator.handleDownloadedPDFResult(
+            data: Data("%PDF incomplete".utf8),
+            response: nil,
+            error: nil,
+            sourceFileName: "attempt-1.pdf"
+        )
+        // The previous attempt left its print dialog mounted.
+        fixture.coordinator.autoPrintStageTwoReadinessEvaluator = { _, _, completion in
+            fixture.counters.census += 1
+            completion(["diagnostic": ["dialogCount": 1, "qualifyingDialogCount": 1]], nil)
+        }
+        let stageOneReadinessBefore = fixture.counters.stageOneReadiness
+
+        XCTAssertTrue(fixture.coordinator.retryCrewAccessAutoPrintIfPossible())
+
+        XCTAssertEqual(fixture.counters.census, 1, "every retry is censused before it may click Print")
+        XCTAssertEqual(
+            fixture.counters.stageOneReadiness,
+            stageOneReadinessBefore,
+            "a refused retry never starts Stage 1 sampling"
+        )
+        XCTAssertEqual(fixture.counters.stageTwoInvocations, 0, "inherited UI is never submitted")
+        XCTAssertEqual(fixture.coordinator.lastTerminalFailure?.reason, "retry-inherited-dialog")
+        XCTAssertFalse(fixture.coordinator.isAutoPrintRetryInFlight)
+        XCTAssertFalse(fixture.viewModel.isImportingCrewAccessTrip)
+        XCTAssertNotNil(fixture.viewModel.incompleteImportFailure)
+    }
+
+    /// The clean counterpart: a censused-clean page retries normally through the existing path.
+    func test_retryWithCleanCensusReentersTheExistingAutoPrintPath() {
+        let fixture = makeFixture()
+        let key = ObjectIdentifier(fixture.popup)
+        fixture.coordinator.autoPrintStageOneAttemptedPopupIDs.insert(key)
+        fixture.coordinator.autoPrintStageTwoAttemptedPopupIDs.insert(key)
+        fixture.coordinator.handleDownloadedPDFResult(
+            data: Data("%PDF incomplete".utf8),
+            response: nil,
+            error: nil,
+            sourceFileName: "attempt-1.pdf"
+        )
+        let stageOneReadinessBefore = fixture.counters.stageOneReadiness
+
+        XCTAssertTrue(fixture.coordinator.retryCrewAccessAutoPrintIfPossible())
+
+        XCTAssertEqual(fixture.counters.stageOneReadiness, stageOneReadinessBefore + 1)
+        XCTAssertTrue(fixture.coordinator.isAutoPrintRetryInFlight)
+        XCTAssertEqual(fixture.coordinator.terminalFailureCount, 0)
+        XCTAssertEqual(
+            fixture.coordinator.autoPrintStageOneSettleDelayNanoseconds,
+            CrewAccessAutoPrint.stageOneSettleDelayNanoseconds
+        )
+
+        fixture.coordinator.closePopups()
+    }
+
+    // RCA 8. The first attempt survives the isolation client's in-place query evolution.
+    func test_stageOneEligibilitySurvivesZscalerQueryEvolution() {
+        let base = Self.sessionURLString
+        let printButton: [String: Any] = [
+            "root": "document",
+            "tagName": "button",
+            "tagNameIsExactButton": true,
+            "type": "button",
+            "typeIsExactButton": true,
+            "ariaLabel": "Print",
+            "ariaLabelIsExactPrint": true,
+            "printMatch": "exact",
+            "isVisible": true,
+            "isDisabled": false,
+            "rect": [0, 0, 32, 32]
+        ]
+        func reason(completedURL: URL?, currentURL: URL?) -> String? {
+            CrewAccessAutoPrint.rejectionReason(
+                isTrackedPopup: true,
+                isVisiblePopup: true,
+                livePopupCount: 1,
+                teardownInProgress: false,
+                completedURL: completedURL,
+                currentURL: currentURL,
+                readyState: "complete",
+                printElements: [printButton],
+                oneShotConsumed: false
+            )
+        }
+        let session = URL(string: base)
+        let evolved = URL(string: base + "?printJob=abc123")
+        let evolvedAgain = URL(string: base + "?printJob=def456&dialog=open")
+
+        XCTAssertNil(reason(completedURL: session, currentURL: evolved))
+        XCTAssertNil(reason(completedURL: evolved, currentURL: evolvedAgain))
+        XCTAssertEqual(
+            reason(
+                completedURL: session,
+                currentURL: URL(
+                    string: "https://99999999.isolation.zscaler.com/profile/00000000-0000-4000-8000-000000000000/zpa-session"
+                )
+            ),
+            "session-changed",
+            "a different isolation host is still a different session"
+        )
+        XCTAssertEqual(
+            reason(completedURL: session, currentURL: URL(string: "https://fltops-portal.ups.com/home")),
+            "url-mismatch",
+            "a genuine URL mismatch is still reported, and more specifically"
+        )
+        XCTAssertEqual(reason(completedURL: session, currentURL: nil), "url-mismatch")
+    }
+
+    /// Attempt A's tail, reproduced: the isolation client mutates its own query in place while the
+    /// one Trip Details document stays open. That used to make every remaining sample of the first
+    /// chain report `stale-probe`, so only a retry — which re-baselines the captured URL — could
+    /// ever reach Stage 1.
+    func test_firstAttemptReachesStageOneThroughInPlaceQueryEvolution() {
+        let fixture = makeFixture()
+        let evolved = URL(string: Self.sessionURLString + "?printJob=abc123")
+        fixture.popup.fixedURL = evolved
+
+        fixture.coordinator.evaluateAutoPrintStageOneEligibility(
+            settledStageOneProbe(),
+            webView: fixture.popup,
+            completedURL: URL(string: Self.sessionURLString),
+            attempt: 1,
+            sequence: 1
+        )
+
+        XCTAssertTrue(
+            fixture.coordinator.hasPendingAutoPrintStageOneSettleWork,
+            "in-place query evolution must no longer strand the first attempt"
+        )
+        XCTAssertTrue(
+            fixture.coordinator.autoPrintStageOneAttemptedPopupIDs.isEmpty,
+            "the one-shot stays available for the whole settle"
+        )
+        XCTAssertEqual(fixture.coordinator.terminalFailureCount, 0)
+
+        fixture.coordinator.closePopups()
+    }
+
+    // RCA 9 + 10. Source guards: ownership, boundedness, redaction, frozen constants.
+    func test_stageOwnershipAndObserverSourceInvariants() throws {
+        let projectRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(
+            contentsOf: projectRoot.appendingPathComponent("TripDataHub/Views/BrowserWebView.swift"),
+            encoding: .utf8
+        )
+
+        // Ownership transfer, and the invariant that depends on it.
+        XCTAssertTrue(source.contains("sampling=retired reason=stage-two-owns-progress"))
+        XCTAssertTrue(source.contains("guard !autoPrintStageOneAttemptedPopupIDs.contains(key) else { return }"))
+
+        // The ownership test's pinned sampling entry point is untouched.
+        XCTAssertTrue(source.contains(
+            "            ) { [weak self, weak webView] result, _ in\n"
+            + "                guard let self, let webView else { return }\n"
+            + "                guard webView.url == completedURL else { return }\n"
+            + "                self.beginCrewAccessProbe("
+        ))
+
+        // Frozen production constants.
+        XCTAssertTrue(source.contains("static let stageOneSettleDelayNanoseconds: UInt64 = 4_000_000_000"))
+        XCTAssertTrue(source.contains("100_000_000,\n        250_000_000,\n        500_000_000"))
+        XCTAssertTrue(source.contains("static let stageTwoObserverDeadlineMilliseconds: UInt64 = 8_000"))
+
+        // One deadline, and it lives in the page world so the call always returns.
+        let observerScript = CrewAccessAutoPrint.stageTwoDialogObserverScript(deadlineMilliseconds: 8_000)
+        XCTAssertTrue(observerScript.contains("const deadlineMilliseconds = 8000;"))
+        XCTAssertEqual(observerScript.components(separatedBy: "setTimeout(").count - 1, 1)
+        XCTAssertTrue(observerScript.contains("observer.disconnect()"))
+
+        // The observer observes; it never interacts.
+        for banned in [".click(", "dispatchEvent", "MouseEvent", "PointerEvent", "TouchEvent", "window.print", "focus()"] {
+            XCTAssertFalse(observerScript.contains(banned), "the observer must never interact: \(banned)")
+        }
+        // It reuses Stage 2's own selectors rather than inventing new ones.
+        XCTAssertTrue(observerScript.contains("[role=\"dialog\"] button[type=\"submit\"]"))
+        XCTAssertTrue(CrewAccessAutoPrint.stageTwoReadinessScript.contains("[role=\"dialog\"]"))
+
+        // Weak ownership and non-retaining keys hold for the new bookkeeping.
+        for line in source.components(separatedBy: "\n")
+        where line.contains("var autoPrintStageTwoObserverPopupIDs")
+            || line.contains("var autoPrintRetryCensusPopupIDs") {
+            XCTAssertTrue(line.contains("Set<ObjectIdentifier>"))
+            XCTAssertFalse(line.contains("WKWebView"))
+        }
+        XCTAssertTrue(source.contains("autoPrintStageTwoObserverEvaluator(\n"))
+        XCTAssertTrue(source.contains("            ) { [weak self, weak webView] result, error in\n                guard let self else { return }\n                self.autoPrintStageTwoObserverPopupIDs.remove(key)"))
+
+        // Diagnostics never carry page contents.
+        for line in source.components(separatedBy: "\n")
+        where line.contains("observer=ended") || line.contains("retry=census") || line.contains("terminal=failure") {
+            for banned in ["pageText", "innerText", "textContent", "normalizedText"] {
+                XCTAssertFalse(line.contains(banned), "no page contents in diagnostics: \(banned)")
+            }
+        }
+
+        // The recoverable failure still has exactly one presenter.
+        XCTAssertEqual(source.components(separatedBy: "viewModel.presentIncompleteImportFailure()").count - 1, 1)
+    }
 }
