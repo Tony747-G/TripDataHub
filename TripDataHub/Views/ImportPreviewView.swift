@@ -165,7 +165,7 @@ struct ImportPreviewView: View {
                 ContentUnavailableView(
                     "No Pending Import",
                     systemImage: "doc.text.magnifyingglass",
-                    description: Text("Start a CrewAccess import from the share sheet.")
+                    description: Text("Open a trip in CrewAccess to start an import.")
                 )
             }
         }
@@ -177,7 +177,7 @@ struct ImportPreviewView: View {
             Alert(
                 title: Text("Replace Existing Trip?"),
                 message: Text(confirmation.message),
-                primaryButton: .destructive(Text("Replace and Import")) {
+                primaryButton: .destructive(Text("Replace Trip")) {
                     Task {
                         if await viewModel.confirmPendingImport(
                             expectedReplacementIDs: confirmation.expectedReplacementIDs
@@ -245,36 +245,38 @@ struct ImportPreviewView: View {
                                     from: leg.depLocal,
                                     to: leg.arrLocal
                                 ),
-                                blockConnectionDisplay: nil
+                                blockConnectionDisplay: nil,
+                                density: .compact
                             )
                             .listRowInsets(EdgeInsets())
                         }
                     } header: {
                         Text(section.label)
-                            .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
+                            .appScaledFont(.footnote, weight: .bold, scale: fontScale)
                             .foregroundStyle(ScheduleColors.timelineDateHeaderText(for: colorScheme))
                             .textCase(nil)
+                            .padding(.bottom, -8)
                     }
                 }
             }
 
             if !replacements.isEmpty {
-                Section("Changes to Existing Trips") {
+                Section {
                     ForEach(replacements) { candidate in
                         switch candidate.reason {
                         case .sameTripID:
                             Label(
-                                "Trip \(candidate.tripId) will be replaced with this version.",
+                                "Existing trip \(candidate.tripId) will be replaced.",
                                 systemImage: "arrow.triangle.2.circlepath"
                             )
-                            .appScaledFont(.subheadline, weight: .semibold, scale: fontScale)
+                            .appScaledFont(.footnote, weight: .semibold, scale: fontScale)
                             .foregroundStyle(.orange)
                         case .timeOverlap:
                             Label(
                                 "This trip overlaps Trip \(candidate.tripId), which will be removed from Timeline and synced devices.",
                                 systemImage: "exclamationmark.triangle.fill"
                             )
-                            .appScaledFont(.subheadline, weight: .semibold, scale: fontScale)
+                            .appScaledFont(.footnote, weight: .semibold, scale: fontScale)
                             .foregroundStyle(.red)
                         }
                     }
@@ -316,9 +318,11 @@ struct ImportPreviewView: View {
             }
         }
         .listStyle(.plain)
+        .listSectionSpacing(4)
+        .environment(\.defaultMinListHeaderHeight, 0)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             ImportPreviewActionBar(
-                primaryTitle: replacements.isEmpty ? "Import" : "Replace and Import",
+                primaryTitle: replacements.isEmpty ? "Import" : "Replace Trip",
                 primaryRole: replacements.isEmpty ? nil : .destructive,
                 isPrimaryDisabled: !pending.canConfirm,
                 onPrimary: {
@@ -364,28 +368,30 @@ private struct ImportPreviewTripSummary: View {
     let fontScale: CGFloat
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 2) {
             Text("Trip \(tripID)")
-                .appScaledFont(.headline, weight: .bold, scale: fontScale)
+                .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
 
+            // ViewThatFits keeps the single line at default type sizes and falls back to a stacked
+            // layout when Dynamic Type or a narrow width would otherwise truncate it.
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) {
+                HStack(spacing: 8) {
                     Text(dateRangeText)
                     Spacer(minLength: 8)
                     Text(legCountText)
                 }
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(dateRangeText)
                     Text(legCountText)
                 }
             }
-            .appScaledFont(.subheadline, scale: fontScale)
+            .appScaledFont(.caption, scale: fontScale)
             .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
     }
 }
@@ -405,29 +411,36 @@ private struct ImportPreviewActionBar: View {
                     actionButtons
                 }
 
-                VStack(spacing: 10) {
+                VStack(spacing: 8) {
                     actionButtons
                 }
             }
             .frame(maxWidth: 680)
             .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.vertical, 8)
         }
         .frame(maxWidth: .infinity)
         .background(.bar)
     }
 
+    /// `.regular` control size with an explicit 44pt floor: the bar gets shorter without any
+    /// button dropping below the Human Interface Guidelines minimum tap target, at any Dynamic
+    /// Type size.
+    private static let minimumTapTarget: CGFloat = 44
+
     @ViewBuilder
     private var actionButtons: some View {
         Button("Cancel", action: onCancel)
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .frame(maxWidth: .infinity)
+            .buttonStyle(.borderless)
+            .controlSize(.regular)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, minHeight: Self.minimumTapTarget)
+            .contentShape(Rectangle())
 
         Button(primaryTitle, role: primaryRole, action: onPrimary)
             .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .frame(maxWidth: .infinity)
+            .controlSize(.regular)
+            .frame(maxWidth: .infinity, minHeight: Self.minimumTapTarget)
             .disabled(isPrimaryDisabled)
     }
 }

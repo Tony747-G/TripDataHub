@@ -118,6 +118,21 @@ struct FriendMatchPresentationView: View {
 /// `iconColor` defaults to `.primary`; pass `friendMatchAmber` for friend highlights.
 /// `onFriendMatchTap` is nil in ScheduleTimelineRendererView (Friends Timeline, no tap needed).
 struct TimelineFlightRow: View {
+    /// Row metrics. `.standard` is what the Timeline has always used and stays the default, so a
+    /// caller that does not opt in renders exactly as before. `.compact` trims the spacing and the
+    /// icon for surfaces that show many legs at once with an action bar below them.
+    enum Density {
+        case standard
+        case compact
+
+        var rowSpacing: CGFloat { self == .compact ? 10 : 12 }
+        var stackSpacing: CGFloat { self == .compact ? 2 : 4 }
+        var routeSpacing: CGFloat { self == .compact ? 6 : 8 }
+        var verticalPadding: CGFloat { self == .compact ? 4 : 7 }
+        var horizontalPadding: CGFloat { self == .compact ? 14 : 16 }
+        var iconSize: CGFloat { self == .compact ? 17 : 20 }
+    }
+
     let leg: TripLeg
     let isPast: Bool
     let fontScale: CGFloat
@@ -129,6 +144,7 @@ struct TimelineFlightRow: View {
     /// schedule-state tint. Rendered in the same layer as `rowBackground` so it cannot be
     /// painted over by it.
     var backgroundOverride: Color? = nil
+    var density: Density = .standard
     var onFriendMatchTap: (() -> Void)? = nil
     var onFlightTap: (() -> Void)? = nil
 
@@ -164,15 +180,15 @@ struct TimelineFlightRow: View {
     }
 
     private var rowContent: some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: density.rowSpacing) {
             let resolvedIconColor: Color = isPast ? .gray : iconColor
             let iconStatus = leg.flight.caseInsensitiveCompare("GND") == .orderedSame
                 ? "GND"
                 : leg.status
             flightIcon(status: iconStatus, color: resolvedIconColor)
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: density.stackSpacing) {
+                HStack(spacing: density.routeSpacing) {
                     Text("\(leg.depAirport) - \(leg.arrAirport)")
                         .appScaledFont(.subheadline, weight: .bold, scale: fontScale)
                         .foregroundStyle(isPast ? .gray : .primary)
@@ -200,8 +216,8 @@ struct TimelineFlightRow: View {
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 7)
+        .padding(.horizontal, density.horizontalPadding)
+        .padding(.vertical, density.verticalPadding)
         .background(rowBackground)
     }
 
@@ -209,7 +225,7 @@ struct TimelineFlightRow: View {
     private func flightIcon(status: String, color: Color) -> some View {
         let icon = MaterialIconView(
             codePoint: TimelineLegIconSupport.codePoint(for: status),
-            size: 20 * fontScale,
+            size: density.iconSize * fontScale,
             color: color,
             fallbackSystemName: TimelineLegIconSupport.fallbackSystemName(for: status)
         )

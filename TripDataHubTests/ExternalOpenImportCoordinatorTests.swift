@@ -181,7 +181,7 @@ final class ImportPreviewPresentationPolicyTests: XCTestCase {
 
         XCTAssertTrue(source.contains("confirmPendingImport(expectedReplacementIDs: [])"))
         XCTAssertTrue(source.contains("await viewModel.discardPendingImport()"))
-        XCTAssertTrue(source.contains("primaryTitle: replacements.isEmpty ? \"Import\" : \"Replace and Import\""))
+        XCTAssertTrue(source.contains("primaryTitle: replacements.isEmpty ? \"Import\" : \"Replace Trip\""))
         XCTAssertTrue(source.contains("Button(\"Cancel\", action: onCancel)"))
     }
 
@@ -4333,5 +4333,304 @@ final class CrewAccessAutoPrintStageOwnershipTests: XCTestCase {
 
         // The recoverable failure still has exactly one presenter.
         XCTAssertEqual(source.components(separatedBy: "viewModel.presentIncompleteImportFailure()").count - 1, 1)
+    }
+}
+
+
+// MARK: - Production help content
+
+/// The help screen is the only place the app explains the import to a pilot, so it has to describe
+/// the flow that actually ships. It previously walked through Safari, the iOS share sheet, pop-up
+/// blocking and a default-browser workaround — a flow the app stopped using — and it must never
+/// describe the capture mechanism, which is an implementation detail that has already changed twice.
+final class CrewAccessImportHelpContentTests: XCTestCase {
+
+    private func helpSource() throws -> String {
+        let projectRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        return try String(
+            contentsOf: projectRoot.appendingPathComponent("TripDataHub/Views/CrewAccessImportHelpView.swift"),
+            encoding: .utf8
+        )
+    }
+
+    /// Every user-visible string in the help view, which is what these assertions are about — code
+    /// comments explaining what was removed are deliberately not part of the scan.
+    private func helpUserFacingStrings() throws -> [String] {
+        let source = try helpSource()
+        var strings: [String] = []
+        for line in source.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("Text(\"") || trimmed.hasPrefix("Section(\"") else { continue }
+            guard let first = trimmed.firstIndex(of: "\""),
+                  let last = trimmed.lastIndex(of: "\""),
+                  first < last
+            else { continue }
+            strings.append(String(trimmed[trimmed.index(after: first)..<last]))
+        }
+        return strings
+    }
+
+    func test_helpDescribesTheShippingImportFlow() throws {
+        let strings = try helpUserFacingStrings()
+
+        XCTAssertTrue(strings.contains("Importing a Trip"))
+        XCTAssertTrue(strings.contains("If Import Fails"))
+        XCTAssertTrue(strings.contains("Reset the In-App Browser"))
+
+        let body = strings.joined(separator: "\n")
+        // The names here must match the strings the app actually shows.
+        XCTAssertTrue(body.contains("Importing Trip…"))
+        XCTAssertTrue(body.contains("Import Preview"))
+        XCTAssertTrue(body.contains("Unable to Import Trip"))
+        XCTAssertTrue(body.contains("Try Again"))
+        XCTAssertTrue(body.contains("Reset Browser"))
+    }
+
+    func test_helpNoLongerDescribesTheLegacyBrowserFlow() throws {
+        let body = try helpUserFacingStrings().joined(separator: "\n").lowercased()
+
+        for legacy in [
+            "safari",
+            "share sheet",
+            "share button",
+            "block pop-ups",
+            "pop-ups",
+            "private browsing",
+            "default browser",
+            "http 500",
+            "bad request",
+            "website data"
+        ] {
+            XCTAssertFalse(body.contains(legacy), "legacy instruction still in the help: \(legacy)")
+        }
+    }
+
+    func test_helpNeverDescribesTheCaptureImplementation() throws {
+        let body = try helpUserFacingStrings().joined(separator: "\n").lowercased()
+
+        for internalDetail in [
+            "pdf",
+            "stage 1",
+            "stage 2",
+            "poll",
+            "observer",
+            "sampling",
+            "4 second",
+            "4-second",
+            "4.0"
+        ] {
+            XCTAssertFalse(body.contains(internalDetail), "implementation detail leaked into help: \(internalDetail)")
+        }
+    }
+
+    func test_helpIsMateriallyShorterThanTheFlowItReplaced() throws {
+        let strings = try helpUserFacingStrings()
+        // Section titles plus body rows. The version this replaced carried five sections and
+        // twenty-five rows of browser troubleshooting.
+        XCTAssertLessThanOrEqual(strings.count, 12, "the production help must stay compact")
+        XCTAssertEqual(
+            strings.filter { $0.hasPrefix("1. ") || $0.hasPrefix("2. ") || $0.hasPrefix("3. ") || $0.hasPrefix("4. ") }.count,
+            4,
+            "Importing a Trip is four numbered steps"
+        )
+    }
+
+    /// The card layout and navigation chrome are unchanged; only the content was rewritten.
+    func test_helpKeepsItsExistingPresentation() throws {
+        let source = try helpSource()
+
+        XCTAssertTrue(source.contains("List {"))
+        XCTAssertTrue(source.contains(".navigationTitle(\"CrewAccess Import Help\")"))
+        XCTAssertTrue(source.contains("#if os(iOS)"))
+        XCTAssertTrue(source.contains(".navigationBarTitleDisplayMode(.inline)"))
+    }
+
+    /// The Settings diagnostics stay development-only, and the CrewAccess timing controls stay gone.
+    func test_settingsShipsNoDiagnosticsOrTimingControls() throws {
+        let projectRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let settings = try String(
+            contentsOf: projectRoot.appendingPathComponent("TripDataHub/Views/SettingsTabView.swift"),
+            encoding: .utf8
+        )
+
+        // The validation section exists only inside a DEBUG region.
+        let debugRegions = settings.components(separatedBy: "#if DEBUG").dropFirst()
+            .map { $0.components(separatedBy: "#endif")[0] }
+            .joined(separator: "\n")
+        XCTAssertTrue(settings.contains("DEBUG Validation"))
+        XCTAssertTrue(
+            debugRegions.contains("DEBUG Validation"),
+            "the validation section must never ship in a TestFlight build"
+        )
+
+        // The removed CrewAccess timing/delay controls must not come back.
+        for control in [
+            "stageOneSettleDelay",
+            "autoPrintDelay",
+            "Settle Delay",
+            "Auto-Print Timing",
+            "CrewAccess Timing"
+        ] {
+            XCTAssertFalse(settings.contains(control), "removed timing control reappeared: \(control)")
+        }
+
+        // And the production delay stays where it belongs: fixed, internal, unchanged.
+        XCTAssertEqual(CrewAccessAutoPrint.stageOneSettleDelayNanoseconds, 4_000_000_000)
+    }
+}
+
+
+// MARK: - Import Preview density
+
+/// The preview is the one screen a pilot reads before committing a trip, and it has to show a
+/// four-leg trip plus its action bar without scrolling on a phone. These pin the density work so a
+/// later edit cannot quietly reinflate it, and pin the things density must never cost: Dynamic
+/// Type, iPad width, tap targets, and the import/replacement logic itself.
+final class ImportPreviewDensityTests: XCTestCase {
+
+    private func previewSource() throws -> String {
+        let projectRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        return try String(
+            contentsOf: projectRoot.appendingPathComponent("TripDataHub/Views/ImportPreviewView.swift"),
+            encoding: .utf8
+        )
+    }
+
+    func test_compactRowDensityIsTighterThanTheTimelineDefault() {
+        let standard = TimelineFlightRow.Density.standard
+        let compact = TimelineFlightRow.Density.compact
+
+        XCTAssertLessThan(compact.verticalPadding, standard.verticalPadding)
+        XCTAssertLessThan(compact.horizontalPadding, standard.horizontalPadding)
+        XCTAssertLessThan(compact.rowSpacing, standard.rowSpacing)
+        XCTAssertLessThan(compact.stackSpacing, standard.stackSpacing)
+        XCTAssertLessThan(compact.routeSpacing, standard.routeSpacing)
+        XCTAssertLessThan(compact.iconSize, standard.iconSize, "the flight icon is slightly smaller")
+        XCTAssertGreaterThan(compact.iconSize, standard.iconSize * 0.75, "slightly smaller, not shrunken")
+
+        // The Timeline's own metrics are the ones it has always had.
+        XCTAssertEqual(standard.verticalPadding, 7)
+        XCTAssertEqual(standard.horizontalPadding, 16)
+        XCTAssertEqual(standard.iconSize, 20)
+    }
+
+    /// Only Import Preview opts in. Every Timeline surface keeps the default, so the density work
+    /// cannot leak into the tab pilots use in flight.
+    func test_onlyImportPreviewOptsIntoCompactDensity() throws {
+        let projectRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        for timelineSurface in [
+            "TripDataHub/Views/TimelineTabView.swift",
+            "TripDataHub/Views/ScheduleTimelineRendererView.swift",
+            "TripDataHub/Views/iPad/iPadTimelineSidebarView.swift"
+        ] {
+            let source = try String(
+                contentsOf: projectRoot.appendingPathComponent(timelineSurface),
+                encoding: .utf8
+            )
+            XCTAssertFalse(
+                source.contains("density:"),
+                "\(timelineSurface) must keep the standard row density"
+            )
+        }
+        XCTAssertTrue(try previewSource().contains("density: .compact"))
+
+        let rowSource = try String(
+            contentsOf: projectRoot.appendingPathComponent("TripDataHub/Views/TimelineRowViews.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(
+            rowSource.contains("var density: Density = .standard"),
+            "the default must stay standard so existing callers are unaffected"
+        )
+    }
+
+    func test_dateHeadersUseTightVerticalListMetrics() throws {
+        let source = try previewSource()
+
+        XCTAssertTrue(
+            source.contains(".listSectionSpacing(4)"),
+            "adjacent date sections keep only a small gap after the preceding divider"
+        )
+        XCTAssertTrue(
+            source.contains(".environment(\\.defaultMinListHeaderHeight, 0)"),
+            "the List must not reserve extra height above or below compact date headers"
+        )
+        XCTAssertTrue(
+            source.contains(".padding(.bottom, -8)"),
+            "only the date header's lower boundary moves closer to its first flight row"
+        )
+        XCTAssertFalse(source.contains(".padding(.vertical, 1)"))
+    }
+
+    func test_previewCopyIsTheProductionWording() throws {
+        let source = try previewSource()
+
+        XCTAssertTrue(source.contains("Open a trip in CrewAccess to start an import."))
+        XCTAssertFalse(source.contains("share sheet"), "the legacy empty state is gone")
+
+        XCTAssertTrue(source.contains("\"Replace Trip\""))
+        XCTAssertFalse(source.contains("Replace and Import"))
+
+        XCTAssertFalse(source.contains("Changes to Existing Trips"), "the redundant section label is gone")
+        XCTAssertTrue(source.contains("\"Existing trip \\(candidate.tripId) will be replaced.\""))
+    }
+
+    func test_densityNeverCostsAccessibilityOrIPadLayout() throws {
+        let source = try previewSource()
+
+        // Dynamic Type: every string still scales, and both adaptive layouts survive.
+        XCTAssertFalse(source.contains(".font(.system(size:"), "no fixed point sizes")
+        XCTAssertEqual(
+            source.components(separatedBy: "ViewThatFits(in: .horizontal)").count - 1,
+            2,
+            "the summary and the action bar both keep their adaptive layout"
+        )
+        XCTAssertTrue(source.contains("scale: fontScale"))
+
+        // iPad: the action bar still centres on a bounded width.
+        XCTAssertTrue(source.contains(".frame(maxWidth: 680)"))
+
+        // Tap targets survive the shorter bar.
+        XCTAssertTrue(source.contains("private static let minimumTapTarget: CGFloat = 44"))
+        XCTAssertEqual(
+            source.components(separatedBy: "minHeight: Self.minimumTapTarget").count - 1,
+            2,
+            "both actions keep a 44pt minimum height"
+        )
+    }
+
+    func test_cancelIsSecondaryAndThePrimaryActionStaysProminent() throws {
+        let source = try previewSource()
+        let buttons = try XCTUnwrap(source.range(of: "private var actionButtons: some View"))
+        let body = String(source[buttons.lowerBound...])
+
+        XCTAssertTrue(body.contains("Button(\"Cancel\", action: onCancel)"))
+        XCTAssertTrue(body.contains(".buttonStyle(.borderless)"), "Cancel is visually secondary")
+        XCTAssertTrue(body.contains(".foregroundStyle(.secondary)"))
+        XCTAssertTrue(body.contains(".buttonStyle(.borderedProminent)"), "the primary action stays prominent")
+        XCTAssertFalse(body.contains(".buttonStyle(.bordered)\n"), "Cancel no longer competes with the primary")
+    }
+
+    /// Density is presentation only. The confirm and discard paths are the same ones T25 pins.
+    func test_importAndReplacementLogicIsUnchanged() throws {
+        let source = try previewSource()
+
+        XCTAssertTrue(source.contains("confirmPendingImport(expectedReplacementIDs: [])"))
+        XCTAssertTrue(source.contains("expectedReplacementIDs: confirmation.expectedReplacementIDs"))
+        XCTAssertTrue(source.contains("await viewModel.discardPendingImport()"))
+        XCTAssertTrue(source.contains(".alert(item: $replacementConfirmation)"))
+        XCTAssertFalse(source.contains(".confirmationDialog"))
+
+        // The confirmation alert keeps the fuller wording it is tested on; only the inline row
+        // warning was shortened.
+        let confirmation = try XCTUnwrap(ImportReplacementConfirmation(candidates: [
+            AppViewModel.TripImportReplacementCandidate(
+                id: "schedule-12165",
+                tripId: "12165",
+                pairings: ["12165"],
+                reason: .sameTripID
+            )
+        ]))
+        XCTAssertTrue(confirmation.message.contains("Trip 12165 already exists."))
     }
 }

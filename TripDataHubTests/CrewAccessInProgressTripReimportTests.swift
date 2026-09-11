@@ -500,13 +500,13 @@ final class CrewAccessInProgressTripReimportTests: XCTestCase {
             .appendingPathComponent("TripDataHub/Views/ImportPreviewView.swift")
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
 
-        XCTAssertTrue(source.contains("primaryTitle: replacements.isEmpty ? \"Import\" : \"Replace and Import\""))
+        XCTAssertTrue(source.contains("primaryTitle: replacements.isEmpty ? \"Import\" : \"Replace Trip\""))
         XCTAssertTrue(source.contains("if replacements.isEmpty"))
         XCTAssertTrue(source.contains(".alert(item: $replacementConfirmation)"))
         XCTAssertFalse(source.contains(".confirmationDialog"))
 
         let previewButtonStart = try XCTUnwrap(
-            source.range(of: "primaryTitle: replacements.isEmpty ? \"Import\" : \"Replace and Import\"")
+            source.range(of: "primaryTitle: replacements.isEmpty ? \"Import\" : \"Replace Trip\"")
         ).lowerBound
         let previewButtonEnd = try XCTUnwrap(
             source.range(of: "onCancel:", range: previewButtonStart..<source.endIndex)
